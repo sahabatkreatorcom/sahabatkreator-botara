@@ -40,6 +40,34 @@ const files = (await readdir(migrationsDir))
   .filter((f) => f.endsWith(".sql"))
   .sort();
 assert.ok(files.length >= 1, `diharapkan >=1 file migrasi, ditemukan ${files.length}`);
+
+/**
+ * Penjaga: `drizzle-kit migrate` TIDAK membaca direktori ini — ia membaca
+ * `meta/_journal.json`. Berkas .sql yang tidak terdaftar di journal akan
+ * dilewati tanpa suara saat deploy, sementara harness ini (yang memutar
+ * semua .sql) tetap lulus. Itu pernah terjadi: 0001 (RLS), 0002 (role
+ * aplikasi), dan 0003 (constraint booking) tidak pernah masuk journal,
+ * sehingga database produksi berjalan TANPA isolasi tenant walau
+ * `db verify` hijau. Perbandingan di bawah membuat kelas kesalahan itu
+ * gagal keras di sini.
+ */
+const journalPath = path.join(migrationsDir, "meta", "_journal.json");
+const journal = JSON.parse(await readFile(journalPath, "utf8")) as {
+  entries: { idx: number; tag: string }[];
+};
+const journalTags = journal.entries
+  .slice()
+  .sort((a, b) => a.idx - b.idx)
+  .map((e) => e.tag);
+const fileTags = files.map((f) => f.replace(/\.sql$/, ""));
+assert.deepEqual(
+  journalTags,
+  fileTags,
+  "meta/_journal.json tidak selaras dengan berkas .sql — drizzle-kit migrate " +
+    "hanya menjalankan yang tercatat di journal. Daftarkan migrasi yang hilang " +
+    `(berkas: ${fileTags.join(", ")}; journal: ${journalTags.join(", ")}).`,
+);
+
 for (const file of files) {
   const sqlText = await readFile(path.join(migrationsDir, file), "utf8");
   await db.exec(sqlText.replaceAll("--> statement-breakpoint", ""));
