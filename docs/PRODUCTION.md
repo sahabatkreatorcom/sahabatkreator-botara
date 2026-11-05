@@ -283,6 +283,33 @@ mengubahnya menuntut **restart container `db`** (data aman: ada di volume
 `pgdata`). Setelah restart pertama, ekstensinya perlu dibuat sekali:
 `create extension if not exists pg_stat_statements;`
 
+### Kalau channel Meta tidak menerima pesan
+
+Channel tampil "terhubung", token valid, dan webhook aplikasi benar — tetapi
+tidak ada satu pun `POST /api/meta/webhook` di log nginx. Untuk WhatsApp ada
+**dua** syarat yang keduanya harus benar-benar terpenuhi, dan keduanya tidak
+terlihat dari halaman Channel:
+
+```bash
+# 1. WABA harus berlangganan aplikasi kita. Harus memuat "Sahabat Botara".
+curl -s "https://graph.facebook.com/v21.0/<WABA_ID>/subscribed_apps?access_token=<TOKEN>"
+
+# 2. Nomor harus berstatus CONNECTED. PENDING/RESTRICTED tidak menerima pesan.
+curl -s "https://graph.facebook.com/v21.0/<PHONE_NUMBER_ID>?fields=status,quality_rating&access_token=<TOKEN>"
+```
+
+| Temuan | Arti | Tindakan |
+| --- | --- | --- |
+| `subscribed_apps` tidak memuat aplikasi kita | Meta tidak mengirim event ke webhook | Hubungkan ulang nomor di halaman Channel (sejak perbaikan 2026-11-05 jalur tempel token ikut subscribe), atau `POST /{WABA_ID}/subscribed_apps` |
+| `status` = `PENDING` | Nomor terdaftar tetapi belum aktif | Selesaikan verifikasi/registrasi nomor di Meta Business Manager — ini di luar kendali aplikasi |
+| keduanya benar | Masalah ada di jalur webhook aplikasi | Periksa callback URL + field `messages` pada `GET /{APP_ID}/subscriptions` |
+
+Insiden 2026-11-05 (nomor "Kampung Inggris Booster"): penyebabnya baris
+pertama — nomor dihubungkan lewat **tempel token**, sedangkan hanya jalur
+OAuth Unified Login yang melakukan subscribe otomatis. Sesudah WABA
+di-subscribe, percakapan WhatsApp pertama langsung masuk (masuk → keluar →
+masuk → keluar, keempatnya `read`), tanpa perubahan lain.
+
 ## 8. Skala
 
 - `api`, `worker`, `realtime` semuanya stateless — boleh direplikasi.
