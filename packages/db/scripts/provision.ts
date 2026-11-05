@@ -10,9 +10,9 @@
  *
  * MENGAPA SKRIP, BUKAN LANGKAH DI DOKUMEN
  * Langkah "GRANT … TO sk_app" pernah hidup sebagai prosa di
- * docs/PRODUCTION.md §7. Reset skema menghapus seluruh hak role aplikasi,
- * API tetap hidup, dan setiap query gagal "permission denied" — tanpa ada
- * yang memeriksa. Sekarang langkah itu (a) ikut rantai migrasi lewat
+ * docs/PRODUCTION.md (bagian peran database). Reset skema menghapus seluruh
+ * hak role aplikasi, API tetap hidup, dan setiap query gagal
+ * "permission denied" — tanpa ada yang memeriksa. Sekarang langkah itu (a) ikut rantai migrasi lewat
  * `0009_app_role_grants.sql` untuk kasus normal, (b) tersedia sebagai
  * perintah `grant` untuk kasus restore-dari-dump (dump dibuat
  * --no-privileges), dan (c) DIPERIKSA otomatis oleh `doctor`.

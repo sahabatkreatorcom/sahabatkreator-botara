@@ -29,7 +29,6 @@ import type { Agent, AgentSuggestion } from "@sahabat-kreator/db";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export function serializeAgent(row: Agent): AgentResponse {
@@ -116,8 +115,6 @@ export function createAgentsRoutes(
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const resolveTenant = async (c: AppContext) =>
     resolveTenantForUser(

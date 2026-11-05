@@ -50,7 +50,7 @@ if (!url) {
     "[backfill:reply-snapshots] MIGRATION_DATABASE_URL (atau DATABASE_URL) wajib diisi",
   );
 }
-const { db, pool } = createDb(url);
+const { db, pool } = createDb(url, { applicationName: "sk-script" });
 
 try {
   const logRows = await db

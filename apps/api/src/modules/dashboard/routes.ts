@@ -3,7 +3,6 @@ import { DashboardSummaryResponseSchema } from "@sahabat-kreator/contracts";
 import { getDashboardSummary } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 /**
@@ -25,8 +24,6 @@ export function createDashboardRoutes(bundle: AuthBundle | null) {
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   app.get(base, async (c) => {
     const tenant = await resolveTenantForUser(

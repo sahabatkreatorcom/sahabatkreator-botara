@@ -57,7 +57,7 @@ export function createRealtimeAuthBundle(opts: {
   secret: string;
   baseURL: string;
 }): RealtimeAuthBundle {
-  const { db } = createDb(opts.databaseUrl);
+  const { db } = createDb(opts.databaseUrl, { applicationName: "sk-realtime" });
   return {
     auth: createRealtimeAuthInstance(db, opts),
     db,

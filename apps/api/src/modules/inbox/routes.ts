@@ -21,7 +21,6 @@ import {
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { contactAvatarUrl } from "../avatars/routes";
 import { serializeMessage } from "../messages-serialize";
 import { resolveTenantForUser } from "../tenants/guard";
@@ -92,8 +91,6 @@ export function createInboxRoutes(
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   app.get(base, async (c) => {
     const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);

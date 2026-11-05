@@ -42,7 +42,7 @@ if (!url) {
     "[backfill:kb-embeddings] MIGRATION_DATABASE_URL (atau DATABASE_URL) wajib diisi",
   );
 }
-const { db, pool } = createDb(url);
+const { db, pool } = createDb(url, { applicationName: "sk-script" });
 
 const platformOptions: PlatformSettingsOptions = {
   masterSecret: process.env.PLATFORM_SETTINGS_SECRET,

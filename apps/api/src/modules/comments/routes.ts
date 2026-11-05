@@ -20,7 +20,6 @@ import {
 } from "@sahabat-kreator/channel-messenger";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export interface CommentsModuleOptions {
@@ -168,8 +167,6 @@ export function createCommentsRoutes(
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const resolveTenant = async (c: AppContext) =>
     resolveTenantForUser(

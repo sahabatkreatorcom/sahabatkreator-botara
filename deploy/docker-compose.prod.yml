@@ -43,6 +43,27 @@ services:
   db:
     image: pgvector/pgvector:pg16
     restart: unless-stopped
+    # pg_stat_statements: riwayat agregat semua query (jumlah panggilan, total
+    # waktu, waktu per panggilan). Tanpa ini, pertanyaan "query mana yang
+    # lambat" hanya bisa dijawab dengan menembak endpoint satu per satu sambil
+    # membaca access log — persis yang harus dilakukan pada insiden latensi
+    # 2026-11-05, dan itu memakan waktu jauh lebih lama daripada seharusnya.
+    #
+    # `shared_preload_libraries` hanya dibaca saat proses postgres MULAI, jadi
+    # perubahan ini menuntut restart container (bukan reload). Data aman: ada
+    # di volume `pgdata`, bukan di dalam container.
+    #
+    # `log_min_duration_statement=1000` mencatat query di atas 1 detik ke log
+    # Postgres — pelengkap yang murah, karena pg_stat_statements menyimpan
+    # agregat tanpa contoh teks query yang sudah dinormalisasi.
+    command:
+      - "postgres"
+      - "-c"
+      - "shared_preload_libraries=pg_stat_statements"
+      - "-c"
+      - "pg_stat_statements.track=all"
+      - "-c"
+      - "log_min_duration_statement=1000"
     environment:
       POSTGRES_USER: sahabat
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?wajib diisi}

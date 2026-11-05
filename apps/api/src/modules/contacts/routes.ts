@@ -23,7 +23,6 @@ import {
 import type { Contact } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { contactAvatarUrl } from "../avatars/routes";
 import { resolveTenantForUser } from "../tenants/guard";
 
@@ -107,8 +106,6 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   app.post(base, async (c) => {
     const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);

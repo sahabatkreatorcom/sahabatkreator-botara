@@ -33,7 +33,6 @@ import {
 import type { Product } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export interface ProductsModuleOptions {
@@ -159,8 +158,6 @@ export function createProductsRoutes(
       updatedAt: row.updatedAt.toISOString(),
     });
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const resolveTenant = async (c: AppContext) =>
     resolveTenantForUser(

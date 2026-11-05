@@ -29,7 +29,6 @@ import {
 } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export function serializeDocument(row: KbDocumentWithChunkCount): KbDocumentResponse {
@@ -105,8 +104,6 @@ export function createKnowledgeRoutes(
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const resolveTenant = async (c: AppContext) =>
     resolveTenantForUser(

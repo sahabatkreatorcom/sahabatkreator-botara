@@ -285,6 +285,6 @@ export function createAuthBundle(opts: {
   /** Storage rate limit bersama (Redis) — Fase 13D; null/kosong = in-memory. */
   rateLimitStorage?: RateLimitStorage | null;
 }): AuthBundle {
-  const { db, pool } = createDb(opts.databaseUrl);
+  const { db, pool } = createDb(opts.databaseUrl, { applicationName: "sk-api" });
   return { auth: createAuthInstance(db, opts), db, pool };
 }

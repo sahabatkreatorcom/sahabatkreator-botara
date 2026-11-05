@@ -86,6 +86,8 @@ produksi `REDIS_URL` wajib.
 Readiness 503 **tidak** memicu restart loop — ia menarik replika dari
 rotasi. Liveness yang memicu restart.
 
+`/ready` juga yang dipantau otomatis setiap 5 menit — lihat §7.
+
 ## 6. Backup
 
 Backup **otomatis dan teruji** — bukan sekadar perintah yang didokumentasikan.
@@ -216,7 +218,72 @@ keputusan tanpa menghubungi apa pun; tanpa `--dry-run` ia benar-benar
 mem-ping. Selama `HEARTBEAT_URL` kosong, heartbeat tidak aktif dan tidak
 dianggap gagal.
 
-## 7. Skala
+## 7. Pemantauan ketersediaan
+
+Backup punya alarm (notifikasi kegagalan) dan dead-man's switch (heartbeat).
+**Aplikasi tidak** — sampai 2026-11-05 tidak ada satu pun alarm yang berbunyi
+saat API berhenti melayani. `restart: unless-stopped` memang menyalakan ulang
+proses yang mati, tetapi ia tidak memberi tahu siapa pun dan tidak menolong
+saat container crash-loop.
+
+`deploy/scripts/check-ready.sh` menutup celah itu dan dipasang cron setiap
+5 menit oleh `install-backup-cron.sh`:
+
+| Perintah | Arti |
+|---|---|
+| `check-ready.sh` | periksa `/api/ready` lewat nginx (`127.0.0.1:5180`) |
+| `check-ready.sh --status` | cetak status terakhir tanpa memeriksa |
+| `check-ready.sh --dry-run` | periksa dan cetak aksi, tanpa mengirim apa pun |
+| `check-ready.sh --force-fail` | paksa jalur gagal (menguji alert) |
+
+Diperiksa **lewat nginx**, bukan langsung ke container `api`, supaya satu
+pemeriksaan mencakup rantai yang benar-benar dilalui pengguna: nginx → api →
+Postgres + Redis. Alarm dikirim setelah **2 kegagalan berturut-turut**
+(praktisnya ~10 menit), sekali per insiden, lalu sekali lagi saat pulih.
+Log: `~/backups/sahabat-kreator/ready.log`.
+
+**Dua lapis, dan bedanya penting:**
+
+1. **Alert Telegram** — dikirim dari VPS yang sama. Menangkap container mati,
+   crash-loop, DB/Redis tidak siap, dan nginx rusak. TIDAK menangkap VPS mati
+   total, karena pengirim alarm ikut mati.
+2. **Dead-man's switch** (`READY_HEARTBEAT_URL`) — skrip hanya mengetuk layanan
+   pemantau di luar VPS ketika aplikasi SEHAT. Kalau mesinnya mati, ketukan
+   berhenti dan layanan pemantau yang membunyikan alarm. **Ini satu-satunya
+   lapis yang menangkap kematian total mesin.**
+
+Mengaktifkan lapis 2: buat check baru di healthchecks.io (period 5 menit,
+grace 10 menit), lalu tambahkan ke `deploy/backup.env`:
+
+```
+READY_HEARTBEAT_URL='https://hc-ping.com/<uuid>'
+```
+
+Selama variabel itu kosong, lapis 2 tidak aktif dan tidak dianggap gagal —
+lapis 1 tetap berjalan.
+
+### Kalau ada yang lambat
+
+`pg_stat_statements` aktif (di-set lewat `command:` pada service `db` di
+`deploy/docker-compose.prod.yml`, plus `log_min_duration_statement=1000`).
+Tanpa ini, pertanyaan "query mana yang lambat" hanya bisa dijawab dengan
+menembak endpoint satu per satu — persis yang memakan waktu pada insiden
+latensi 2026-11-05.
+
+```sql
+select calls, round(total_exec_time::numeric, 1) as total_ms,
+       round(mean_exec_time::numeric, 2) as rata_ms, left(query, 90) as query
+from pg_stat_statements
+order by total_exec_time desc
+limit 20;
+```
+
+`shared_preload_libraries` hanya dibaca saat proses postgres mulai, jadi
+mengubahnya menuntut **restart container `db`** (data aman: ada di volume
+`pgdata`). Setelah restart pertama, ekstensinya perlu dibuat sekali:
+`create extension if not exists pg_stat_statements;`
+
+## 8. Skala
 
 - `api`, `worker`, `realtime` semuanya stateless — boleh direplikasi.
 - **Poller pengiriman Telegram/Meta berjalan di `worker`**
@@ -226,7 +293,7 @@ dianggap gagal.
 - Klaim outbound memakai `FOR UPDATE SKIP LOCKED`; dua replika tidak akan
   mengirim pesan yang sama.
 
-## 8. Log dan audit
+## 9. Log dan audit
 
 - Log terstruktur JSON (`LOG_LEVEL`), membawa `requestId`.
 - `integration_log` — jejak per pesan keluar/masuk beserta kode error.
@@ -235,7 +302,7 @@ dianggap gagal.
 - **Token tidak pernah masuk log.** Bila menemukan token di log, itu bug
   keamanan — perlakukan sebagai insiden.
 
-## 9. Checklist sebelum rilis
+## 10. Checklist sebelum rilis
 
 - [ ] `pnpm lint` tanpa error
 - [ ] `pnpm typecheck` hijau

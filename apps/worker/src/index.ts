@@ -180,7 +180,13 @@ if (!env.REDIS_URL) {
   throw new Error("[worker] REDIS_URL wajib diisi");
 }
 
-const { db, pool } = createDb(env.DATABASE_URL);
+// Worker menjalankan fan-out massal (broadcast, automasi), jadi batas
+// statement-nya lebih longgar daripada API — tetap ada batas, supaya satu
+// job yang menggantung tidak menahan pool selamanya.
+const { db, pool } = createDb(env.DATABASE_URL, {
+  applicationName: "sk-worker",
+  statementTimeoutMs: 60_000,
+});
 const queueConnection = createRedisConnection(env.REDIS_URL);
 const workerConnection = createRedisConnection(env.REDIS_URL);
 const queue = createAutomationQueue(queueConnection);

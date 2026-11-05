@@ -18,7 +18,6 @@ import {
 } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export interface PaymentsModuleOptions extends PaymentDeps {
@@ -86,8 +85,6 @@ export function createPaymentsRoutes(
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   async function guard(
     c: AppContext,

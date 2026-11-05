@@ -3,7 +3,6 @@ import { z } from "zod";
 import { getProfilePhoto } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 /**
@@ -42,8 +41,6 @@ export function createAvatarsRoutes(bundle: AuthBundle | null) {
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const serve = async (
     c: Context<{ Variables: AppVariables }>,

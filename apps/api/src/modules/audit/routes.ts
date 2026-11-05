@@ -83,7 +83,6 @@ export function createAuditRoutes(
   }
 
   const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
   app.use("/audit/*", auth);
 
   app.get("/tenants/:tenantId/audit", async (c) => {

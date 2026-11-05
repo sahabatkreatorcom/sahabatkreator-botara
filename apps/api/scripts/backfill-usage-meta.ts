@@ -37,7 +37,7 @@ if (!url) {
     "[backfill:usage-meta] MIGRATION_DATABASE_URL (atau DATABASE_URL) wajib diisi",
   );
 }
-const { db, pool } = createDb(url);
+const { db, pool } = createDb(url, { applicationName: "sk-script" });
 
 try {
   const candidates = await db

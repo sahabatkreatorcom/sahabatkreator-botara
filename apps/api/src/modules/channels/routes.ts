@@ -55,7 +55,6 @@ import { META_GRAPH_API_VERSION } from "@sahabat-kreator/config";
 import type { ChannelAccount } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { channelAvatarUrl } from "../avatars/routes";
 import { resolveTenantForUser } from "../tenants/guard";
 
@@ -408,8 +407,6 @@ export function createChannelsRoutes(
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   app.get(base, async (c) => {
     const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);

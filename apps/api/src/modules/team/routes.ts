@@ -130,7 +130,6 @@ export function createTeamRoutes(
   }
 
   const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
   app.use("/invitations/*", auth);
 
   type GuardOk = {

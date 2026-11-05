@@ -182,7 +182,6 @@ export function createLogsRoutes(
   }
 
   const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
   app.use("/logs/*", auth);
 
   app.get(tenantBase, async (c) => {

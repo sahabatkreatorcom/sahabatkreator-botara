@@ -28,6 +28,7 @@ import {
 } from "./observability";
 import { checkDatabase, combineReadiness } from "./readiness";
 import type { AppVariables } from "./http";
+import { requireAuth } from "./modules/auth/session";
 import { createTenantsRoutes } from "./modules/tenants/routes";
 import { createContactsRoutes } from "./modules/contacts/routes";
 import { createInboxRoutes } from "./modules/inbox/routes";
@@ -205,6 +206,27 @@ const realtimePublisher: RealtimePublisher | null = env.REDIS_URL
   ? createRealtimePublisher(env.REDIS_URL)
   : null;
 const webchatOpts = { secret: env.WEBCHAT_SECRET, publisher: realtimePublisher };
+
+/**
+ * Autentikasi permukaan dashboard dipasang SATU KALI di sini.
+ *
+ * Sebelumnya setiap modul mendaftarkan `app.use("/tenants/*", auth)` sendiri
+ * — 26 modul — dan Hono menjalankan SEMUA handler yang cocok dengan pola path
+ * itu. Akibatnya satu request dashboard mengeksekusi `getSession` +
+ * `select users` 26 kali (terukur 217 ms untuk `GET /api/tenants`, sementara
+ * query-nya sendiri hanya 1–11 ms).
+ *
+ * `requireAuth` tetap idempoten sebagai jaring pengaman: modul baru yang
+ * (keliru) mendaftarkannya lagi tidak akan berbiaya. Lihat catatan di
+ * modules/auth/session.ts.
+ *
+ * PENTING: harus didaftarkan SEBELUM `routes.route(...)` di bawah. Hono
+ * menjalankan handler sesuai urutan registrasi — kalau dipasang sesudahnya,
+ * handler modul berjalan lebih dulu dan route jadi terbuka tanpa sesi.
+ */
+if (authBundle) {
+  routes.use("/tenants/*", requireAuth(authBundle));
+}
 
 // Modul log integrasi (Fase 7B.1) — pembacaan integration_log:
 // /tenants/:tenantId/logs (owner/admin) + /logs/unresolved (platform admin).

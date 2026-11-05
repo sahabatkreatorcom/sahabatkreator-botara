@@ -14,7 +14,6 @@ import {
 } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 
 function serializeTenant(t: TenantWithRole): TenantResponse {
   return TenantResponseSchema.parse({
@@ -55,9 +54,6 @@ export function createTenantsRoutes(bundle: AuthBundle | null) {
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants", auth);
-  app.use("/tenants/*", auth);
 
   app.post("/tenants", async (c) => {
     let json: unknown;

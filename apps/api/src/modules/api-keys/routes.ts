@@ -15,7 +15,6 @@ import {
 import type { ApiKey } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export function serializeApiKey(row: ApiKey): ApiKeyResponse {
@@ -50,8 +49,6 @@ export function createApiKeysRoutes(bundle: AuthBundle | null) {
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   app.post(base, async (c) => {
     const appUser = c.get("appUser");

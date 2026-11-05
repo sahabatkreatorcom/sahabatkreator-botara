@@ -18,7 +18,7 @@ const env = loadEnv();
 if (!env.DATABASE_URL) {
   throw new Error("[meta:token-lifecycle] DATABASE_URL wajib diisi");
 }
-const { db, pool } = createDb(env.DATABASE_URL);
+const { db, pool } = createDb(env.DATABASE_URL, { applicationName: "sk-script" });
 try {
   const result = await runMetaTokenLifecycle({
     db,

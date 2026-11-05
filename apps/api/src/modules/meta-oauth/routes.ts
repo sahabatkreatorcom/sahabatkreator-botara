@@ -45,7 +45,6 @@ import type { ChannelAccount } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 import { createOAuthKvStore, type OAuthKvStore } from "../../oauth-kv";
-import { requireAuth } from "../auth/session";
 import { channelAvatarUrl } from "../avatars/routes";
 import { resolveTenantForUser } from "../tenants/guard";
 
@@ -387,8 +386,6 @@ export function createMetaOAuthRoutes(
     namespace: "meta-oauth",
     ttlSeconds: OAUTH_TTL_SECONDS,
   });
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
   const redirectUri = `${webBase}/api/meta/oauth/callback`;

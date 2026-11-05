@@ -26,7 +26,6 @@ import {
 import type { AutomationRun } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
-import { requireAuth } from "../auth/session";
 import { resolveTenantForUser } from "../tenants/guard";
 
 export function serializeAutomation(row: AutomationWithRunCount): AutomationResponse {
@@ -122,8 +121,6 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
     return app;
   }
 
-  const auth = requireAuth(bundle);
-  app.use("/tenants/*", auth);
 
   const resolveTenant = async (c: AppContext) =>
     resolveTenantForUser(
