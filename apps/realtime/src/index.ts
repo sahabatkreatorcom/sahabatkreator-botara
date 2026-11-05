@@ -410,9 +410,13 @@ wss.on("connection", (ws: WebSocket & { isAlive?: boolean }) => {
   });
 });
 
-server.listen(env.REALTIME_PORT, "127.0.0.1", () => {
+// Default loopback (bare-metal). Di Docker WAJIB REALTIME_HOST=0.0.0.0 —
+// nginx berjalan di container lain dan tidak bisa menjangkau 127.0.0.1
+// milik netns ini. Lihat catatan di EnvSchema.
+const listenHost = env.REALTIME_HOST ?? "127.0.0.1";
+server.listen(env.REALTIME_PORT, listenHost, () => {
   console.log(
-    `[realtime] Sahabat Kreator realtime gateway listening on http://127.0.0.1:${env.REALTIME_PORT}`,
+    `[realtime] Sahabat Kreator realtime gateway listening on http://${listenHost}:${env.REALTIME_PORT}`,
   );
 });
 

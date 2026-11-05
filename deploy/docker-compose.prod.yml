@@ -88,6 +88,11 @@ services:
   realtime:
     <<: *server-image
     command: ["node", "apps/realtime/dist/index.js"]
+    # Wajib 0.0.0.0 di Docker: container `web` (nginx) adalah netns lain
+    # dan tidak bisa menjangkau 127.0.0.1 milik container ini. Tetap
+    # privat karena publish di bawah hanya ke loopback host.
+    environment:
+      REALTIME_HOST: "0.0.0.0"
     ports:
       - "127.0.0.1:3103:3103"
 

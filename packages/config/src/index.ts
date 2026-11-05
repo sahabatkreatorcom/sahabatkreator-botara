@@ -40,6 +40,17 @@ const EnvSchema = z.object({
    * pada web preview (staging) / reverse-proxy (produksi).
    */
   REALTIME_PORT: z.coerce.number().int().positive().default(3103),
+  /**
+   * Alamat bind gateway WebSocket realtime. Default 127.0.0.1 (deployment
+   * bare-metal: nginx di host yang sama menjangkaunya lewat loopback).
+   *
+   * Di Docker nilainya WAJIB 0.0.0.0: container `realtime` dan `web`
+   * (nginx) adalah dua netns berbeda, sehingga 127.0.0.1 di dalam
+   * container realtime tidak dapat dijangkau nginx. Bind 0.0.0.0 di sini
+   * tetap privat karena port-nya hanya di-publish ke loopback HOST
+   * (127.0.0.1:3103) — bukan ke antarmuka publik.
+   */
+  REALTIME_HOST: z.string().min(1).optional(),
   DATABASE_URL: z.string().url().optional(),
   /** Better Auth (Fase 1B): secret penandatanganan sesi & URL publik aplikasi. */
   BETTER_AUTH_SECRET: z.string().min(16).optional(),
