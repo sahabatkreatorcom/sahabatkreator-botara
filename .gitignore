@@ -40,3 +40,6 @@ Thumbs.db
 *.sqlite
 *.db
 *.sql.gz
+
+# Data proyek milik agen (catatan kerja, cache) — bukan sumber.
+.workbuddy-ai/
