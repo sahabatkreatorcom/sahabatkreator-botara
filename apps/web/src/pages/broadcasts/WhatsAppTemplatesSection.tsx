@@ -499,6 +499,17 @@ export function WhatsAppTemplatesSection({
                   <p className="mt-1 whitespace-pre-wrap text-sm text-muted">
                     {tpl.bodyText ?? t("whatsappTemplates.noBody")}
                   </p>
+                  {/* Alasan dari Meta (mis. kenapa ditolak) — tanpa ini
+                      chip "Ditolak" tidak memberi tahu apa yang harus
+                      diperbaiki. */}
+                  {tpl.statusReason ? (
+                    <p className="mt-2 rounded-lg bg-surface-2 px-3 py-2 text-xs text-muted">
+                      <span className="font-medium text-ink">
+                        {t("whatsappTemplates.statusReasonLabel")}:
+                      </span>{" "}
+                      {tpl.statusReason}
+                    </p>
+                  ) : null}
                   {canManage && channelConnected ? (
                     <div className="mt-3">
                       <button

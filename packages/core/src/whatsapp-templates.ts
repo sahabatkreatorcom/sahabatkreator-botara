@@ -240,6 +240,138 @@ export async function recordCreatedWhatsAppTemplate(
 }
 
 /**
+ * Kode bahasa template dari webhook Meta memakai bentuk `en-US`,
+ * sedangkan Graph (`message_templates`) memakai `en_US`, dan formulir
+ * kita menyimpan apa yang diketik pengguna. Ketiganya harus dianggap
+ * sama saat mencocokkan; kalau tidak, status template berbahasa dengan
+ * locale tidak akan pernah menemukan barisnya.
+ */
+function normalizeTemplateLanguage(language: string): string {
+  return language.trim().toLowerCase().replace(/-/g, "_");
+}
+
+export interface ApplyWhatsAppTemplateStatusInput {
+  tenantId: string;
+  channelAccountId: string;
+  /** `message_template_id` Meta — kunci pencocokan utama bila ada. */
+  metaTemplateId: string | null;
+  name: string;
+  language: string;
+  /** Nilai `event` apa adanya (APPROVED, REJECTED, PAUSED, …). */
+  status: string;
+  category: string | null;
+  /** Alasan dari Meta (penolakan / pause / disable); null bila tak ada. */
+  reason: string | null;
+}
+
+export interface ApplyWhatsAppTemplateStatusResult {
+  updated: boolean;
+  templateId: string | null;
+  previousStatus: string | null;
+}
+
+/**
+ * Menerapkan satu `message_template_status_update` ke cermin lokal.
+ *
+ * Sebelum ini, status template hanya berubah bila operator menekan
+ * Sinkron — sehingga template yang sudah disetujui Meta masih tampil
+ * PENDING (dan yang ditolak masih tampil PENDING) sampai ada yang
+ * ingat menyinkronkan. Chip status di halaman Broadcasts sekarang
+ * bergerak sendiri.
+ *
+ * Pencocokan: `meta_template_id` lebih dulu (otoritatif, tidak
+ * terpengaruh perbedaan penulisan bahasa), lalu nama + bahasa
+ * ternormalisasi sebagai cadangan untuk baris lama yang belum punya id.
+ *
+ * Status yang datang tidak divalidasi terhadap daftar Meta — nilai baru
+ * disimpan apa adanya supaya tidak hilang diam-diam; UI punya cadangan
+ * tampilan untuk status yang belum dikenal.
+ */
+export async function applyWhatsAppTemplateStatus(
+  db: Database,
+  input: ApplyWhatsAppTemplateStatusInput,
+): Promise<ApplyWhatsAppTemplateStatusResult> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const rows = await tx
+      .select()
+      .from(whatsappTemplates)
+      .where(
+        and(
+          eq(whatsappTemplates.tenantId, input.tenantId),
+          eq(whatsappTemplates.channelAccountId, input.channelAccountId),
+        ),
+      );
+
+    const wantedLanguage = normalizeTemplateLanguage(input.language);
+    const target =
+      (input.metaTemplateId
+        ? rows.find((r) => r.metaTemplateId === input.metaTemplateId)
+        : undefined) ??
+      rows.find(
+        (r) =>
+          r.name === input.name &&
+          normalizeTemplateLanguage(r.language) === wantedLanguage,
+      );
+
+    if (!target) {
+      return { updated: false, templateId: null, previousStatus: null };
+    }
+
+    const nextReason = input.reason?.slice(0, 512) ?? null;
+    // APPROVED/REINSTATED menghapus alasan lama: menyimpan alasan
+    // penolakan pada template yang sudah disetujui hanya menyesatkan.
+    const clearsReason =
+      input.status === "APPROVED" || input.status === "REINSTATED";
+    const reasonToStore = clearsReason ? null : nextReason;
+
+    const unchanged =
+      target.status === input.status && target.statusReason === reasonToStore;
+    if (unchanged) {
+      return {
+        updated: false,
+        templateId: target.id,
+        previousStatus: target.status,
+      };
+    }
+
+    const now = new Date();
+    await tx
+      .update(whatsappTemplates)
+      .set({
+        status: input.status.slice(0, 32),
+        statusReason: reasonToStore,
+        // Kategori hanya ditimpa bila Meta mengirimkannya — webhook
+        // sebagian event tidak menyertakan kategori.
+        ...(input.category ? { category: input.category.slice(0, 32) } : {}),
+        updatedAt: now,
+      })
+      .where(eq(whatsappTemplates.id, target.id));
+
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "system",
+      actorId: "whatsapp-webhook",
+      action: "whatsapp_template.status_updated",
+      meta: {
+        whatsappTemplateId: target.id,
+        channelAccountId: input.channelAccountId,
+        name: target.name,
+        language: target.language,
+        from: target.status,
+        to: input.status,
+        reason: reasonToStore,
+      },
+    });
+
+    return {
+      updated: true,
+      templateId: target.id,
+      previousStatus: target.status,
+    };
+  });
+}
+
+/**
  * Hapus baris cermin berdasarkan NAMA pada satu akun (semantik DELETE
  * Meta). Mengembalikan jumlah baris terhapus; audit hanya ditulis
  * bila memang ada yang terhapus.

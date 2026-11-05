@@ -265,6 +265,48 @@ export async function resolveWhatsAppAccountByPhoneNumberId(
   });
 }
 
+/**
+ * Resolusi SEMUA akun WhatsApp milik satu WABA — dipakai event webhook
+ * tingkat WABA yang tidak menyebut nomor telepon sama sekali
+ * (`message_template_status_update`).
+ *
+ * Berbeda dari `resolveWhatsAppAccountByPhoneNumberId`, kuncinya
+ * `parent_external_id` (WABA id), bukan `external_id` (phone_number_id),
+ * lewat lengan RLS `whatsapp_waba_lookup` (migrasi 0004). Satu WABA bisa
+ * menaungi beberapa nomor dan — secara teori — beberapa tenant, jadi
+ * hasilnya daftar: setiap cermin template per akun harus ikut diperbarui,
+ * bukan hanya yang pertama ditemukan.
+ */
+export async function resolveWhatsAppAccountsByWabaId(
+  db: Database,
+  wabaId: string,
+): Promise<WhatsAppAccountRef[]> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.whatsapp_waba_id', ${wabaId}, true)`,
+    );
+    return tx
+      .select({
+        id: channelAccounts.id,
+        tenantId: channelAccounts.tenantId,
+        provider: channelAccounts.provider,
+        externalId: channelAccounts.externalId,
+        parentExternalId: channelAccounts.parentExternalId,
+        displayName: channelAccounts.displayName,
+        status: channelAccounts.status,
+        accessTokenEncrypted: channelAccounts.accessTokenEncrypted,
+        publicHandle: channelAccounts.publicHandle,
+      })
+      .from(channelAccounts)
+      .where(
+        and(
+          eq(channelAccounts.provider, "whatsapp"),
+          eq(channelAccounts.parentExternalId, wabaId),
+        ),
+      );
+  });
+}
+
 export interface RecordWhatsAppInboundResult {
   message: Message;
   contactId: string;
@@ -462,6 +504,157 @@ export async function recordWhatsAppInboundMessage(
     });
 
     return { message, contactId, identityCreated, duplicate: false };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Echo coexistence (smb_message_echoes) — pesan dikirim dari HP
+// ---------------------------------------------------------------------------
+
+export interface RecordWhatsAppEchoInput {
+  /** wa_id PELANGGAN penerima (sudah dinormalkan tanpa '+'). */
+  customerWaId: string;
+  /** wamid pesan yang dikirim dari aplikasi WhatsApp Business. */
+  providerMessageId: string;
+  type: Message["type"];
+  text: string | null;
+}
+
+export interface RecordWhatsAppEchoResult {
+  message: Message;
+  conversationId: string;
+  duplicate: boolean;
+}
+
+/**
+ * Mencatat pesan yang dikirim bisnis lewat aplikasi WhatsApp Business /
+ * perangkat tertaut (mode coexistence) sebagai pesan KELUAR di inbox.
+ *
+ * Tanpa ini, jawaban yang diketik staf dari HP tidak pernah muncul di
+ * linimasa — agen lain melihat percakapan seolah pelanggan tidak pernah
+ * dibalas, lalu membalas lagi. Itu sebabnya echo dicatat, bukan dibuang.
+ *
+ * TIGA PERBEDAAN yang disengaja dari `recordWhatsAppInboundMessage`:
+ * 1. `direction: "outbound"`, `senderType: "user"`, `status: "sent"` —
+ *    pesan ini memang sudah terkirim dari perangkat, bukan dari antrean
+ *    kita, jadi tidak ada status `queued` dan tidak akan pernah ada
+ *    receipt `delivered/read` dari Cloud API untuk wamid ini.
+ * 2. `unread_count` TIDAK dinaikkan — pesan keluar bukan beban belum
+ *    dibaca.
+ * 3. TIDAK menulis outbox `message.received`. Event itu yang membuat
+ *    worker menjalankan `automation.evaluate`; memicunya di sini berarti
+ *    agent AI/automation membalas pesan yang barusan diketik manusia —
+ *    persis kebalikan dari yang diinginkan.
+ *
+ * Idempoten seperti jalur masuk: wamid yang sama mengembalikan baris
+ * yang sudah ada (`duplicate: true`).
+ */
+export async function recordWhatsAppEchoMessage(
+  db: Database,
+  account: Pick<WhatsAppAccountRef, "id" | "tenantId" | "externalId">,
+  input: RecordWhatsAppEchoInput,
+): Promise<RecordWhatsAppEchoResult | null> {
+  const compositeId = whatsAppProviderMessageId(
+    account.externalId,
+    input.providerMessageId,
+  );
+  return withTenantDb(db, account.tenantId, async (tx) => {
+    const [identity] = await tx
+      .select()
+      .from(channelIdentities)
+      .where(
+        and(
+          eq(channelIdentities.channelAccountId, account.id),
+          eq(channelIdentities.externalUserId, input.customerWaId),
+        ),
+      )
+      .limit(1);
+
+    let contactId: string;
+    if (identity) {
+      contactId = identity.contactId;
+    } else {
+      // Nama pelanggan tidak ada di payload echo — kontak lahir dengan
+      // label cadangan dan akan berganti nama saat pelanggan membalas.
+      const [contact] = await tx
+        .insert(contacts)
+        .values({
+          tenantId: account.tenantId,
+          name: WHATSAPP_CONTACT_FALLBACK_NAME,
+        })
+        .returning();
+      contactId = contact.id;
+      await tx.insert(channelIdentities).values({
+        tenantId: account.tenantId,
+        contactId,
+        channelAccountId: account.id,
+        provider: "whatsapp",
+        externalUserId: input.customerWaId,
+      });
+    }
+
+    const [existingConv] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, account.tenantId),
+          eq(conversations.channelAccountId, account.id),
+          eq(conversations.contactId, contactId),
+        ),
+      )
+      .orderBy(desc(conversations.createdAt))
+      .limit(1);
+
+    let conversationId: string;
+    if (existingConv && existingConv.status !== "closed") {
+      conversationId = existingConv.id;
+    } else {
+      const [conv] = await tx
+        .insert(conversations)
+        .values({
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          contactId,
+          provider: "whatsapp",
+          providerChatId: input.customerWaId,
+          kind: "private",
+          status: "open",
+        })
+        .returning();
+      conversationId = conv.id;
+    }
+
+    const [dupe] = await tx
+      .select()
+      .from(messages)
+      .where(eq(messages.providerMessageId, compositeId))
+      .limit(1);
+    if (dupe) return { message: dupe, conversationId, duplicate: true };
+
+    const [message] = await tx
+      .insert(messages)
+      .values({
+        tenantId: account.tenantId,
+        conversationId,
+        direction: "outbound",
+        senderType: "user",
+        type: input.type,
+        contentText: input.text,
+        providerMessageId: compositeId,
+        status: "sent",
+      })
+      .onConflictDoNothing()
+      .returning();
+    if (!message) return null;
+
+    const now = new Date();
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: now, updatedAt: now })
+      .where(eq(conversations.id, conversationId));
+
+    return { message, conversationId, duplicate: false };
   });
 }
 

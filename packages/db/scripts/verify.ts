@@ -215,7 +215,11 @@ const policies = await db.query<{ count: string }>(
 // 51 tenant_isolation + 25 lengan = 76. Angka ini bukan target desain,
 // melainkan hasil; yang dijaga adalah setiap lengan tetap ada (diuji di
 // bawah) dan tidak ada policy `USING (true)` yang membocorkan tenant.
-assert.equal(Number(policies.rows[0].count), 76);
+//
+// 2026-11-06: + lengan `whatsapp_waba_lookup` pada channel_accounts
+// (migrasi 0004) untuk event webhook tingkat WABA yang tidak membawa
+// phone_number_id = 77.
+assert.equal(Number(policies.rows[0].count), 77);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2334,6 +2338,8 @@ function oneHotVector(index: number): string {
   // tenant_isolation → 59 / 73.
   // 2026-11-05: rantai migrasi dibangun ulang dari schema Drizzle; jumlah
   // policy menjadi 76 (lihat catatan di bagian 4). Angka tabel tetap 59.
+  // 2026-11-06: migrasi 0004 menambah lengan `whatsapp_waba_lookup` → 77
+  // (kolom baru `whatsapp_templates.status_reason` tidak menambah policy).
   const counts = await db.query<{ tables: string; policies: string }>(
     `SELECT
        (SELECT count(*)::text FROM information_schema.tables
@@ -2342,7 +2348,7 @@ function oneHotVector(index: number): string {
          WHERE schemaname = 'public') AS policies`,
   );
   assert.equal(counts.rows[0].tables, "59");
-  assert.equal(counts.rows[0].policies, "76");
+  assert.equal(counts.rows[0].policies, "77");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
@@ -3204,6 +3210,51 @@ function oneHotVector(index: number): string {
     "[42] Hotfix analisis: messages.claimed_at ada; klaim atomik hanya satu pemenang, klaim basi boleh diambil alih, status tetap queued (penandaan sent tetap jalan), tenant lain tidak bisa mengklaim: OK",
   );
 }
+
+// ---------- 43. Lengan WABA (event webhook tingkat WABA) ----------
+// Migrasi 0004: `message_template_status_update` hanya membawa WABA id,
+// tanpa phone_number_id, sehingga akun harus dicari lewat
+// parent_external_id. Cakupan lengan ini harus tetap sempit — tanpa
+// setting tidak ada baris, WABA lain tidak terbuka, dan provider lain
+// yang kebetulan berinduk sama tidak ikut terbuka.
+const WABA_COL = await db.query(
+  `SELECT 1 FROM information_schema.columns
+   WHERE table_name = 'whatsapp_templates' AND column_name = 'status_reason'`,
+);
+assert.equal(WABA_COL.rows.length, 1);
+
+await db.query(
+  `INSERT INTO channel_accounts (tenant_id, provider, external_id, parent_external_id, status)
+   VALUES ($1, 'whatsapp', 'waba-phone-a', 'waba-001', 'connected'),
+          ($2, 'whatsapp', 'waba-phone-b', 'waba-002', 'connected'),
+          ($1, 'telegram', 'waba-bot-a', 'waba-001', 'connected')`,
+  [TENANT_A, TENANT_B],
+);
+const wabaSeen = await db.transaction(async (tx) => {
+  await tx.query(`SET LOCAL ROLE app_user`);
+  const noCtx = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM channel_accounts`,
+  );
+  await tx.query(`SELECT set_config('app.whatsapp_waba_id', 'waba-001', true)`);
+  const match = await tx.query<{ external_id: string }>(
+    `SELECT external_id FROM channel_accounts`,
+  );
+  await tx.query(`SELECT set_config('app.whatsapp_waba_id', 'waba-tidak-ada', true)`);
+  const none = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM channel_accounts`,
+  );
+  return { noCtx, match, none };
+});
+assert.equal(wabaSeen.noCtx.rows[0].n, "0");
+// Hanya akun WhatsApp milik WABA itu — bot Telegram berinduk sama TIDAK ikut.
+assert.deepEqual(
+  wabaSeen.match.rows.map((r) => r.external_id),
+  ["waba-phone-a"],
+);
+assert.equal(wabaSeen.none.rows[0].n, "0");
+console.log(
+  "[43] Fase 10B: kolom whatsapp_templates.status_reason ada; lengan whatsapp_waba_lookup hanya membuka akun WhatsApp milik WABA yang di-set (fail-closed, provider lain tidak ikut): OK",
+);
 
 await db.close();
 console.log("db verify (PGlite): SEMUA LULUS");

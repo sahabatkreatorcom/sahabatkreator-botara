@@ -67,6 +67,7 @@ export function serializeTemplate(row: WhatsAppTemplate): WhatsAppTemplateRespon
     language: row.language,
     category: row.category,
     status: row.status,
+    statusReason: row.statusReason,
     components: Array.isArray(row.components) ? row.components : [],
     bodyText: row.bodyText,
     variableCount: row.variableCount,

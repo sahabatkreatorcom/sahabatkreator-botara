@@ -310,6 +310,42 @@ OAuth Unified Login yang melakukan subscribe otomatis. Sesudah WABA
 di-subscribe, percakapan WhatsApp pertama langsung masuk (masuk → keluar →
 masuk → keluar, keempatnya `read`), tanpa perubahan lain.
 
+### Coexistence (nomor dipakai juga di aplikasi WhatsApp Business)
+
+Nomor yang di-onboard lewat alur coexistence tetap menerima pesan pelanggan
+di field `messages`, dan pesan yang **diketik staf dari HP** datang di field
+`smb_message_echoes`. Keduanya ditangani:
+
+- Echo dicatat sebagai pesan **keluar** di percakapan yang sama (bukan pesan
+  masuk, bukan kontak baru untuk nomor bisnis sendiri).
+- Echo **tidak** memicu automation/AI. Ini disengaja: pesan itu baru saja
+  diketik manusia, dan membalasnya otomatis adalah kebalikan dari maksudnya.
+- `to` pada echo kadang berawalan `+`; parser menormalkannya supaya orang yang
+  sama tidak menjadi dua kontak.
+
+Yang **belum** diterapkan: `revoke` dan `edit` dari HP. Pesan yang dihapus
+atau disunting lewat aplikasi WhatsApp Business tetap tampil apa adanya di
+inbox; keduanya dicatat di log integrasi sebagai `ignored_status_only` supaya
+tidak senyap. `smb_app_state_sync` (sinkronisasi kontak dari HP) belum
+ditangani sama sekali.
+
+### Status template (`/broadcasts`)
+
+Template yang baru dibuat berstatus `PENDING` sampai Meta meninjaunya. Sejak
+2026-11-06 status itu bergerak sendiri lewat field
+`message_template_status_update`: cermin lokal diperbarui (status + alasan
+penolakan) tanpa perlu menekan **Sinkron dari Meta**.
+
+Syaratnya field itu benar-benar dilanggankan di **App Dashboard → WhatsApp →
+Configuration → Webhook fields**. Catatan penting: webhook WhatsApp **tidak
+bisa** diubah lewat `POST /{app-id}/subscriptions` (dibatasi Meta); hanya
+dashboard. Cek hasilnya dengan:
+
+```bash
+curl -s "https://graph.facebook.com/v21.0/<APP_ID>/subscriptions?access_token=<APP_ID>|<APP_SECRET>"
+# objek whatsapp_business_account harus memuat: messages, message_template_status_update
+```
+
 ## 8. Skala
 
 - `api`, `worker`, `realtime` semuanya stateless — boleh direplikasi.

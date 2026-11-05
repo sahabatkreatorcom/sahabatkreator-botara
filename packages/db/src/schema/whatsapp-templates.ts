@@ -51,6 +51,13 @@ export const whatsappTemplates = pgTable(
     category: varchar("category", { length: 32 }).notNull(),
     /** Status persetujuan Meta: APPROVED | PENDING | REJECTED (atau status lain apa adanya). */
     status: varchar("status", { length: 32 }).notNull(),
+    /**
+     * Alasan status terakhir dari webhook `message_template_status_update`
+     * (Fase 10B): alasan penolakan Meta, judul pause/disable, atau alasan
+     * penonaktifan. Tanpa ini operator hanya melihat chip "REJECTED" tanpa
+     * tahu apa yang harus diperbaiki. Null bila belum pernah dilaporkan.
+     */
+    statusReason: varchar("status_reason", { length: 512 }),
     /** Komponen template apa adanya dari Meta (array HEADER/BODY/FOOTER/BUTTONS). */
     components: jsonb("components").notNull().default([]),
     /** Teks komponen BODY (turunan lokal untuk pratinjau); null bila komponen tidak terbaca. */

@@ -155,4 +155,50 @@ describe("RLS tenant isolation", () => {
     });
     expect(rows.map((r) => r.tenant_id)).toEqual([TENANT_A]);
   });
+
+  /**
+   * Lengan `whatsapp_waba_lookup` (migrasi 0004) — dipakai event webhook
+   * tingkat WABA (`message_template_status_update`) yang TIDAK membawa
+   * phone_number_id, hanya WABA id. Lengan lama
+   * (`provider_external_lookup`) tidak menolong di sana karena ia
+   * mencocokkan `external_id`.
+   *
+   * Yang diuji bukan hanya "bisa membuka", tetapi juga "tidak membuka
+   * lebih dari seharusnya": tanpa setting harus fail-closed, WABA lain
+   * tidak boleh terlihat, dan provider lain dengan induk yang sama tidak
+   * boleh ikut terbuka.
+   */
+  it("lengan WABA membuka akun WhatsApp yang tepat saja", async () => {
+    await db.query(
+      `INSERT INTO channel_accounts (tenant_id, provider, external_id, parent_external_id, status)
+       VALUES ($1, 'whatsapp', 'phone-a', 'waba-a', 'connected'),
+              ($2, 'whatsapp', 'phone-b', 'waba-b', 'connected'),
+              ($1, 'telegram', 'bot-a', 'waba-a', 'connected')`,
+      [TENANT_A, TENANT_B],
+    );
+
+    const visible = async (wabaId: string | null) =>
+      db.transaction(async (tx) => {
+        await tx.query(`SET LOCAL ROLE app_user`);
+        if (wabaId) {
+          await tx.query(`SELECT set_config('app.whatsapp_waba_id', $1, true)`, [
+            wabaId,
+          ]);
+        }
+        const res = await tx.query<{ external_id: string }>(
+          `SELECT external_id FROM channel_accounts`,
+        );
+        return res.rows.map((r) => r.external_id);
+      });
+
+    // Fail closed: tanpa setting tidak ada baris sama sekali.
+    expect(await visible(null)).toEqual([]);
+    // WABA yang cocok membuka akun WhatsApp-nya…
+    expect(await visible("waba-a")).toEqual(["phone-a"]);
+    // …tetapi TIDAK akun provider lain yang kebetulan berinduk sama.
+    expect(await visible("waba-a")).not.toContain("bot-a");
+    // WABA lain tidak ikut terbuka, dan WABA asing tidak membuka apa pun.
+    expect(await visible("waba-b")).toEqual(["phone-b"]);
+    expect(await visible("waba-tidak-ada")).toEqual([]);
+  });
 });

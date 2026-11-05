@@ -54,6 +54,12 @@ export const WhatsAppTemplateResponseSchema = z.object({
   language: z.string(),
   category: z.string(),
   status: z.string(),
+  /**
+   * Alasan status terakhir dari webhook `message_template_status_update`
+   * (mis. alasan penolakan Meta). Null bila belum pernah dilaporkan —
+   * ditampilkan di UI supaya "REJECTED" tidak menjadi jalan buntu.
+   */
+  statusReason: z.string().nullable(),
   components: z.array(z.record(z.string(), z.unknown())),
   bodyText: z.string().nullable(),
   variableCount: z.number().int().nonnegative(),

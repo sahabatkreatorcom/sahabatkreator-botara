@@ -31,6 +31,14 @@ export function TemplateStatusChip({
       labelKey: "whatsappTemplates.statusRejected",
       className: "bg-danger-soft text-danger",
     },
+    PAUSED: {
+      labelKey: "whatsappTemplates.statusPaused",
+      className: "bg-warning-soft text-warning",
+    },
+    DISABLED: {
+      labelKey: "whatsappTemplates.statusDisabled",
+      className: "bg-danger-soft text-danger",
+    },
   };
   const chip = known[status];
   return (

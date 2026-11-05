@@ -1,14 +1,17 @@
 import {
   applyWhatsAppMessageStatus,
+  applyWhatsAppTemplateStatus,
   attributeContactToGrowthLink,
   decryptChannelSecret,
   fetchAndStoreMetaContactProfile,
   recordMetaComment,
   recordMetaInboundMessage,
   recordMetaReferralContact,
+  recordWhatsAppEchoMessage,
   recordWhatsAppInboundMessage,
   resolveMetaAccountByExternalId,
   resolveWhatsAppAccountByPhoneNumberId,
+  resolveWhatsAppAccountsByWabaId,
   type IntegrationLogInboundOutcome,
   type MetaAccountRef,
   type MetaProvider,
@@ -423,7 +426,12 @@ async function handleWhatsAppWebhook(
   };
   try {
     const parsed = parseWhatsAppWebhookEvents(payload);
-    if (parsed.messages.length === 0 && parsed.statuses.length === 0) {
+    if (
+      parsed.messages.length === 0 &&
+      parsed.statuses.length === 0 &&
+      parsed.echoes.length === 0 &&
+      parsed.templateStatuses.length === 0
+    ) {
       if (!scoped) {
         await log({
           direction: "in",
@@ -438,6 +446,9 @@ async function handleWhatsAppWebhook(
     }
 
     const accountCache = new Map<string, WhatsAppAccountRef | null>();
+    // Cache terpisah untuk event tingkat WABA: kuncinya WABA id, bukan
+    // phone_number_id, dan hasilnya daftar (satu WABA bisa banyak nomor).
+    const wabaCache = new Map<string, WhatsAppAccountRef[]>();
     const resolveAccount = async (
       phoneNumberId: string,
     ): Promise<WhatsAppAccountRef | null> => {
@@ -556,6 +567,100 @@ async function handleWhatsAppWebhook(
       }
     }
 
+    // Coexistence (`smb_message_echoes`): pesan yang diketik staf lewat
+    // aplikasi WhatsApp Business di HP. Dicatat sebagai pesan KELUAR
+    // tanpa memicu automation/AI — lihat recordWhatsAppEchoMessage.
+    // Nudge yang dipakai `conversation.updated`, bukan `message.received`:
+    // inbox perlu menyegar, tetapi tidak ada yang boleh "menjawab" ini.
+    for (const echo of parsed.echoes) {
+      const account = await resolveAccount(echo.phoneNumberId);
+      if (!account) {
+        if (scoped) continue;
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          signatureValid: true,
+          outcome: "unresolved_account",
+          summary: `echo for unknown phone_number_id ${echo.phoneNumberId}`,
+          payload,
+        });
+        continue;
+      }
+      if (scoped && account.tenantId !== deps.tenantScopeId) continue;
+      if (account.status !== "connected") {
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: "ignored_disconnected",
+          summary: `echo for ${account.status} account`,
+          payload,
+        });
+        continue;
+      }
+      // `revoke`/`edit` dari HP belum diterapkan ke baris kita. Dicatat
+      // eksplisit supaya tidak ada perubahan pelanggan yang senyap.
+      if (echo.isRevoke || echo.isEdit) {
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: "ignored_status_only",
+          summary: echo.isRevoke
+            ? `echo revoke for ${echo.providerMessageId} not applied`
+            : `echo edit for ${echo.providerMessageId} not applied`,
+          payload,
+        });
+        continue;
+      }
+      let echoed: Awaited<ReturnType<typeof recordWhatsAppEchoMessage>>;
+      try {
+        echoed = await recordWhatsAppEchoMessage(deps.db, account, {
+          customerWaId: echo.toWaId,
+          providerMessageId: echo.providerMessageId,
+          type: echo.type,
+          text: echo.text,
+        });
+      } catch (err) {
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: "error",
+          errorCode: "processing_error",
+          summary: `failed to record echo to ${echo.toWaId}`,
+          payload,
+        });
+        errorLogged = true;
+        throw err;
+      }
+      await log({
+        direction: "in",
+        provider: "whatsapp",
+        tenantId: account.tenantId,
+        channelAccountId: account.id,
+        signatureValid: true,
+        outcome:
+          echoed === null || echoed.duplicate ? "duplicate" : "recorded",
+        summary: `echo ${echo.type} to ${echo.toWaId}`,
+        payload,
+      });
+      if (!echoed || echoed.duplicate) continue;
+      if (deps.publisher) {
+        await deps.publisher.publishNudge({
+          kind: "conversation.updated",
+          tenantId: account.tenantId,
+          conversationId: echoed.conversationId,
+        });
+      }
+    }
+
     for (const status of parsed.statuses) {
       const account = await resolveAccount(status.phoneNumberId);
       if (!account) {
@@ -624,6 +729,63 @@ async function handleWhatsAppWebhook(
         tenantId: account.tenantId,
         conversationId: applied.conversationId,
       });
+    }
+
+    // Status template (`message_template_status_update`) — event tingkat
+    // WABA: payload tidak menyebut nomor telepon sama sekali, jadi akun
+    // di-resolve lewat parent_external_id (WABA id), bukan phone_number_id.
+    // Satu WABA bisa menaungi beberapa nomor, dan cermin template hidup
+    // per akun — karena itu SEMUA akun milik WABA itu diperbarui.
+    for (const change of parsed.templateStatuses) {
+      let wabaAccounts = wabaCache.get(change.wabaId);
+      if (wabaAccounts === undefined) {
+        wabaAccounts = await resolveWhatsAppAccountsByWabaId(
+          deps.db,
+          change.wabaId,
+        );
+        wabaCache.set(change.wabaId, wabaAccounts);
+      }
+      if (wabaAccounts.length === 0) {
+        if (scoped) continue;
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          signatureValid: true,
+          outcome: "unresolved_account",
+          summary: `template status for unknown WABA ${change.wabaId}`,
+          payload,
+        });
+        continue;
+      }
+      for (const account of wabaAccounts) {
+        if (scoped && account.tenantId !== deps.tenantScopeId) continue;
+        // Alasan penolakan rinci lebih berguna daripada kode `reason`;
+        // kalau Meta tidak menyertakannya, pakai kode itu apa adanya.
+        const reason =
+          change.rejectionReason ?? change.reason ?? null;
+        const applied = await applyWhatsAppTemplateStatus(deps.db, {
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          metaTemplateId: change.templateId,
+          name: change.templateName,
+          language: change.language,
+          status: change.event,
+          category: change.category,
+          reason,
+        });
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: applied.updated ? "recorded" : "ignored_status_only",
+          summary: applied.updated
+            ? `template ${change.templateName} ${applied.previousStatus} -> ${change.event}`
+            : `template ${change.templateName} ${change.event} without mirror change`,
+          payload,
+        });
+      }
     }
   } catch (err) {
     await logErrorOnce("whatsapp webhook processing failed");

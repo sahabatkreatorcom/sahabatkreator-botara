@@ -29,6 +29,13 @@
       "when": 1793870118799,
       "tag": "0003_bookings_no_overlap",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793870118800,
+      "tag": "0004_whatsapp_waba_lookup",
+      "breakpoints": true
     }
   ]
 }

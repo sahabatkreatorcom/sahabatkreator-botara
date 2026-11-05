@@ -474,6 +474,77 @@ export interface WhatsAppStatusEvent {
 export interface WhatsAppWebhookEvents {
   messages: WhatsAppInboundMessageEvent[];
   statuses: WhatsAppStatusEvent[];
+  /**
+   * Pesan yang dikirim dari aplikasi WhatsApp Business / perangkat
+   * tertaut (`smb_message_echoes`, mode coexistence). Arahnya KELUAR
+   * dari sudut pandang kita: `toWaId` adalah pelanggan, bukan pengirim.
+   */
+  echoes: WhatsAppEchoMessageEvent[];
+  /** Perubahan status template (`message_template_status_update`). */
+  templateStatuses: WhatsAppTemplateStatusEvent[];
+}
+
+/**
+ * Satu pesan yang dikirim bisnis lewat aplikasi WhatsApp Business di HP
+ * atau perangkat tertaut — bukan lewat Cloud API kita.
+ *
+ * Bentuk payload mengikuti referensi Meta `smb_message_echoes`:
+ * `value.message_echoes[]` dengan `from` = nomor tampil bisnis dan
+ * `to` = nomor pelanggan. Perhatikan arahnya terbalik dibanding
+ * `messages[]` (di sana `from` = pelanggan).
+ */
+export interface WhatsAppEchoMessageEvent {
+  /** entry.id — WABA id (konteks). */
+  wabaId: string;
+  /** value.metadata.phone_number_id — kunci resolusi akun. */
+  phoneNumberId: string;
+  /** Nomor pelanggan penerima (`to`), SUDAH dinormalkan tanpa '+'. */
+  toWaId: string;
+  /** wamid pesan; id dedup provider. */
+  providerMessageId: string;
+  type: WhatsAppInboundType;
+  /** Teks pesan; untuk media = caption bila ada, selain itu null. */
+  text: string | null;
+  timestamp: number | null;
+  /**
+   * true bila ini pesan `revoke` (bisnis menghapus pesan yang sudah
+   * terkirim dari HP). Pemanggil memutuskan apa yang dilakukan; parser
+   * tidak menebak.
+   */
+  isRevoke: boolean;
+  /**
+   * true bila ini pesan `edit` (bisnis mengubah isi pesan dari HP).
+   * Isi barunya tetap ada di `text`.
+   */
+  isEdit: boolean;
+}
+
+/**
+ * Satu perubahan status template (`message_template_status_update`).
+ *
+ * Nilai `event` yang mungkin (referensi Meta): APPROVED, ARCHIVED,
+ * UNARCHIVED, DELETED, DISABLED, FLAGGED, IN_APPEAL, LIMIT_EXCEEDED,
+ * LOCKED, PAUSED, PENDING, REINSTATED, PENDING_DELETION, REJECTED.
+ * Kita TIDAK memvalidasi daftar itu: status disimpan apa adanya supaya
+ * status baru dari Meta tidak diam-diam hilang — chip di UI sudah punya
+ * cadangan tampilan untuk nilai yang belum dikenal.
+ */
+export interface WhatsAppTemplateStatusEvent {
+  /** entry.id — WABA id; event ini TIDAK membawa phone_number_id. */
+  wabaId: string;
+  event: string;
+  /** `message_template_id` Meta (angka di payload, disimpan sebagai string). */
+  templateId: string | null;
+  templateName: string;
+  /** Kode bahasa; webhook memakai bentuk 'en-US', Graph memakai 'en_US'. */
+  language: string;
+  /** Alasan penolakan (`reason`) atau null. */
+  reason: string | null;
+  category: string | null;
+  /** `rejection_info.reason` — penjelasan rinci (khusus REJECTED INVALID_FORMAT). */
+  rejectionReason: string | null;
+  /** `rejection_info.recommendation` — saran perbaikan dari Meta. */
+  rejectionRecommendation: string | null;
 }
 
 interface WhatsAppWebhookPayload {
@@ -508,10 +579,57 @@ interface WhatsAppWebhookPayload {
           timestamp?: string;
           errors?: Array<{ code?: number; title?: string }>;
         }>;
+        /**
+         * `smb_message_echoes`: pesan yang dikirim dari aplikasi WhatsApp
+         * Business / perangkat tertaut. `from` = bisnis, `to` = pelanggan.
+         */
+        message_echoes?: Array<{
+          from?: string;
+          to?: string;
+          id?: string;
+          timestamp?: string;
+          type?: string;
+          text?: { body?: string };
+          image?: { caption?: string };
+          video?: { caption?: string };
+          document?: { caption?: string; filename?: string };
+          revoke?: { original_message_id?: string };
+          /**
+           * `edit` menaruh ISI BARU di dalam `edit.message` — `type`
+           * tingkat atas bernilai "edit", dan `image`/`text` di tingkat
+           * atas TIDAK berisi konten hasil suntingan.
+           */
+          edit?: {
+            original_message_id?: string;
+            message?: {
+              type?: string;
+              text?: { body?: string };
+              image?: { caption?: string };
+              video?: { caption?: string };
+              document?: { caption?: string };
+            };
+          };
+        }>;
+        /** `message_template_status_update` — event tingkat WABA. */
+        event?: string;
+        message_template_id?: number | string;
+        message_template_name?: string;
+        message_template_language?: string;
+        reason?: string | null;
+        message_template_category?: string;
+        rejection_info?: {
+          reason?: string;
+          recommendation?: string;
+        };
       };
     }>;
   }>;
 }
+
+/** Satu `value` di dalam `entry[].changes[]` (semua field webhook WA). */
+type WhatsAppChangeValue = NonNullable<
+  NonNullable<WhatsAppWebhookPayload["entry"]>[number]["changes"]
+>[number]["value"];
 
 /** true bila payload adalah objek webhook WhatsApp Business Account. */
 export function isWhatsAppWebhookPayload(payload: unknown): boolean {
@@ -523,22 +641,177 @@ export function isWhatsAppWebhookPayload(payload: unknown): boolean {
 }
 
 /**
- * Menormalkan payload webhook WhatsApp menjadi event pesan masuk +
- * event status. Hanya `changes[].field === "messages"` yang dibaca.
- * Pesan non-teks TETAP dikembalikan dengan tipenya (caption sebagai
- * teks bila ada) — keputusan pencatatan ada di core; status yang tidak
- * dikenal dilewati. Nama kontak dicocokkan dari `value.contacts[]`
- * berdasarkan wa_id.
+ * Isi teks satu pesan WhatsApp: teks asli untuk tipe `text`, caption
+ * untuk media (bila ada). Dipakai jalur pesan masuk DAN jalur echo
+ * supaya keduanya tidak menyimpang satu sama lain.
+ */
+function whatsAppContentText(
+  type: WhatsAppInboundType,
+  holder: {
+    text?: { body?: string };
+    image?: { caption?: string };
+    video?: { caption?: string };
+    document?: { caption?: string };
+  },
+): string | null {
+  if (type === "text") {
+    return typeof holder.text?.body === "string" ? holder.text.body : null;
+  }
+  return (
+    holder.image?.caption ||
+    holder.video?.caption ||
+    holder.document?.caption ||
+    null
+  );
+}
+
+/**
+ * Satu perubahan `message_template_status_update` → event ternormalisasi.
+ *
+ * Event ini TIDAK membawa `metadata.phone_number_id`; kuncinya hanya
+ * WABA id di `entry.id`. Pemanggil karena itu me-resolve akun lewat
+ * `parent_external_id`, bukan `external_id`. Nama template wajib ada —
+ * tanpa itu tidak ada yang bisa dicocokkan, jadi peristiwanya dibuang.
+ */
+function parseTemplateStatusChange(
+  wabaId: string,
+  value: WhatsAppChangeValue | undefined,
+): WhatsAppTemplateStatusEvent | null {
+  if (!value || typeof value !== "object") return null;
+  const event = typeof value.event === "string" ? value.event : "";
+  const name =
+    typeof value.message_template_name === "string"
+      ? value.message_template_name.trim()
+      : "";
+  if (!event || !name) return null;
+  const id =
+    typeof value.message_template_id === "number" ||
+    typeof value.message_template_id === "string"
+      ? String(value.message_template_id)
+      : null;
+  return {
+    wabaId,
+    event,
+    templateId: id,
+    templateName: name,
+    language:
+      typeof value.message_template_language === "string"
+        ? value.message_template_language
+        : "",
+    reason: typeof value.reason === "string" ? value.reason : null,
+    category:
+      typeof value.message_template_category === "string"
+        ? value.message_template_category
+        : null,
+    rejectionReason:
+      typeof value.rejection_info?.reason === "string"
+        ? value.rejection_info.reason
+        : null,
+    rejectionRecommendation:
+      typeof value.rejection_info?.recommendation === "string"
+        ? value.rejection_info.recommendation
+        : null,
+  };
+}
+
+/**
+ * Satu perubahan `smb_message_echoes` → daftar pesan keluar yang dikirim
+ * dari aplikasi WhatsApp Business / perangkat tertaut.
+ *
+ * Dua jebakan yang ditangani di sini:
+ * 1. ARAH TERBALIK. Di `messages[]` `from` adalah pelanggan; di sini
+ *    `from` adalah nomor bisnis dan `to` adalah pelanggan. Memakai
+ *    `from` seperti jalur biasa akan membuat kita "membuat kontak" dari
+ *    nomor bisnis sendiri.
+ * 2. `to` kadang berawalan '+'. wa_id di jalur `messages` tidak pernah
+ *    berawalan '+', jadi tanpa normalisasi orang yang sama akan menjadi
+ *    dua kontak dan dua percakapan. Semua non-digit dibuang.
+ */
+function parseEchoChange(
+  wabaId: string,
+  value: WhatsAppChangeValue | undefined,
+): WhatsAppEchoMessageEvent[] {
+  const out: WhatsAppEchoMessageEvent[] = [];
+  if (!value || typeof value !== "object") return out;
+  const phoneNumberId = value.metadata?.phone_number_id;
+  if (typeof phoneNumberId !== "string" || !phoneNumberId) return out;
+
+  for (const echo of value.message_echoes ?? []) {
+    const to = typeof echo?.to === "string" ? echo.to.replace(/\D/g, "") : "";
+    const wamid = echo?.id;
+    if (!to) continue;
+    if (typeof wamid !== "string" || !wamid) continue;
+    const rawType = typeof echo.type === "string" ? echo.type : "";
+    const isRevoke = rawType === "revoke";
+    const isEdit = rawType === "edit";
+    // `edit` membawa isi baru di dalam `edit.message`; tipenya diambil
+    // dari sana karena `type` tingkat atas bernilai "edit".
+    const inner = isEdit ? echo.edit?.message : undefined;
+    const effectiveRawType = isEdit
+      ? typeof inner?.type === "string"
+        ? inner.type
+        : "text"
+      : rawType;
+    const effectiveType = WHATSAPP_TYPE_MAP[effectiveRawType] ?? "other";
+    out.push({
+      wabaId,
+      phoneNumberId,
+      toWaId: to,
+      providerMessageId: wamid,
+      type: effectiveType,
+      // Sumber konten: untuk `edit`, isi barunya ada di `edit.message`;
+      // untuk pesan biasa, di objek echo itu sendiri.
+      text: whatsAppContentText(
+        effectiveType,
+        isEdit && inner ? inner : echo,
+      ),
+      timestamp:
+        typeof echo.timestamp === "string"
+          ? Number(echo.timestamp) || null
+          : null,
+      isRevoke,
+      isEdit,
+    });
+  }
+  return out;
+}
+
+/**
+ * Menormalkan payload webhook WhatsApp menjadi event pesan masuk,
+ * status pengiriman, echo coexistence, dan status template.
+ *
+ * `messages` → pesan masuk + status pengiriman (jalur lama).
+ * `smb_message_echoes` → pesan KELUAR yang dikirim dari aplikasi
+ * WhatsApp Business di HP (mode coexistence).
+ * `message_template_status_update` → perubahan status template.
+ * Field lain tetap dilewati: kita hanya berlangganan empat field, dan
+ * tiga di antaranya (`history`, `smb_app_state_sync`) memang belum
+ * ditangani.
  */
 export function parseWhatsAppWebhookEvents(
   payload: unknown,
 ): WhatsAppWebhookEvents {
-  const result: WhatsAppWebhookEvents = { messages: [], statuses: [] };
+  const result: WhatsAppWebhookEvents = {
+    messages: [],
+    statuses: [],
+    echoes: [],
+    templateStatuses: [],
+  };
   if (!isWhatsAppWebhookPayload(payload)) return result;
   const body = payload as WhatsAppWebhookPayload;
   for (const entry of body.entry ?? []) {
     const wabaId = typeof entry?.id === "string" ? entry.id : "";
     for (const change of entry?.changes ?? []) {
+      // Fase 10B — dua field yang sebelumnya dibuang diam-diam.
+      if (change?.field === "message_template_status_update") {
+        const tpl = parseTemplateStatusChange(wabaId, change.value);
+        if (tpl) result.templateStatuses.push(tpl);
+        continue;
+      }
+      if (change?.field === "smb_message_echoes") {
+        result.echoes.push(...parseEchoChange(wabaId, change.value));
+        continue;
+      }
       if (change?.field !== "messages") continue;
       const value = change.value;
       const phoneNumberId = value?.metadata?.phone_number_id;
@@ -562,18 +835,9 @@ export function parseWhatsAppWebhookEvents(
         if (typeof wamid !== "string" || !wamid) continue;
         const rawType = typeof message.type === "string" ? message.type : "";
         const type = WHATSAPP_TYPE_MAP[rawType] ?? "other";
-        const text =
-          type === "text"
-            ? typeof message.text?.body === "string"
-              ? message.text.body
-              : null
-            : (typeof message.image?.caption === "string" &&
-                message.image.caption) ||
-              (typeof message.video?.caption === "string" &&
-                message.video.caption) ||
-              (typeof message.document?.caption === "string" &&
-                message.document.caption) ||
-              null;
+        // Diekstrak ke helper bersama jalur echo (whatsAppContentText)
+        // supaya kedua jalur tidak menyimpang soal caption.
+        const text = whatsAppContentText(type, message);
         result.messages.push({
           wabaId,
           phoneNumberId,
