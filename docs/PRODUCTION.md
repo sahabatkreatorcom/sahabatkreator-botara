@@ -159,6 +159,19 @@ Keputusan yang mengikat:
 - **Retensi berbeda di tiap sisi:** 7 harian + 28 hari mingguan di VPS,
   30 hari di R2. Off-site justru untuk menutup kasus "VPS-nya hilang",
   jadi wajar disimpan lebih lama di sana.
+- **Notifikasi sadar-penyedia.** `lib-notify.sh` memilih bentuk body dari
+  URL: Telegram form-encoded, Discord `{"content":…}`, sisanya
+  `{"text":…}` (Slack/Mattermost). Satu bentuk untuk semua berarti
+  notifikasi diam-diam hilang di dua dari tiga penyedia. Uji tanpa
+  menunggu kegagalan nyata: `./backup-db.sh --test-notify`.
+- **Heartbeat menutup celah yang tidak bisa ditutup notifikasi.** Semua
+  notifikasi di atas dikirim oleh mesin yang sama dengan yang diawasi —
+  kalau VPS-nya mati, tidak ada proses yang hidup untuk mengirim apa pun.
+  `heartbeat.sh` (cron tiap jam :17) mem-ping layanan pemantau di luar,
+  **tetapi hanya bila dump terbaru masih segar** (< 36 jam). Dengan begitu
+  satu pemeriksaan menutup dua kegagalan: mesin mati, dan backup yang
+  berhenti tanpa suara. Kalau yang diperiksa hanya "mesin hidup", backup
+  yang berhenti berbulan-bulan tetap terlihat sehat.
 - Volume Redis **tidak** perlu dibackup: isinya antrean dan cache. Job
   yang hilang dipulihkan dari `outbox_events` yang belum terbit.
 - Media di R2 mengikuti retensi bucket.
@@ -170,6 +183,38 @@ kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.
 Prasyarat di host: `rclone` tersedia di `$PATH` atau `~/bin/rclone`
 (biner statis, tidak butuh root). Tanpa itu, backup lokal tetap jalan dan
 off-site dilaporkan gagal — bukan diam-diam dilewati.
+
+### Memasang notifikasi dan heartbeat
+
+Semua pengaturan ada di `deploy/backup.env` (mode 600, di-`.gitignore`),
+terpisah dari `.env` aplikasi.
+
+**Telegram** (disarankan: pesan sampai sebagai push ke HP):
+
+```bash
+# 1. Chat @BotFather → /newbot → simpan token.
+# 2. Kirim satu pesan apa saja ke bot itu — bot tidak bisa memulai
+#    percakapan sendiri, ini langkah yang paling sering terlewat.
+# 3. Skrip mencari chat_id sendiri, menulis ALERT_WEBHOOK_URL, dan
+#    mengirim pesan uji:
+deploy/scripts/setup-alert-telegram.sh <BOT_TOKEN>
+```
+
+`chat_id` sengaja ditaruh di URL (`…/sendMessage?chat_id=…`) supaya
+`notify()` cukup memakai satu variabel. Token tidak dicetak ulang oleh
+skrip; yang ditampilkan hanya nama bot dan judul percakapan.
+
+**Heartbeat** — buat check di layanan pemantau (healthchecks.io, cron-job.org,
+UptimeRobot), atur periodenya ±1 jam dengan grace ±2 jam, lalu isi:
+
+```
+HEARTBEAT_URL='https://hc-ping.com/<uuid>'
+```
+
+Uji tanpa menunggu: `deploy/scripts/heartbeat.sh --dry-run` mencetak
+keputusan tanpa menghubungi apa pun; tanpa `--dry-run` ia benar-benar
+mem-ping. Selama `HEARTBEAT_URL` kosong, heartbeat tidak aktif dan tidak
+dianggap gagal.
 
 ## 7. Skala
 

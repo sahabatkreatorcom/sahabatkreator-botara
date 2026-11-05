@@ -10,6 +10,10 @@
 #             Postgres yang benar-benar BARU (volume kosong, tanpa ekstensi,
 #             tanpa role aplikasi), lalu membandingkan isi dan struktur
 #             dengan produksi.
+#   heartbeat: setiap jam :17 — memberi kabar ke layanan pemantau di luar
+#             VPS, TETAPI hanya bila dump terbaru masih segar (< 36 jam).
+#             Ini satu-satunya yang bisa memberi tahu saat mesinnya sendiri
+#             mati; notifikasi lain dikirim dari mesin yang sama.
 #
 # Kenapa drill, bukan verify-backup.sh? verify-backup.sh memulihkan ke
 # database uji di dalam cluster produksi, yang sudah punya ekstensi dan
@@ -30,7 +34,8 @@ DEPLOY_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 BACKUP_DIR="${BACKUP_DIR:-$HOME/backups/sahabat-kreator}"
 
 chmod +x "$SCRIPT_DIR"/backup-db.sh "$SCRIPT_DIR"/verify-backup.sh \
-  "$SCRIPT_DIR"/verify-backup-fresh-cluster.sh "$SCRIPT_DIR"/restore-db.sh
+  "$SCRIPT_DIR"/verify-backup-fresh-cluster.sh "$SCRIPT_DIR"/restore-db.sh \
+  "$SCRIPT_DIR"/heartbeat.sh
 mkdir -p "$BACKUP_DIR"
 
 BEGIN="# >>> sahabat-kreator backup >>>"
@@ -46,6 +51,8 @@ block="$BEGIN
 30 2 * * * cd $DEPLOY_DIR && PATH=/usr/local/bin:/usr/bin:/bin $SCRIPT_DIR/backup-db.sh >> $BACKUP_DIR/backup.log 2>&1
 # Drill mingguan: pulihkan dump ke cluster Postgres baru dan bandingkan dengan produksi.
 30 3 * * 0 cd $DEPLOY_DIR && PATH=/usr/local/bin:/usr/bin:/bin $SCRIPT_DIR/verify-backup-fresh-cluster.sh >> $BACKUP_DIR/drill.log 2>&1
+# Heartbeat tiap jam: ping layanan pemantau HANYA bila dump terbaru masih segar.
+17 * * * * cd $DEPLOY_DIR && PATH=/usr/local/bin:/usr/bin:/bin $SCRIPT_DIR/heartbeat.sh >> $BACKUP_DIR/heartbeat.log 2>&1
 $END"
 
 printf '%s\n%s\n' "$filtered" "$block" | sed '/^$/N;/^\n$/D' | crontab -
@@ -55,3 +62,4 @@ crontab -l | sed -n "/^${BEGIN}$/,/^${END}$/p"
 echo
 echo "Log backup : $BACKUP_DIR/backup.log"
 echo "Log drill  : $BACKUP_DIR/drill.log"
+echo "Log detak  : $BACKUP_DIR/heartbeat.log"

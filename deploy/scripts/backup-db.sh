@@ -70,59 +70,11 @@ umask 077
 mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly"
 chmod 700 "$BACKUP_DIR"
 
-log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
-
-# Escape untuk body JSON. Isi pesan dibuat oleh skrip ini sendiri (bukan
-# input pengguna), jadi cukup menangani yang memang bisa muncul: backslash,
-# kutip ganda, dan baris baru. Tanpa ini, satu pesan yang memuat `"` membuat
-# body tidak valid dan notifikasi hilang tanpa jejak.
-json_escape() {
-  printf '%s' "$1" |
-    sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' |
-    awk 'BEGIN { ORS = "" } NR > 1 { print "\\n" } { print }'
-}
-
-# Kirim notifikasi ke webhook. Bentuk body BERGANTUNG penyedia — ini bukan
-# kerapian belaka: Slack/Mattermost menerima {"text":...}, Discord menolak
-# body tanpa {"content":...} (400 "Cannot send an empty message"), dan
-# Telegram Bot API sama sekali bukan JSON melainkan form-encoded. Satu
-# bentuk untuk semua berarti notifikasi diam-diam hilang di dua dari tiga
-# penyedia.
-notify() {
-  local msg="$1"
-  [ -n "${ALERT_WEBHOOK_URL:-}" ] || return 0
-
-  if printf '%s' "$ALERT_WEBHOOK_URL" | grep -q 'api\.telegram\.org'; then
-    # chat_id harus sudah ada di URL (…/bot<token>/sendMessage?chat_id=123)
-    # supaya tidak perlu variabel lingkungan kedua.
-    curl -fsS -m 10 --data-urlencode "text=$msg" \
-      "$ALERT_WEBHOOK_URL" >/dev/null 2>&1 || {
-      log "PERINGATAN: notifikasi gagal dikirim"
-      return 1
-    }
-    return 0
-  fi
-
-  local body
-  case "$ALERT_WEBHOOK_URL" in
-    *discord.com* | *discordapp.com*)
-      body="{\"content\":\"$(json_escape "$msg")\"}"
-      ;;
-    *)
-      # Slack, Mattermost, dan webhook generik.
-      body="{\"text\":\"$(json_escape "$msg")\"}"
-      ;;
-  esac
-
-  # --data-raw, bukan -d: `-d` memperlakukan nilai berawalan `@` sebagai
-  # nama berkas.
-  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
-    --data-raw "$body" "$ALERT_WEBHOOK_URL" >/dev/null 2>&1 || {
-    log "PERINGATAN: notifikasi gagal dikirim"
-    return 1
-  }
-  return 0
-}
+# log / json_escape / notify tinggal di pustaka bersama: heartbeat.sh juga
+# memakainya, dan bentuk body per penyedia terlalu mudah salah untuk
+# disalin dua kali.
+# shellcheck source=lib-notify.sh
+. "$SCRIPT_DIR/lib-notify.sh"
 
 fail() {
   log "GAGAL: $*"
