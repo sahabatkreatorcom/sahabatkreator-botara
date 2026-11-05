@@ -27,13 +27,13 @@
  *      messaging_type;
  *  (f) cache probe: panggilan berulang tidak menambah request `/me`.
  *
- * Jalankan: pnpm --filter @sahabat-kreator/api verify:meta-send
+ * Jalankan: pnpm --filter @sahabat-kreator/worker verify:meta-send
  */
 import { MetaGraphClient } from "@sahabat-kreator/channel-messenger";
 import {
   pickInstagramSendObjectId,
   resolveInstagramSendObjectId,
-} from "../src/modules/meta/poller";
+} from "../src/delivery";
 
 /**
  * Bentuk minimal delivery yang dipakai resolver — hanya kunci cache

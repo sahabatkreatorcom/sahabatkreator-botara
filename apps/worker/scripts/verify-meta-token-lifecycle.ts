@@ -18,7 +18,7 @@
  *  (f) hook isAuthError runner: Graph 190 → true, code lain → false,
  *      WhatsAppGraphError 190 → true.
  *
- * Jalankan: pnpm --filter @sahabat-kreator/api verify:meta-token-lifecycle
+ * Jalankan: pnpm --filter @sahabat-kreator/worker verify:meta-token-lifecycle
  */
 import {
   MetaGraphClient,
@@ -29,7 +29,7 @@ import {
   instagramSendVariantFromTokenType,
   metaSendSpecIsAuthError,
   resolveInstagramSendObjectId,
-} from "../src/modules/meta/poller";
+} from "../src/delivery";
 import { metaTokenLifecycleDecision } from "@sahabat-kreator/core";
 
 let passes = 0;

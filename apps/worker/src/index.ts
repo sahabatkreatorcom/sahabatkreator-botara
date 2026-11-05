@@ -33,6 +33,11 @@ import {
 } from "@sahabat-kreator/core";
 import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
 import {
+  startMetaDeliveryPoller,
+  startTelegramDeliveryPoller,
+  type DeliveryPoller,
+} from "./delivery";
+import {
   AGENT_RESPOND_JOB,
   AUTOMATION_EVALUATE_JOB,
   BROADCAST_DISPATCH_JOB,
@@ -81,7 +86,8 @@ import {
  *      - tipe lain (mis. `message.queued`) → tidak ada konsumen relay saat
  *        ini; event tetap ditandai published agar antrean relay tidak
  *        menumpuk. (Konsumen `message.queued` adalah poller pengiriman di
- *        proses API yang membaca tabel messages langsung.)
+ *        proses worker ini yang membaca tabel messages langsung —
+ *        lihat butir 10 di bawah.)
  * 2. EVALUASI AUTOMATION (BullMQ Worker): job `automation.evaluate`
  *    menjalankan `evaluateInboundMessageForAutomations` di core — pencocokan
  *    keyword, pembuatan balasan `queued`, run, dan audit terjadi di sana
@@ -92,7 +98,7 @@ import {
  *    `respondToInboundMessage` di core: retrieval KB full-text → provider
  *    LLM (mock default / OpenRouter via env) → eksekusi tool / draf
  *    saran → metering usage_ledger + audit. Balasan agent juga berhenti
- *    sebagai pesan `queued`; poller API yang mengirimnya lewat hub WS.
+ *    sebagai pesan `queued`; poller worker yang mengirimkannya (butir 10).
  *    Fase 9A: job di-enqueue dengan delay jendela batch
  *    (AGENT_BATCH_WINDOW_MS, default 5000) dan core menyerah
  *    (agent.batched) bila ada pesan masuk yang lebih baru — satu
@@ -111,7 +117,7 @@ import {
  *    Processor-nya menjalankan `dispatchBroadcast` di core:
  *    materialisasi penerima + pesan `queued` per penerima (opt-out &
  *    jendela 24 jam Meta menjadi `skipped`). Pengiriman tetap oleh
- *    poller API; worker menutup broadcast lewat penyapu berkala
+ *    poller worker (butir 10); penyapu berkala menutup broadcast
  *    `reconcileBroadcasts` (sinkron status penerima ← status pesan).
  * 6. FLOW ENGINE (Fase 8A): evaluasi pesan masuk (processor yang sama)
  *    diperluas — sesudah automation keyword/sequence, flow AKTIF yang
@@ -144,6 +150,15 @@ import {
  *    booking buat/batal pada tenant terhubung Google) menjadi job
  *    `appointment.google_sync`; processor-nya menjalankan sinkron di
  *    core — booking tidak pernah menunggu atau gagal karena Google.
+ * 10. PENGIRIMAN OUTBOUND TELEGRAM & META: dua poller berkala
+ *    (`delivery/telegram.ts`, `delivery/meta.ts`) memindai pesan
+ *    `queued` lintas tenant, mengklaim tiap baris, mendekripsi token
+ *    akun sesaat di memori, lalu memanggil Bot API / Graph Send API.
+ *    Keduanya berbagi satu runner (`delivery/runner.ts`) sehingga
+ *    siklus klaim → validasi → kirim → tandai → log → nudge hanya ada
+ *    di satu tempat. Poller ini SEBELUMNYA hidup di proses API;
+ *    dipindahkan ke sini agar replika HTTP tetap stateless dan rolling
+ *    deploy tidak memotong pengiriman yang sedang berjalan.
  *
  * Worker TIDAK mengirim pesan ke pengunjung: sejak Fase 6G socket
  * pengunjung & dashboard milik apps/realtime. Balasan automation/agent/
@@ -429,7 +444,7 @@ const bullWorker = new Worker<MainJobData>(
       // Fase 7C: dispatch satu broadcast — klaim atomik, materialisasi
       // penerima + pesan `queued`, aturan opt-out & jendela 24 jam Meta
       // semuanya di core. Pengiriman sesungguhnya tetap oleh poller
-      // telegram/meta di proses API; penutupan status akhir oleh
+      // telegram/meta di proses worker ini; penutupan status akhir oleh
       // penyapu `reconcileBroadcasts` di bawah.
       const data = job.data as BroadcastDispatchJobData;
       const result = await dispatchBroadcast(db, {
@@ -489,7 +504,7 @@ const bullWorker = new Worker<MainJobData>(
     }
     if (job.name === COMMENT_EVALUATE_JOB) {
       // Fase 10B: evaluasi satu komentar terhadap aturan komentar
-      // akunnya. DM menjadi pesan `queued` di core (poller API yang
+      // akunnya. DM menjadi pesan `queued` di core (poller worker yang
       // mengirim private reply-nya); balasan publik + sembunyikan
       // adalah panggilan Graph langsung lewat commentGraphActions.
       const data = job.data as CommentEvaluateJobData;
@@ -516,7 +531,7 @@ const bullWorker = new Worker<MainJobData>(
               : ""),
         );
         // DM yang terantre = pesan `queued` baru → nudge agar
-        // dashboard menyegar (pengiriman sesungguhnya oleh poller API).
+        // dashboard menyegar (pengiriman sesungguhnya oleh poller worker).
         if (result.actions?.dm?.status === "queued" && result.conversationId) {
           await realtimePublisher.publishNudge({
             kind: "message.queued",
@@ -1028,6 +1043,47 @@ const tokenLifecycleTimer = setInterval(
 );
 void tokenLifecycleTick();
 
+// ---------------------------------------------------------------------------
+// Poller pengiriman pesan outbound (Telegram + Meta).
+//
+// DIPINDAHKAN dari proses API ke worker (rekomendasi analisis). Selama
+// poller hidup di API, setiap replika HTTP ikut menjalankan siklus
+// kirim tiap 2 detik: klaim atomik memang mencegah kirim ganda, tetapi
+// beban panggilan provider menempel pada replika yang seharusnya hanya
+// melayani permintaan, dan `SIGTERM` saat rolling deploy dapat memotong
+// pengiriman di tengah jalan (API tidak menunggu poller selesai).
+//
+// Kedua poller memakai runner bersama `delivery/runner.ts` — satu
+// implementasi siklus klaim → validasi → dekripsi → kirim → tandai →
+// log → nudge. Perbedaan provider hanya pada spec (scan, send, kode
+// error). Token didekripsi sesaat di memori dari CHANNEL_TOKEN_SECRET
+// dan tidak pernah dicatat.
+//
+// Interval 2 detik dipertahankan persis seperti sebelumnya: latensi
+// balasan dashboard tidak boleh berubah hanya karena prosesnya pindah.
+const DELIVERY_POLL_INTERVAL_MS = 2_000;
+const deliveryPollers: DeliveryPoller[] = [
+  startTelegramDeliveryPoller(
+    db,
+    {
+      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+      telegramApiBase: env.TELEGRAM_API_BASE,
+      publisher: realtimePublisher,
+    },
+    DELIVERY_POLL_INTERVAL_MS,
+  ),
+  startMetaDeliveryPoller(
+    db,
+    {
+      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+      metaApiBase: env.META_API_BASE,
+      graphApiVersion: META_GRAPH_API_VERSION,
+      publisher: realtimePublisher,
+    },
+    DELIVERY_POLL_INTERVAL_MS,
+  ),
+];
+
 console.log(
   `[worker] Sahabat Kreator worker aktif — antrean "${MAIN_QUEUE_NAME}", relay outbox tiap ${RELAY_INTERVAL_MS}ms`,
 );
@@ -1042,6 +1098,13 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(logPruneTimer);
   clearInterval(broadcastReconcileTimer);
   clearInterval(tokenLifecycleTimer);
+  // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang
+  // berjalan memakai `db`, dan memutus pool di bawahnya mengubah
+  // pengiriman yang sedang berlangsung menjadi kegagalan palsu yang
+  // tercatat di integration_log. `stop()` hanya menghentikan timer —
+  // tick aktif dibiarkan selesai (penjaga `running` di runner membuat
+  // tidak ada tick baru yang dimulai).
+  for (const poller of deliveryPollers) poller.stop();
   await bullWorker.close();
   await queue.close();
   realtimePublisher.close();

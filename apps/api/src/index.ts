@@ -44,7 +44,6 @@ import { createWebchatRoutes } from "./modules/webchat/routes";
 import { createTelegramRoutes } from "./modules/telegram/routes";
 import { createMetaRoutes } from "./modules/meta/routes";
 import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
-import { startMetaDeliveryPoller } from "./modules/meta/poller";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
 import { createLogsRoutes } from "./modules/logs/routes";
@@ -61,7 +60,6 @@ import { createNotesRoutes } from "./modules/notes/routes";
 import { createTeamRoutes } from "./modules/team/routes";
 import { createAnalyticsRoutes } from "./modules/analytics/routes";
 import { createDashboardRoutes } from "./modules/dashboard/routes";
-import { startTelegramDeliveryPoller } from "./modules/telegram/poller";
 import {
   createRealtimePublisher,
   type RealtimePublisher,
@@ -510,26 +508,13 @@ if (process.env.NODE_ENV !== "test") {
       metaGraphApiVersion: META_GRAPH_API_VERSION,
     });
   });
-  // WebSocket TIDAK lagi dilayani proses ini (Fase 6G): hub webchat &
-  // poller pengiriman webchat pensiun — socket dashboard & pengunjung
-  // kini milik apps/realtime, dijangkau publik lewat proxy `/realtime`.
-  if (authBundle) {
-    // Poller pengiriman Telegram (Fase 6A): mengirim pesan outbound
-    // `queued` percakapan telegram via Bot API (token terdekripsi sesaat
-    // di memori dari CHANNEL_TOKEN_SECRET) + nudge status (Fase 6G).
-    startTelegramDeliveryPoller(authBundle, {
-      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
-      telegramApiBase: env.TELEGRAM_API_BASE,
-      publisher: realtimePublisher,
-    });
-    // Poller pengiriman Meta (Fase 7A): mengirim pesan outbound `queued`
-    // percakapan messenger/instagram via Graph Send API (token Page
-    // terdekripsi sesaat di memori) + nudge status (Fase 6G).
-    startMetaDeliveryPoller(authBundle, {
-      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
-      metaApiBase: env.META_API_BASE,
-      graphApiVersion: META_GRAPH_API_VERSION,
-      publisher: realtimePublisher,
-    });
-  }
+  // WebSocket TIDAK dilayani proses ini (Fase 6G): hub webchat pensiun —
+  // socket dashboard & pengunjung kini milik apps/realtime, dijangkau
+  // publik lewat proxy `/realtime`.
+  //
+  // POLLER PENGIRIMAN JUGA TIDAK DI SINI: sejak rekomendasi analisis,
+  // pengiriman outbound Telegram/Meta hidup di apps/worker (lihat
+  // apps/worker/src/delivery). Proses ini sengaja tetap stateless — ia
+  // hanya melayani permintaan HTTP dan boleh di-replika/di-restart
+  // kapan pun tanpa memotong pengiriman yang sedang berjalan.
 }

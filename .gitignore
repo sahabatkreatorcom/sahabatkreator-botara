@@ -19,6 +19,10 @@ build/
 logs/
 coverage/
 .nyc_output/
+# Direktori temp Vitest (lihat vitest.config.ts: sengaja di root repo,
+# bukan di node_modules atau %TEMP%, agar tulis cache tidak diblokir
+# sandbox yang membatasi kedua lokasi itu).
+.tmp-vitest/
 
 # Berkas OS / editor
 .DS_Store

@@ -1,3 +1,4 @@
+import type { Database } from "@sahabat-kreator/db";
 import {
   extractRawProviderMessageId,
   getMessageProviderMessageId,
@@ -9,17 +10,16 @@ import {
   TelegramBotApiClient,
 } from "@sahabat-kreator/channel-telegram";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
-import type { AuthBundle } from "../../auth";
 import {
   startDeliveryPoller,
   type DeliveryPoller,
   type QueuedDeliveryBase,
-} from "../delivery-poller";
+} from "./runner";
 
 /**
- * Poller pengiriman Telegram (Fase 6A) — kini berupa SPESIFIKASI di atas
- * runner bersama `modules/delivery-poller.ts` (Hotfix analisis 2026-11-03:
- * siklus klaim/kirim/tandai/log/nudge sebelumnya diduplikasi dengan poller
+ * Poller pengiriman Telegram (Fase 6A) — berupa SPESIFIKASI di atas
+ * runner bersama `./runner.ts` (Hotfix analisis 2026-11-03: siklus
+ * klaim/kirim/tandai/log/nudge sebelumnya diduplikasi dengan poller
  * Meta).
  *
  * Semua balasan (dashboard, automation, sequence, agent AI) untuk
@@ -46,16 +46,16 @@ export interface TelegramPollerOptions {
 export type TelegramDeliveryPoller = DeliveryPoller;
 
 export function startTelegramDeliveryPoller(
-  bundle: AuthBundle,
+  db: Database,
   opts: TelegramPollerOptions,
   intervalMs = 2_000,
 ): TelegramDeliveryPoller {
   return startDeliveryPoller<TelegramDelivery>(
-    bundle,
+    db,
     {
       name: "telegram",
-      scan: async (db) =>
-        (await listQueuedTelegramDeliveries(db)).map((delivery) => ({
+      scan: async (conn) =>
+        (await listQueuedTelegramDeliveries(conn)).map((delivery) => ({
           ...delivery,
           encryptedToken: delivery.encryptedBotToken,
           recipientLabel: `chat ${delivery.chatExternalId}`,
@@ -64,7 +64,7 @@ export function startTelegramDeliveryPoller(
       emptyTextCode: "telegram_empty_text",
       missingCredentialsCode: "telegram_missing_credentials",
       undecryptableCode: "telegram_token_undecryptable",
-      async send(delivery, token, db) {
+      async send(delivery, token, conn) {
         // Fase 7B.5: kutipan native — turunkan message_id numerik pesan
         // target dari barisnya dalam konteks tenant ini (id provider
         // kutipan tidak disimpan duplikat; antrean lintas tenant hanya
@@ -74,7 +74,7 @@ export function startTelegramDeliveryPoller(
         let replyToMessageId: number | undefined;
         if (delivery.replyToMessageId) {
           const composite = await getMessageProviderMessageId(
-            db,
+            conn,
             { tenantId: delivery.tenantId },
             delivery.replyToMessageId,
           );

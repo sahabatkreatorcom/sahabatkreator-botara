@@ -253,6 +253,12 @@ importers:
       '@sahabat-kreator/channel-messenger':
         specifier: workspace:*
         version: link:../../packages/channels/channel-messenger
+      '@sahabat-kreator/channel-telegram':
+        specifier: workspace:*
+        version: link:../../packages/channels/channel-telegram
+      '@sahabat-kreator/channel-whatsapp':
+        specifier: workspace:*
+        version: link:../../packages/channels/channel-whatsapp
       '@sahabat-kreator/config':
         specifier: workspace:*
         version: link:../../packages/config

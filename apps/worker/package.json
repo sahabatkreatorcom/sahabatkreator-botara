@@ -2,6 +2,8 @@
   "dependencies": {
     "@sahabat-kreator/ai": "workspace:*",
     "@sahabat-kreator/channel-messenger": "workspace:*",
+    "@sahabat-kreator/channel-telegram": "workspace:*",
+    "@sahabat-kreator/channel-whatsapp": "workspace:*",
     "@sahabat-kreator/config": "workspace:*",
     "@sahabat-kreator/core": "workspace:*",
     "@sahabat-kreator/db": "workspace:*",
@@ -33,6 +35,8 @@
     "verify:kb-embeddings": "tsx scripts/verify-kb-embeddings.ts",
     "verify:sequences": "tsx scripts/verify-sequences.ts",
     "verify:platform-settings": "tsx scripts/verify-platform-settings.ts",
+    "verify:meta-send": "tsx scripts/verify-meta-send.ts",
+    "verify:meta-token-lifecycle": "tsx scripts/verify-meta-token-lifecycle.ts",
     "purge:channels": "tsx scripts/purge-trashed-channels.ts",
     "prune:logs": "tsx scripts/prune-integration-logs.ts",
     "meta:token-lifecycle": "tsx scripts/meta-token-lifecycle.ts"

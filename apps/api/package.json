@@ -11,8 +11,6 @@
     "verify:http": "tsx scripts/verify-http.ts",
     "verify:oauth-kv": "tsx scripts/verify-oauth-kv.ts",
     "verify:meta-discovery": "tsx scripts/verify-meta-discovery.ts",
-    "verify:meta-send": "tsx scripts/verify-meta-send.ts",
-    "verify:meta-token-lifecycle": "tsx scripts/verify-meta-token-lifecycle.ts",
     "backfill:reply-snapshots": "tsx scripts/backfill-reply-snapshots.ts",
     "backfill:usage-meta": "tsx scripts/backfill-usage-meta.ts",
     "backfill:kb-embeddings": "tsx scripts/backfill-kb-embeddings.ts"

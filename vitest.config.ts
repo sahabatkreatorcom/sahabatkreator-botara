@@ -5,12 +5,19 @@ import { defineConfig } from "vitest/config";
 /**
  * Arahkan direktori temp ke dalam repo SEBELUM worker test lahir.
  *
- * Sebagian lingkungan (sandbox IDE, container dengan /tmp read-only)
- * melarang tulis ke direktori temp sistem; Vitest menulis cache transform
- * SSR ke sana dan gagal dengan EPERM meskipun seluruh test lulus. Karena
- * worker mewarisi env proses ini, satu baris di sini cukup.
+ * Dua lingkungan bermasalah yang pernah terbukti, keduanya berakhir
+ * dengan `EPERM` pada tulis cache transform SSR Vitest — test-nya sendiri
+ * lulus, tetapi run dilaporkan gagal karena "unhandled error":
+ *   1. direktori temp sistem (%TEMP% / /tmp) read-only atau diblokir
+ *      sandbox;
+ *   2. `node_modules/` — beberapa sandbox hanya mengizinkan tulis di
+ *      root workspace, sehingga `node_modules/.tmp` pun ditolak.
+ *
+ * Karena itu targetnya root repo (`.tmp-vitest/`, di-gitignore), bukan
+ * `node_modules`. Worker mewarisi env proses ini, jadi satu set variabel
+ * di sini cukup — tidak perlu flag per-test.
  */
-const tmpDir = path.join(process.cwd(), "node_modules", ".tmp");
+const tmpDir = path.join(process.cwd(), ".tmp-vitest");
 mkdirSync(tmpDir, { recursive: true });
 process.env.TMPDIR = tmpDir;
 process.env.TMP = tmpDir;

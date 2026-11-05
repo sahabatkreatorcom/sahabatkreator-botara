@@ -1,3 +1,4 @@
+import type { Database } from "@sahabat-kreator/db";
 import {
   claimOutboundMessage,
   decryptChannelSecret,
@@ -7,20 +8,30 @@ import {
   recordIntegrationLog,
 } from "@sahabat-kreator/core";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
-import type { AuthBundle } from "../auth";
 
 /**
- * Runner poller pengiriman bersama (Hotfix analisis 2026-11-03).
+ * Runner poller pengiriman bersama.
  *
- * Sebelumnya `modules/telegram/poller.ts` dan `modules/meta/poller.ts`
- * memuat siklus yang ~90% identik: klaim baris, validasi teks/kredensial,
- * dekripsi token, kirim, tandai sent/failed, catat integration_log,
- * terbitkan nudge realtime. Setiap hotfix pada siklus itu harus
- * dikerjakan dua kali dan mudah menyimpang.
+ * Sebelumnya `telegram/poller.ts` dan `meta/poller.ts` memuat siklus yang
+ * ~90% identik: klaim baris, validasi teks/kredensial, dekripsi token,
+ * kirim, tandai sent/failed, catat integration_log, terbitkan nudge
+ * realtime. Setiap hotfix pada siklus itu harus dikerjakan dua kali dan
+ * mudah menyimpang.
  *
  * Modul ini memegang SATU implementasi siklus tersebut. Perbedaan per
  * provider tinggal di `DeliveryPollerSpec`: cara memindai antrean, cara
  * mengirim, bentuk id pesan majemuk, dan pemetaan error transport.
+ *
+ * SEJAK PINDAH KE WORKER: runner ini hidup di proses `worker`, bukan
+ * `api`. Alasannya, pengiriman pesan adalah pekerjaan latar berdurasi
+ * variabel (Bot API/Graph bisa lambat atau menggantung) dan proses API
+ * harus tetap stateless + dapat di-replika tanpa batas. Selama poller
+ * hidup di API, setiap replika ikut mengirim — klaim atomik mencegah
+ * kirim ganda, tetapi beban provider tetap menempel pada replika HTTP
+ * dan `SIGTERM` saat rolling deploy bisa memotong pengiriman di tengah
+ * jalan. Worker sudah memiliki pola poller berkala (relay outbox, purge,
+ * prune, reconcile, lifecycle token), jadi ini konsisten dengan
+ * prosesnya.
  */
 
 /** Bentuk minimal satu baris antrean yang dibutuhkan runner. */
@@ -42,7 +53,7 @@ export interface DeliveryPollerSpec<D extends QueuedDeliveryBase> {
   /** Nama proses untuk log & awalan pesan error, mis. "telegram"/"meta". */
   name: string;
   /** Pindai antrean lintas tenant (sudah menyaring baris yang bisa diklaim). */
-  scan: (db: AuthBundle["db"]) => Promise<D[]>;
+  scan: (db: Database) => Promise<D[]>;
   /** Kode saat pesan tidak punya teks. */
   emptyTextCode: string;
   /** Kode saat akun tidak punya kredensial tersimpan. */
@@ -53,7 +64,7 @@ export interface DeliveryPollerSpec<D extends QueuedDeliveryBase> {
    * Kirim satu pesan dan kembalikan id pesan MENTAH dari provider
    * (tanpa awalan majemuk). Melempar error transport bila gagal.
    */
-  send: (delivery: D, token: string, db: AuthBundle["db"]) => Promise<string>;
+  send: (delivery: D, token: string, db: Database) => Promise<string>;
   /** Bentuk id majemuk untuk kolom messages.provider_message_id. */
   compositeProviderMessageId: (delivery: D, rawProviderId: string) => string;
   /** Terjemahkan error transport → kode aman (tanpa token/URL). */
@@ -91,7 +102,7 @@ export interface DeliveryPollerOptions {
  * - token tidak pernah dicatat: hanya kode error aman.
  */
 export function startDeliveryPoller<D extends QueuedDeliveryBase>(
-  bundle: AuthBundle,
+  db: Database,
   spec: DeliveryPollerSpec<D>,
   opts: DeliveryPollerOptions,
   intervalMs = 2_000,
@@ -105,7 +116,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
     errorCode: string | null,
   ): Promise<void> => {
     try {
-      await recordIntegrationLog(bundle.db, {
+      await recordIntegrationLog(db, {
         direction: "out",
         provider: delivery.logProvider,
         tenantId: delivery.tenantId,
@@ -127,7 +138,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
     if (running) return;
     running = true;
     try {
-      const deliveries = await spec.scan(bundle.db);
+      const deliveries = await spec.scan(db);
       if (deliveries.length === 0) return;
       if (!opts.channelTokenSecret) {
         if (!warnedNoSecret) {
@@ -145,7 +156,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
         // Klaim atomik: hanya SATU proses yang boleh mengirim baris ini.
         // Gagal klaim = sudah dibatalkan (dihapus broadcast) atau sedang
         // dikirim proses lain → lewati.
-        if (!(await claimOutboundMessage(bundle.db, ctx, delivery.messageId))) {
+        if (!(await claimOutboundMessage(db, ctx, delivery.messageId))) {
           continue;
         }
 
@@ -160,7 +171,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
         };
         const failBeforeSend = async (code: string) => {
           await markOutboundMessageFailed(
-            bundle.db,
+            db,
             ctx,
             delivery.messageId,
             `${spec.name}-poller`,
@@ -188,14 +199,14 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
         }
 
         try {
-          const rawProviderId = await spec.send(delivery, token, bundle.db);
+          const rawProviderId = await spec.send(delivery, token, db);
           const compositeId = spec.compositeProviderMessageId(
             delivery,
             rawProviderId,
           );
           try {
             await markOutboundMessageSent(
-              bundle.db,
+              db,
               ctx,
               delivery.messageId,
               `${spec.name}-poller`,
@@ -209,7 +220,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
               `[${spec.name}] menyimpan provider id pesan ${delivery.messageId} gagal — tandai sent tanpa id`,
             );
             await markOutboundMessageSent(
-              bundle.db,
+              db,
               ctx,
               delivery.messageId,
               `${spec.name}-poller`,
@@ -230,7 +241,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
             `[${spec.name}] pengiriman pesan ${delivery.messageId} gagal: ${code}${detail}`,
           );
           await markOutboundMessageFailed(
-            bundle.db,
+            db,
             ctx,
             delivery.messageId,
             `${spec.name}-poller`,
@@ -244,7 +255,7 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
           if (spec.isAuthError?.(err)) {
             try {
               await markChannelAccountAuthError(
-                bundle.db,
+                db,
                 ctx,
                 delivery.channelAccountId,
                 code,

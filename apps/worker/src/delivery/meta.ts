@@ -1,3 +1,4 @@
+import type { Database } from "@sahabat-kreator/db";
 import {
   extractRawProviderMessageId,
   getMessageProviderMessageId,
@@ -14,18 +15,17 @@ import {
   WhatsAppGraphError,
 } from "@sahabat-kreator/channel-whatsapp";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
-import type { AuthBundle } from "../../auth";
 import {
   startDeliveryPoller,
   type DeliveryPoller,
   type QueuedDeliveryBase,
-} from "../delivery-poller";
+} from "./runner";
 
 /**
- * Poller pengiriman Meta (Fase 7A; WhatsApp Fase 7B) — kini berupa
- * SPESIFIKASI di atas runner bersama `modules/delivery-poller.ts`
- * (Hotfix analisis 2026-11-03: siklus klaim/kirim/tandai/log/nudge
- * sebelumnya diduplikasi dengan poller Telegram).
+ * Poller pengiriman Meta (Fase 7A; WhatsApp Fase 7B) — berupa
+ * SPESIFIKASI di atas runner bersama `./runner.ts` (Hotfix analisis
+ * 2026-11-03: siklus klaim/kirim/tandai/log/nudge sebelumnya
+ * diduplikasi dengan poller Telegram).
  *
  * Semua balasan (dashboard, automation, sequence, agent AI) untuk
  * percakapan messenger/instagram/whatsapp berakhir sebagai pesan outbound
@@ -162,16 +162,16 @@ export function metaSendSpecIsAuthError(err: unknown): boolean {
 }
 
 export function startMetaDeliveryPoller(
-  bundle: AuthBundle,
+  db: Database,
   opts: MetaPollerOptions,
   intervalMs = 2_000,
 ): MetaDeliveryPoller {
   return startDeliveryPoller<MetaDelivery>(
-    bundle,
+    db,
     {
       name: "meta",
-      scan: async (db) =>
-        (await listQueuedMetaDeliveries(db)).map((delivery) => ({
+      scan: async (conn) =>
+        (await listQueuedMetaDeliveries(conn)).map((delivery) => ({
           ...delivery,
           encryptedToken: delivery.encryptedAccessToken,
           recipientLabel: delivery.recipientExternalId,
@@ -180,7 +180,7 @@ export function startMetaDeliveryPoller(
       emptyTextCode: "meta_empty_text",
       missingCredentialsCode: "meta_missing_credentials",
       undecryptableCode: "meta_token_undecryptable",
-      async send(delivery, token, db) {
+      async send(delivery, token, conn) {
         // Fase 7B.5: kutipan keluar. Id mentah target (wamid/mid)
         // diturunkan dari baris targetnya dalam konteks tenant ini —
         // tidak pernah disimpan duplikat di antrean lintas tenant.
@@ -194,7 +194,7 @@ export function startMetaDeliveryPoller(
         if (delivery.replyToMessageId) {
           quotedRawId = extractRawProviderMessageId(
             await getMessageProviderMessageId(
-              db,
+              conn,
               { tenantId: delivery.tenantId },
               delivery.replyToMessageId,
             ),
@@ -246,7 +246,7 @@ export function startMetaDeliveryPoller(
                 // Write-back varian akun warisan (best-effort).
                 (tokenType) =>
                   setChannelAccountTokenType(
-                    bundle.db,
+                    conn,
                     { tenantId: delivery.tenantId },
                     delivery.channelAccountId,
                     tokenType,
