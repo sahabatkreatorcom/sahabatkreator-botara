@@ -10,13 +10,14 @@ Selain itu tersedia API publik `/v1`, SDK, CLI `sk`, dan MCP server untuk dipaka
 ```
 apps/
   api/         HTTP API (Hono) — adapter tipis di atas core
-  worker/      Proses latar (BullMQ): outbox relay, automation, agent, flow, broadcast
+  worker/      Proses latar (BullMQ + poller): outbox relay, automation, agent,
+               flow, broadcast, PENGIRIMAN pesan kanal (Telegram/Meta)
   realtime/    Gateway WebSocket dashboard + widget webchat
   web/         Dashboard React + Vite (termasuk panel admin platform)
   cli/         CLI `sk` di atas SDK
   mcp-server/  MCP server (tools diturunkan dari contracts)
 packages/
-  core/        SELURUH logika bisnis (transport-agnostic)
+  core/        SELURUH logika bisnis (transport-agnostic); mesin flow di core/flows/
   db/          Skema Drizzle + migrasi + RLS
   contracts/   Skema zod — sumber kebenaran tunggal API/SDK/MCP
   ai/          Provider LLM & embedding (mock | OpenRouter)
@@ -57,7 +58,7 @@ Web membuka `http://localhost:5173`; proxy Vite meneruskan `/api` ke `:3101`.
 
 | Perintah | Kegunaan |
 |---|---|
-| `pnpm typecheck` | `tsc --noEmit` di seluruh 21 paket |
+| `pnpm typecheck` | `tsc --noEmit` di seluruh 20 paket |
 | `pnpm lint` | ESLint (0 error; warning = utang terukur) |
 | `pnpm test` | Vitest — tanpa layanan eksternal |
 | `pnpm --filter @sahabat-kreator/db verify` | Bukti migrasi + isolasi RLS di PGlite |

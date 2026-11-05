@@ -38,7 +38,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 |---|---|---|
 | Automation keyword | ✅ | `core/automations.ts` |
 | Sequence bertahap | ✅ | `sequence_enrollments`, `sequence.step` |
-| Flow builder grafis | ✅ | `core/flows.ts`, `FlowBuilderPage` |
+| Flow builder grafis | ✅ | `core/flows/` (11 modul), `FlowBuilderPage` |
 | Node flow (15+ tipe: condition, delay, ai_response, http_request, goto_flow, ab_split, wait_reply, questionnaire, show_catalog, cart_checkout, book_appointment, …) | ✅ | `validateFlowNodeConfig` |
 | Eksperimen A/B di flow | ✅ | `flow_experiment_assignments` |
 | Broadcast kampanye | ✅ | `core/broadcasts.ts` |
