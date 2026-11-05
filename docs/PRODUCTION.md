@@ -70,25 +70,55 @@ rotasi. Liveness yang memicu restart.
 
 ## 6. Backup
 
-Yang harus dibackup:
+Backup **otomatis dan teruji** — bukan sekadar perintah yang didokumentasikan.
+Tiga skrip di `deploy/scripts/`:
+
+| Skrip | Fungsi |
+| --- | --- |
+| `install-backup-cron.sh` | memasang jadwal: backup harian 02:30 UTC, uji restore mingguan Minggu 03:30 UTC |
+| `backup-db.sh` | `pg_dump` format custom → `~/backups/sahabat-kreator/{daily,weekly}`, lalu memverifikasi dump dapat dibaca ulang |
+| `verify-backup.sh` | memulihkan dump ke database UJI, membandingkan baris tiap tabel + struktur dengan produksi |
+| `restore-db.sh` | pemulihan sungguhan ke produksi (menimpa; butuh `--yes`) |
 
 ```bash
-pg_dump --format=custom --no-privileges "$DATABASE_URL" > sahabat-$(date +%F).dump
+cd /home/ubuntu/sahabat-kreator/deploy/scripts
+./install-backup-cron.sh     # sekali, saat deploy awal
+./backup-db.sh               # boleh dijalankan manual kapan pun
+./verify-backup.sh           # buktikan backup terbaru dapat dipulihkan
 ```
 
-- `--no-privileges` disengaja: hak role dipulihkan oleh migrasi `0002`
+Keputusan yang mengikat:
+
+- **`--no-privileges`** disengaja: hak role dipulihkan oleh migrasi `0002`
   dan `provision.ts grant`, bukan oleh dump. Restore dump ber-privileges
   ke role berbeda justru menghasilkan `permission denied` senyap.
+- **Dump diverifikasi sesudah dibuat.** Dump terpotong tetap berukuran
+  besar dan terlihat wajar sampai seseorang mencoba restore. `backup-db.sh`
+  menjalankan `pg_restore --list` dan menolak dump yang tidak terbaca —
+  lebih baik tidak punya berkas daripada punya berkas yang dikira backup.
+- **Uji restore membandingkan structure, bukan hanya baris.** Empat
+  hitungan diperiksa: tabel, index, constraint, dan **policy RLS**. Dump
+  tanpa policy berarti restore ke cluster baru berjalan tanpa isolasi
+  tenant — tepat kegagalan yang dulu terjadi lewat `_journal.json`.
+- **Off-site belum aktif.** `BACKUP_UPLOAD_CMD` kosong = salinan hanya ada
+  di VPS ini. Selama itu belum diisi, VPS yang mati berarti backup ikut
+  hilang. Isi setelah kredensial R2 tersedia, mis.:
+  `BACKUP_UPLOAD_CMD='rclone copy "$1" r2:sahabat-kreator-backup'`.
 - Volume Redis **tidak** perlu dibackup: isinya antrean dan cache. Job
   yang hilang dipulihkan dari `outbox_events` yang belum terbit.
 - Media di R2 mengikuti retensi bucket.
 
+Retensi default: 7 dump harian + 28 hari cadangan mingguan. Retensi
+dijalankan **sesudah** backup baru sukses, sehingga kegagalan backup tidak
+pernah mengurangi jumlah salinan yang ada.
+
 ## 7. Skala
 
 - `api`, `worker`, `realtime` semuanya stateless — boleh direplikasi.
-- Poller pengiriman Telegram/Meta saat ini berjalan **di proses API**
-  dan mengklaim baris secara atomik. Aman untuk beberapa replika, tetapi
-  menambah beban DB per replika. Rencana: pindahkan ke `worker`.
+- **Poller pengiriman Telegram/Meta berjalan di `worker`**
+  (`apps/worker/src/delivery/`), bukan di API. Klaim barisnya atomik, jadi
+  beberapa replika worker tetap aman; menambah replika API tidak menambah
+  beban panggilan provider.
 - Klaim outbound memakai `FOR UPDATE SKIP LOCKED`; dua replika tidak akan
   mengirim pesan yang sama.
 
