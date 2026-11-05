@@ -1,0 +1,13 @@
+# Konteks build sengaja sempit: image hanya butuh sumber + lockfile.
+node_modules
+**/node_modules
+**/dist
+**/build
+.git
+.gitignore
+*.log
+coverage
+.env
+.env.*
+!.env.example
+docs

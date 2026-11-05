@@ -1,0 +1,685 @@
+import { z } from "zod";
+
+// ---------------------------------------------------------------------------
+// Fase 8A — Flow Engine
+// ---------------------------------------------------------------------------
+
+/**
+ * FORMAT GRAF FLOW — kontrak sumber kebenaran (dipakai API, eksekutor
+ * worker, dan Flow Builder UI Fase 8B):
+ *
+ *   graph = { nodes: FlowNode[], edges: FlowEdge[] }
+ *   FlowNode = { id: string, type: FlowNodeType, config: object,
+ *                position?: { x: number, y: number } }
+ *   FlowEdge = { from: nodeId, to: nodeId,
+ *                branch?: "yes" | "no" | "a" | "b" | "replied" |
+ *                         "timeout" | "completed" | "invalid" }
+ *
+ * `position` adalah metadata TAMPILAN milik builder (Fase 8B): disimpan
+ * apa adanya di graf yang sama (satu sumber kebenaran), diterima
+ * validasi bentuk, dan DIABAIKAN eksekutor — flow 8A tanpa position
+ * tetap sah dan berjalan persis sama.
+ *
+ * Tepat SATU node `trigger` per flow; eksekusi mulai dari node yang
+ * ditunjuk edge keluar trigger. Node tanpa edge keluar = akhir run
+ * (node `end` adalah penanda eksplisit untuk hal yang sama). Edge
+ * `branch` hanya sah keluar dari node bercabang, dan himpunan cabang
+ * yang wajib lengkap ditegakkan saat aktivasi (bukan di skema bentuk):
+ * `condition` → "yes"+"no", `ab_split` → "a"+"b",
+ * `wait_reply` → "replied"+"timeout",
+ * `questionnaire` → "completed"+"invalid"+"timeout",
+ * `show_catalog` → "added"+"invalid"+"timeout",
+ * `cart_checkout` → "checked_out"+"empty_cart",
+ * `book_appointment` → "booked"+"invalid"+"timeout"+"slot_taken". Node lain tidak
+ * boleh membawa branch.
+ *
+ * Tipe node v1 dan config-nya:
+ * - trigger       { kind: "keyword", keywords: string[], match:
+ *                   "exact"|"contains" } | { kind: "any_message" }
+ * - send_message  { text } — teks keluar `queued`, variabel {name}.
+ * - condition     { predicate: "has_tag", tag }
+ *                 | { predicate: "stage_equals", stage }
+ *                 | { predicate: "field_equals", field:
+ *                   "name"|"phone"|"email", value }
+ *                 | { predicate: "message_contains", text } — memakai
+ *                   teks pesan pemicu run.
+ * - delay         { amount: int ≥ 0, unit: "seconds"|"minutes"|"hours",
+ *                   random?: { min: int, max: int } } — Smart Delay
+ *                   (Fase 9A): bila `random` ada, durasi dipilih acak
+ *                   bilangan bulat dalam [min, max] pada satuan node
+ *                   yang sama dan `amount` diabaikan; min ≥ 1,
+ *                   min ≤ max (ditegakkan validasi aktivasi).
+ * - add_tag       { tag }    remove_tag { tag }    set_stage { stage }
+ * - enroll_sequence { automationId } — sequence AKTIF milik tenant
+ *                   yang sama (divalidasi saat aktivasi & eksekusi).
+ * - ai_response   {} — memanggil jalur agent.respond yang ada.
+ * - handoff       {} — agent_enabled=false pada percakapan + audit.
+ * - end           {}
+ *
+ * Tipe node tambahan (Fase 12A):
+ * - set_field     { field, value } — field: "name"|"phone"|"email"|
+ *                   "custom:<key>"; value dirender persis seperti
+ *                   send_message ({name} + spintax) lalu ditulis ke
+ *                   kontak run (kolom atau custom_fields); terlihat
+ *                   oleh condition field_equals pada langkah berikutnya.
+ * - http_request  { method: "GET"|"POST"|"PUT"|"PATCH"|"DELETE", url,
+ *                   headers?: { [nama]: nilai }, body?: string,
+ *                   saveToField?: "custom:<key>" } — permintaan HTTP
+ *                   dari worker dengan timeout 10 detik. Substitusi
+ *                   variabel pada url/headers/body SENGAJA SEMPIT dan
+ *                   TANPA spintax: hanya `{name}` (nama kontak) dan
+ *                   `{{field:<key>}}` (nilai contacts.custom_fields).
+ *                   Status + potongan respons dicatat di detail
+ *                   langkah; saveToField menyimpan body respons
+ *                   (terpotong 2000 char) HANYA bila status 2xx.
+ *                   Kegagalan jaringan/non-2xx tercatat sebagai langkah
+ *                   gagal di detail tetapi RUN TERUS ke node berikutnya
+ *                   (keputusan desain 12A — webhook pihak ketiga yang
+ *                   mati tidak boleh membunuh percakapan).
+ * - goto_flow     { flowId } — memulai run BARU pada flow tujuan
+ *                   (harus ACTIVE, tenant sama; flow itu sendiri sah
+ *                   sebagai tujuan) untuk kontak/percakapan yang sama;
+ *                   run asal selesai `completed` dengan detail goto.
+ *                   Kedalaman rantai dibawa di context run
+ *                   (`gotoDepth`, mulai 0); goto yang akan membuat
+ *                   kedalaman > 5 GAGAL: langkah `goto_depth_exceeded`,
+ *                   run asal `failed`. Run goto TIDAK lahir dari pesan
+ *                   masuk sehingga `triggerMessageId`-nya null (konteks
+ *                   menyimpan `rootTriggerMessageId` untuk node yang
+ *                   membutuhkannya, mis. ai_response).
+ * - ab_split      { percentA: int 1..99 } — cabang edge "a"/"b";
+ *                   pilihan acak per run dicatat di detail langkah.
+ *                   Mode EKSPERIMEN (Fase 13D): config tambahan
+ *                   opsional { experiment: true, experimentLabel?,
+ *                   conversionNodeId? } — penugasan menjadi
+ *                   DETERMINISTIK per (flow, node, kontak) dari hash
+ *                   stabil yang dibucket oleh percentA dan dicatat
+ *                   SATU KALI di flow_experiment_assignments
+ *                   (penugasan pertama menang selamanya, jadi kontak
+ *                   selalu masuk varian yang sama di semua run).
+ *                   conversionNodeId menamai SATU node lain di graf
+ *                   yang sama sebagai titik konversi: run yang
+ *                   langkahnya melewati node itu (langkah sukses
+ *                   SESUDAH langkah split) terhitung terkonversi
+ *                   untuk variannya. Tanpa experiment:true perilaku
+ *                   tetap persis acak per run (12A). Hasil eksperimen
+ *                   (per varian + uji dua-proporsi) hanya permukaan
+ *                   dashboard — tidak ada rute v1/SDK/MCP.
+ * - send_payment_link { productId } — memakai layanan payment link
+ *                   yang sama dengan tool agent (link SIMULASI
+ *                   berlabel) lalu mengirimkannya sebagai pesan keluar
+ *                   pada percakapan run. Produk tak ditemukan/arsip:
+ *                   langkah gagal tercatat, run `failed`
+ *                   (payment_product_unavailable) — kegagalan keras,
+ *                   karena mengirim link yang salah/ tidak ada lebih
+ *                   buruk daripada menghentikan run.
+ * - wait_reply    { amount: int ≥ 0, unit } — run parkir `waiting`
+ *                   PADA node ini (seperti delay, tetapi menunggu
+ *                   balasan): pesan masuk berikutnya dari kontak pada
+ *                   percakapan itu melanjutkan run lewat branch
+ *                   "replied"; tenggat lewat tanpa balasan → job
+ *                   resume menjalankan branch "timeout". Pesan yang
+ *                   melanjutkan wait_reply TETAP diproses pemicu lain
+ *                   seperti biasa (keyword/sequence/flow lain boleh
+ *                   ikut menembak — tidak ada penekanan ganda selain
+ *                   bahwa run yang sama tidak dilanjutkan dua kali).
+ *                   Satu pesan masuk melanjutkan SEMUA run wait_reply
+ *                   yang parkir di percakapan itu. Opt-out membatalkan
+ *                   run parkir seperti delay.
+ *
+ * Tipe node tambahan (Fase 13E):
+ * - questionnaire { questions: [{ id, prompt, answerType:
+ *                   "text"|"number"|"email"|"phone"|"choice",
+ *                   target, required, options? }], amount, unit,
+ *                   maxInvalidAttempts, invalidPrompt?, completionTag? }
+ *                   — kuesioner penangkap lead: daftar pertanyaan
+ *                   BERURUTAN di dalam SATU node, dijalankan memakai
+ *                   mesin parkir wait_reply yang sama (context.wait +
+ *                   tenggat per pertanyaan; balasan yang melanjutkan
+ *                   kuesioner dihitung tertangani flow — tidak bocor ke
+ *                   agent). `target` = "name"|"email"|"phone"|
+ *                   "custom:<key>"; kunci custom harus SUDAH dikenal
+ *                   tenant (dibawa ≥ 1 kontak tenant) — ditegakkan
+ *                   validasi aktivasi (QUESTIONNAIRE_TARGET_UNKNOWN)
+ *                   karena produk tidak punya registri definisi field
+ *                   terpisah: himpunan kunci pada kontak adalah
+ *                   definisinya. Pertanyaan choice wajib ≥ 2 options.
+ *                   Setiap balasan divalidasi menurut answerType
+ *                   (email: bentuk alamat; phone: normalisasi digit
+ *                   yang sama seperti dedup kontak; number: parse
+ *                   numerik, koma desimal diterima; choice: cocok
+ *                   teks opsi case-insensitive ATAU nomor urut 1..n;
+ *                   text: non-kosong sesudah trim) dan jawaban sah
+ *                   LANGSUNG ditulis ke field target — progres parsial
+ *                   selamat dari pengabaian. Jawaban tidak sah memicu
+ *                   prompt ulang (invalidPrompt, atau bawaan produk
+ *                   dwibahasa QUESTIONNAIRE_DEFAULT_INVALID_PROMPT)
+ *                   sampai maxInvalidAttempts per pertanyaan: sesudah
+ *                   itu pertanyaan wajib keluar lewat branch "invalid",
+ *                   pertanyaan opsional dilewati. Cabang keluar:
+ *                   "completed" (semua pertanyaan selesai;
+ *                   completionTag diterapkan bila diisi), "invalid",
+ *                   "timeout" (tenggat pertanyaan berjalan lewat).
+ *                   Keberadaan target custom diperiksa ulang SETIAP
+ *                   pertanyaan hendak dikirim: target wajib yang hilang
+ *                   (kunci tidak lagi dibawa kontak mana pun) keluar
+ *                   "invalid" dengan langkah outcome `target_missing`;
+ *                   target opsional yang hilang dilewati dan tercatat.
+ *                   Jawaban yang sudah telanjur dalam perjalanan tetap
+ *                   ditulis (penulisannya sendiri memulihkan kunci).
+ *                   Transkrip tanya-jawab penuh hidup di
+ *                   context.questionnaire run selama parkir dan disalin
+ *                   ke detail langkah penutup (completed/timeout/
+ *                   attempts_exhausted/target_missing). Render choice:
+ *                   daftar teks bernomor di SEMUA channel — lapisan
+ *                   keluar flow tidak punya infrastruktur tombol
+ *                   quick-reply per channel, jadi tidak ada tombol
+ *                   yang dijanjikan; balasan angka/teks diterima.
+ *
+ * Tipe node tambahan (Fase 13F):
+ * - show_catalog  { introText?, showDescription?, amount, unit,
+ *                   maxInvalidAttempts, invalidPrompt?, addedMessage? }
+ *                   — katalog belanja: mengirim daftar produk AKTIF
+ *                   tenant sebagai daftar teks BERNOMOR (nama + harga
+ *                   Rupiah terformat; deskripsi ikut bila
+ *                   showDescription) lalu PARKIR memakai mesin parkir
+ *                   wait_reply yang sama (context.wait + keadaan di
+ *                   context.catalog; tenggat per parkir). Balasan sah:
+ *                   "N" (nomor produk, qty 1) atau "NxM" (nomor N
+ *                   sebanyak M, 1..999) — item masuk keranjang kontak
+ *                   dengan SNAPSHOT harga saat penambahan (baris yang
+ *                   sudah ada mempertahankan snapshot pertamanya;
+ *                   hanya qty yang bertambah). Sesudah penambahan,
+ *                   node mengirim ringkasan keranjang (baris + total,
+ *                   dirender server) + `addedMessage` opsional, lalu
+ *                   keluar branch "added" — kelanjutannya (katalog
+ *                   lagi / checkout) adalah komposisi graf. Balasan
+ *                   tidak sah (bukan nomor, di luar rentang, produk
+ *                   sudah nonaktif/terhapus sejak daftar dikirim)
+ *                   memicu prompt ulang (invalidPrompt atau bawaan
+ *                   dwibahasa CATALOG_DEFAULT_INVALID_PROMPT) sampai
+ *                   maxInvalidAttempts → branch "invalid". Tenggat
+ *                   lewat → branch "timeout". Produk yang dinonaktifkan
+ *                   SETELAH daftar terkirim tidak bisa ditambahkan
+ *                   (percobaan tidak sah beralasan product_inactive).
+ * - cart_checkout { emptyMessage? } — checkout keranjang: TANPA
+ *                   parkir. Keranjang terbuka kontak dirender sebagai
+ *                   ringkasan (item, qty, total baris, total besar dari
+ *                   snapshot), order dibuat dengan total yang dihitung
+ *                   SERVER dari snapshot itu, SATU tautan bayar dibuat
+ *                   untuk totalnya lewat mesin tautan yang sama
+ *                   (provider 'simulation' berlabel, sama seperti
+ *                   tautan produk), keranjang ditandai checked_out
+ *                   (keranjang terbuka berikutnya lahir malas), dan
+ *                   ringkasan + tautan dikirim sebagai pesan keluar.
+ *                   Keluar branch "checked_out". Keranjang kosong/
+ *                   tidak ada → branch "empty_cart" tanpa membuat apa
+ *                   pun (emptyMessage opsional dikirim bila diisi).
+ *                   Penyelesaian pembayaran tautan order membalik
+ *                   order menjadi paid (+ paid_at) lewat hook yang
+ *                   sama dengan tautan produk; kedaluwarsa tautan
+ *                   membalik order menjadi expired.
+ *
+ * Tipe node tambahan (Fase 13G):
+ * - book_appointment { serviceId, daysAhead, slotsPerMessage, amount,
+ *                   unit, maxInvalidAttempts, invalidPrompt?,
+ *                   bookedMessage? } — pemesanan janji temu: menghitung
+ *                   slot yang bisa dipesan untuk SATU layanan janji
+ *                   (mesin slot inti yang sama dengan dashboard:
+ *                   jendela ketersediaan mingguan ∩ masa depan + lead
+ *                   time − booking terkonfirmasi − kesibukan Google
+ *                   Calendar bila terhubung), mengirim N slot berikutnya
+ *                   (slotsPerMessage) sebagai daftar teks BERNOMOR
+ *                   (tanggal + jam dalam zona waktu janji tenant,
+ *                   format dwibahasa), lalu PARKIR memakai mesin parkir
+ *                   wait_reply yang sama (context.wait + keadaan di
+ *                   context.appointment). Balasan sah: nomor slot →
+ *                   booking dibuat (baris + percobaan event Google
+ *                   lewat outbox) lalu keluar branch "booked";
+ *                   kelanjutan graf (pesan konfirmasi dll.) adalah
+ *                   komposisi graf sesudah node ini. Balasan tidak sah
+ *                   memicu prompt ulang (invalidPrompt atau bawaan
+ *                   dwibahasa APPOINTMENT_DEFAULT_INVALID_PROMPT)
+ *                   sampai maxInvalidAttempts → branch "invalid".
+ *                   Tenggat lewat → branch "timeout". Bila slot yang
+ *                   dipilih keburu diambil booking lain (constraint
+ *                   eksklusi DB menolak), daftar slot SEGAR dihitung
+ *                   ulang dan ditawarkan kembali dengan pemberitahuan
+ *                   (APPOINTMENT_DEFAULT_SLOT_TAKEN_PROMPT); branch
+ *                   "slot_taken" hanya keluar bila daftar segar itu
+ *                   KOSONG. Bila sejak awal tidak ada slot dalam
+ *                   jendela daysAhead, node mengirim pesan bawaan
+ *                   dwibahasa APPOINTMENT_DEFAULT_NO_SLOTS_MESSAGE dan
+ *                   keluar branch "invalid" beralasan no_slots —
+ *                   memarkir daftar kosong akan menggantung kontak.
+ *                   Layanan yang hilang/nonaktif saat eksekusi adalah
+ *                   kegagalan keras tercatat (appointment_service_
+ *                   unavailable), pola show_catalog.
+ */
+export const FlowStatusSchema = z.enum(["draft", "active", "archived"]);
+export type FlowStatus = z.infer<typeof FlowStatusSchema>;
+
+export const FlowRunStatusSchema = z.enum([
+  "running",
+  "waiting",
+  "completed",
+  "failed",
+  "cancelled",
+]);
+export type FlowRunStatus = z.infer<typeof FlowRunStatusSchema>;
+
+export const FlowNodeTypeSchema = z.enum([
+  "trigger",
+  "send_message",
+  "condition",
+  "delay",
+  "add_tag",
+  "remove_tag",
+  "set_stage",
+  "enroll_sequence",
+  "ai_response",
+  "handoff",
+  "end",
+  // Fase 12A
+  "set_field",
+  "http_request",
+  "goto_flow",
+  "ab_split",
+  "send_payment_link",
+  "wait_reply",
+  // Fase 13E
+  "questionnaire",
+  // Fase 13F
+  "show_catalog",
+  "cart_checkout",
+  // Fase 13G
+  "book_appointment",
+]);
+export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
+
+export const FlowTriggerConfigSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("keyword"),
+    keywords: z.array(z.string().min(1).max(128)).max(20),
+    match: z.enum(["exact", "contains"]),
+  }),
+  z.object({ kind: z.literal("any_message") }),
+]);
+export type FlowTriggerConfig = z.infer<typeof FlowTriggerConfigSchema>;
+
+export const FlowConditionConfigSchema = z.discriminatedUnion("predicate", [
+  z.object({ predicate: z.literal("has_tag"), tag: z.string().min(1).max(64) }),
+  z.object({
+    predicate: z.literal("stage_equals"),
+    stage: z.string().min(1).max(64),
+  }),
+  z.object({
+    predicate: z.literal("field_equals"),
+    field: z.enum(["name", "phone", "email"]),
+    value: z.string().min(1).max(255),
+  }),
+  z.object({
+    predicate: z.literal("message_contains"),
+    text: z.string().min(1).max(255),
+  }),
+]);
+export type FlowConditionConfig = z.infer<typeof FlowConditionConfigSchema>;
+
+export const FlowNodeConfigSchema = z.union([
+  FlowTriggerConfigSchema,
+  z.object({ text: z.string().min(1).max(4096) }),
+  FlowConditionConfigSchema,
+  z.object({
+    amount: z.number().int().min(0).max(100_000),
+    unit: z.enum(["seconds", "minutes", "hours"]),
+    // Smart Delay (Fase 9A): rentang acak opsional dalam satuan yang
+    // sama; keabsahan rentang (min ≥ 1, min ≤ max) ditegakkan validasi
+    // aktivasi di core, bukan di skema bentuk ini.
+    random: z
+      .object({
+        min: z.number().int(),
+        max: z.number().int(),
+      })
+      .optional(),
+  }),
+  z.object({ tag: z.string().min(1).max(64) }),
+  z.object({ stage: z.string().min(1).max(64) }),
+  z.object({ automationId: z.string().uuid() }),
+  // Fase 12A — bentuk kasar; keabsahan rinci (rentang persen, rujukan
+  // flow/produk aktif, format field) ditegakkan validasi aktivasi.
+  z.object({
+    field: z.string().min(1).max(128),
+    value: z.string().max(4096),
+  }),
+  z.object({
+    method: z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]),
+    url: z.string().min(1).max(2048),
+    headers: z.record(z.string(), z.string()).optional(),
+    body: z.string().max(8192).optional(),
+    saveToField: z.string().min(1).max(128).optional(),
+  }),
+  z.object({ flowId: z.string().uuid() }),
+  z.object({
+    percentA: z.number().int().min(1).max(99),
+    // Fase 13D — mode eksperimen (semua opsional; tanpa
+    // experiment:true node berperilaku persis 12A). Keabsahan rinci
+    // (conversionNodeId harus menunjuk node yang ada di graf yang
+    // sama) ditegakkan validasi aktivasi di core.
+    experiment: z.boolean().optional(),
+    experimentLabel: z.string().min(1).max(128).optional(),
+    conversionNodeId: z.string().min(1).max(128).optional(),
+  }),
+  z.object({ productId: z.string().uuid() }),
+  z.object({
+    amount: z.number().int().min(0).max(100_000),
+    unit: z.enum(["seconds", "minutes", "hours"]),
+  }),
+  // Fase 13E — questionnaire: bentuk kasar; keabsahan rinci (target
+  // custom harus dikenal tenant, choice ≥ 2 opsi, id pertanyaan unik)
+  // ditegakkan validasi aktivasi di core.
+  z.object({
+    questions: z
+      .array(
+        z.object({
+          id: z.string().min(1).max(64),
+          prompt: z.string().min(1).max(1000),
+          answerType: z.enum(["text", "number", "email", "phone", "choice"]),
+          target: z.string().min(1).max(128),
+          required: z.boolean(),
+          options: z.array(z.string().min(1).max(200)).max(10).optional(),
+        }),
+      )
+      .min(1)
+      .max(20),
+    amount: z.number().int().min(0).max(100_000),
+    unit: z.enum(["seconds", "minutes", "hours"]),
+    maxInvalidAttempts: z.number().int().min(1).max(5),
+    invalidPrompt: z.string().min(1).max(1000).optional(),
+    completionTag: z.string().min(1).max(64).optional(),
+  }),
+  // Fase 13F — show_catalog: bentuk kasar; keabsahan rinci (rentang
+  // percobaan, batas teks) ditegakkan validasi aktivasi di core.
+  z.object({
+    introText: z.string().min(1).max(1000).optional(),
+    showDescription: z.boolean().optional(),
+    amount: z.number().int().min(0).max(100_000),
+    unit: z.enum(["seconds", "minutes", "hours"]),
+    maxInvalidAttempts: z.number().int().min(1).max(5),
+    invalidPrompt: z.string().min(1).max(1000).optional(),
+    addedMessage: z.string().min(1).max(1000).optional(),
+  }),
+  // Fase 13F — cart_checkout: hanya pesan keranjang-kosong opsional.
+  z.object({
+    emptyMessage: z.string().min(1).max(1000).optional(),
+  }),
+  // Fase 13G — book_appointment: bentuk kasar; keabsahan rinci
+  // (layanan ada & aktif, rentang hari/percobaan) ditegakkan validasi
+  // aktivasi di core.
+  z.object({
+    serviceId: z.string().uuid(),
+    daysAhead: z.number().int().min(1).max(30),
+    slotsPerMessage: z.number().int().min(1).max(10),
+    amount: z.number().int().min(0).max(100_000),
+    unit: z.enum(["seconds", "minutes", "hours"]),
+    maxInvalidAttempts: z.number().int().min(1).max(5),
+    invalidPrompt: z.string().min(1).max(1000).optional(),
+    bookedMessage: z.string().min(1).max(1000).optional(),
+  }),
+  // ai_response / handoff / end: config kosong.
+  z.object({}),
+]);
+export type FlowNodeConfig = z.infer<typeof FlowNodeConfigSchema>;
+
+/**
+ * Satu pertanyaan node questionnaire (Fase 13E) — bentuk kanonis yang
+ * dibaca builder & eksekutor dari config node.
+ */
+export const FlowQuestionnaireQuestionSchema = z.object({
+  id: z.string().min(1).max(64),
+  prompt: z.string().min(1).max(1000),
+  answerType: z.enum(["text", "number", "email", "phone", "choice"]),
+  target: z.string().min(1).max(128),
+  required: z.boolean(),
+  options: z.array(z.string().min(1).max(200)).max(10).optional(),
+});
+export type FlowQuestionnaireQuestion = z.infer<
+  typeof FlowQuestionnaireQuestionSchema
+>;
+
+/**
+ * Prompt ulang bawaan produk (dwibahasa dalam satu pesan, pola email
+ * undangan 11B) yang dipakai node questionnaire bila config
+ * `invalidPrompt` tidak diisi. Teks kanonis tinggal di sini (kontrak)
+ * agar worker dan builder tidak menyimpang; cerminannya tampil di
+ * builder lewat kunci i18n `flows.questionnaireInvalidPromptDefault`.
+ */
+export const QUESTIONNAIRE_DEFAULT_INVALID_PROMPT =
+  "Sorry, that answer doesn't look right yet. Please try again.\nMaaf, jawaban itu sepertinya belum tepat. Silakan coba lagi.";
+
+/**
+ * Prompt ulang bawaan produk (dwibahasa dalam satu pesan, pola
+ * questionnaire 13E) yang dipakai node `show_catalog` (Fase 13F) bila
+ * config `invalidPrompt` tidak diisi: balasan bukan pilihan katalog
+ * yang sah (bukan nomor / di luar rentang / produk sudah nonaktif).
+ */
+export const CATALOG_DEFAULT_INVALID_PROMPT =
+  "Sorry, that choice isn't on the list. Please reply with a product number.\nMaaf, pilihan itu tidak ada di daftar. Silakan balas dengan nomor produk.";
+
+/**
+ * Petunjuk balasan yang selalu menutup daftar katalog node
+ * `show_catalog` (dwibahasa, pola yang sama): sintaks "N" / "NxM"
+ * adalah kontrak balasan node ini — builder dan eksekutor membaca
+ * teks kanonis yang sama dari sini.
+ */
+export const CATALOG_REPLY_HINT =
+  "Reply with a product number to add it to your cart (e.g. \"2\", or \"2x3\" for 3 items).\nBalas nomor produk untuk menambahkannya ke keranjang (mis. \"2\", atau \"2x3\" untuk 3 buah).";
+
+/**
+ * Prompt ulang bawaan produk (dwibahasa, pola questionnaire/catalog)
+ * yang dipakai node `book_appointment` (Fase 13G) bila config
+ * `invalidPrompt` tidak diisi: balasan bukan nomor slot yang sah.
+ */
+export const APPOINTMENT_DEFAULT_INVALID_PROMPT =
+  "Sorry, that choice isn't on the list. Please reply with a slot number.\nMaaf, pilihan itu tidak ada di daftar. Silakan balas dengan nomor slot.";
+
+/**
+ * Pemberitahuan bawaan (dwibahasa) saat slot pilihan kontak keburu
+ * diambil booking lain: daftar slot SEGAR menyusul dalam pesan yang
+ * sama dan run parkir lagi; branch "slot_taken" hanya keluar bila
+ * daftar segar kosong.
+ */
+export const APPOINTMENT_DEFAULT_SLOT_TAKEN_PROMPT =
+  "Sorry, that time was just booked by someone else. Here are the latest available times:\nMaaf, waktu itu baru saja dipesan orang lain. Berikut waktu terbaru yang tersedia:";
+
+/**
+ * Pesan bawaan (dwibahasa) saat tidak ada slot yang bisa dipesan dalam
+ * jendela hari node: node keluar branch "invalid" beralasan no_slots
+ * sesudah mengirim pesan ini (tidak memarkir daftar kosong).
+ */
+export const APPOINTMENT_DEFAULT_NO_SLOTS_MESSAGE =
+  "Sorry, there are no available times right now. Please try again later.\nMaaf, saat ini belum ada waktu yang tersedia. Silakan coba lagi nanti.";
+
+/**
+ * Petunjuk balasan yang selalu menutup daftar slot node
+ * `book_appointment` (dwibahasa, pola katalog): balasan angka adalah
+ * kontrak balasan node ini — builder dan eksekutor membaca teks
+ * kanonis yang sama dari sini.
+ */
+export const APPOINTMENT_REPLY_HINT =
+  "Reply with a slot number to book it.\nBalas nomor slot untuk memesannya.";
+
+/**
+ * Posisi node di canvas builder (Fase 8B) — koordinat piksel relatif
+ * kanvas, boleh negatif (pan bebas). Murni metadata tampilan.
+ */
+export const FlowNodePositionSchema = z.object({
+  x: z.number().finite(),
+  y: z.number().finite(),
+});
+export type FlowNodePosition = z.infer<typeof FlowNodePositionSchema>;
+
+export const FlowNodeSchema = z.object({
+  id: z.string().min(1).max(128),
+  type: FlowNodeTypeSchema,
+  config: z.record(z.string(), z.unknown()).default({}),
+  position: FlowNodePositionSchema.optional(),
+});
+export type FlowNode = z.infer<typeof FlowNodeSchema>;
+
+/**
+ * Cabang edge: condition yes/no, ab_split a/b, wait_reply
+ * replied/timeout, questionnaire completed/invalid/timeout,
+ * show_catalog added/invalid/timeout, cart_checkout
+ * checked_out/empty_cart, book_appointment
+ * booked/invalid/timeout/slot_taken.
+ */
+export const FlowEdgeBranchSchema = z.enum([
+  "yes",
+  "no",
+  "a",
+  "b",
+  "replied",
+  "timeout",
+  "completed",
+  "invalid",
+  // Fase 13F
+  "added",
+  "checked_out",
+  "empty_cart",
+  // Fase 13G
+  "booked",
+  "slot_taken",
+]);
+export type FlowEdgeBranch = z.infer<typeof FlowEdgeBranchSchema>;
+
+export const FlowEdgeSchema = z.object({
+  from: z.string().min(1).max(128),
+  to: z.string().min(1).max(128),
+  branch: FlowEdgeBranchSchema.optional(),
+});
+export type FlowEdge = z.infer<typeof FlowEdgeSchema>;
+
+export const FlowGraphSchema = z.object({
+  nodes: z.array(FlowNodeSchema).max(200),
+  edges: z.array(FlowEdgeSchema).max(400),
+});
+export type FlowGraph = z.infer<typeof FlowGraphSchema>;
+
+/** Satu masalah validasi graf (aktivasi) — kode stabil + konteks. */
+export const FlowGraphIssueSchema = z.object({
+  code: z.string(),
+  severity: z.enum(["error", "warning"]),
+  nodeId: z.string().nullable(),
+  message: z.string(),
+});
+export type FlowGraphIssue = z.infer<typeof FlowGraphIssueSchema>;
+
+export const FlowResponseSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  status: FlowStatusSchema,
+  graph: FlowGraphSchema,
+  runCount: z.number().int().nonnegative(),
+  createdByUserId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type FlowResponse = z.infer<typeof FlowResponseSchema>;
+
+export const FlowListResponseSchema = z.object({
+  flows: z.array(FlowResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type FlowListResponse = z.infer<typeof FlowListResponseSchema>;
+
+export const FlowListQuerySchema = z.object({
+  status: FlowStatusSchema.optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type FlowListQuery = z.infer<typeof FlowListQuerySchema>;
+
+export const CreateFlowRequestSchema = z.object({
+  name: z.string().min(1).max(255),
+  graph: FlowGraphSchema.optional(),
+});
+export type CreateFlowRequest = z.infer<typeof CreateFlowRequestSchema>;
+
+/**
+ * Edit hanya sah selama flow masih `draft` (mengubah graf flow aktif
+ * di tengah jalan akan mengubah arti run yang sedang berjalan — flow
+ * aktif harus dinonaktifkan dulu, yang mengembalikannya ke draft).
+ */
+export const UpdateFlowRequestSchema = z.object({
+  name: z.string().min(1).max(255).optional(),
+  graph: FlowGraphSchema.optional(),
+});
+export type UpdateFlowRequest = z.infer<typeof UpdateFlowRequestSchema>;
+
+/** Hasil validasi graf (respons aktivasi yang gagal maupun endpoint validasi). */
+export const FlowValidationResponseSchema = z.object({
+  valid: z.boolean(),
+  issues: z.array(FlowGraphIssueSchema),
+});
+export type FlowValidationResponse = z.infer<
+  typeof FlowValidationResponseSchema
+>;
+
+export const FlowRunResponseSchema = z.object({
+  id: z.string().uuid(),
+  flowId: z.string().uuid(),
+  conversationId: z.string().uuid(),
+  contactId: z.string().uuid(),
+  contactName: z.string(),
+  // Null untuk run yang lahir dari goto_flow (Fase 12A) — run semacam
+  // itu tidak dipicu pesan masuk.
+  triggerMessageId: z.string().uuid().nullable(),
+  status: FlowRunStatusSchema,
+  currentNodeId: z.string().nullable(),
+  stepCount: z.number().int().nonnegative(),
+  errorCode: z.string().nullable(),
+  startedAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type FlowRunResponse = z.infer<typeof FlowRunResponseSchema>;
+
+export const FlowRunListResponseSchema = z.object({
+  runs: z.array(FlowRunResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type FlowRunListResponse = z.infer<typeof FlowRunListResponseSchema>;
+
+export const FlowRunListQuerySchema = z.object({
+  status: FlowRunStatusSchema.optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type FlowRunListQuery = z.infer<typeof FlowRunListQuerySchema>;
+
+export const FlowRunStepResponseSchema = z.object({
+  id: z.string().uuid(),
+  runId: z.string().uuid(),
+  seq: z.number().int().positive(),
+  nodeId: z.string(),
+  nodeType: z.string(),
+  detail: z.record(z.string(), z.unknown()),
+  error: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type FlowRunStepResponse = z.infer<typeof FlowRunStepResponseSchema>;
+
+export const FlowRunStepListResponseSchema = z.object({
+  steps: z.array(FlowRunStepResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type FlowRunStepListResponse = z.infer<
+  typeof FlowRunStepListResponseSchema
+>;
+
+export const FlowRunStepListQuerySchema = z.object({
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+});
+export type FlowRunStepListQuery = z.infer<typeof FlowRunStepListQuerySchema>;

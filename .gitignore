@@ -1,0 +1,33 @@
+# Dependensi
+node_modules/
+.pnpm-store/
+
+# Hasil build
+dist/
+build/
+*.tsbuildinfo
+
+# Rahasia — JANGAN pernah commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Log & artefak runtime
+*.log
+logs/
+coverage/
+.nyc_output/
+
+# Berkas OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Database lokal & dump
+*.sqlite
+*.db
+*.sql.gz

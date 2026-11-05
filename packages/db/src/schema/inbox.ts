@@ -1,0 +1,411 @@
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  index,
+  integer,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  varchar,
+  type AnyPgColumn,
+} from "drizzle-orm/pg-core";
+import { tenants } from "./tenants";
+import { users } from "./identity";
+import { channelAccounts, channelProviderEnum } from "./channels";
+
+/**
+ * Kelompok Audience & Inbox (Fase 1D, RANCANGAN §6):
+ * - contacts      : audiens milik tenant (lintas channel).
+ * - media         : file media yang disimpan di Cloudflare R2 (object key).
+ * - conversations : satu utas percakapan kontak pada satu akun channel.
+ * - messages      : pesan dalam percakapan; `provider_message_id` unik parsial
+ *                   (hanya bila tidak NULL) untuk dedup pesan provider.
+ * Semua tabel tenant-scoped: tenant_id + index, dilindungi RLS.
+ */
+
+export const optInStatusEnum = pgEnum("opt_in_status", [
+  "unknown",
+  "opted_in",
+  "opted_out",
+]);
+
+export const conversationStatusEnum = pgEnum("conversation_status", [
+  "open",
+  "pending",
+  "closed",
+]);
+
+export const messageDirectionEnum = pgEnum("message_direction", [
+  "inbound",
+  "outbound",
+]);
+
+export const messageSenderTypeEnum = pgEnum("message_sender_type", [
+  "contact",
+  "user",
+  "agent",
+  "system",
+]);
+
+export const messageTypeEnum = pgEnum("message_type", [
+  "text",
+  "image",
+  "audio",
+  "video",
+  "document",
+  "sticker",
+  "template",
+  "other",
+]);
+
+export const messageStatusEnum = pgEnum("message_status", [
+  "queued",
+  "sent",
+  "delivered",
+  "read",
+  "failed",
+  "received",
+]);
+
+export const contacts = pgTable(
+  "contacts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    email: varchar("email", { length: 320 }),
+    phone: varchar("phone", { length: 32 }),
+    tags: text("tags").array().notNull().default([]),
+    customFields: jsonb("custom_fields").notNull().default({}),
+    /** Tahap pipeline penjualan, mis. 'new' | 'engaged' | 'qualified' | 'customer'. */
+    pipelineStage: varchar("pipeline_stage", { length: 64 }).notNull().default("new"),
+    /**
+     * Sumber perolehan kontak (Fase 13B): diisi jalur atribusi growth
+     * link sebagai `growth:<slug>` saat kontak pertama kali teratribusi
+     * ke sebuah tautan. NULL = tidak teratribusi (keadaan normal
+     * mayoritas kontak) — memang kondisional, bukan field wajib.
+     * Atribusi pertama menang: nilai yang sudah terisi tidak ditimpa
+     * tautan berikutnya (lihat attributeContactToGrowthLink di core).
+     */
+    source: varchar("source", { length: 128 }),
+    optInStatus: optInStatusEnum("opt_in_status").notNull().default("unknown"),
+    consentAt: timestamp("consent_at", { withTimezone: true }),
+    /**
+     * Jejak opt-in pemasaran (Fase 13C): kapan & lewat jalur apa kontak
+     * terakhir memberi persetujuan broadcast. Keduanya NULL selama
+     * kontak belum pernah opt-in — memang kondisional (aturan NOT NULL
+     * user 2026-11-03). Opt-out TIDAK menghapus kedua kolom ini
+     * (riwayat persetujuan dipertahankan); status EFEKTIF diturunkan
+     * di core: opt_in_status='opted_out' → "opted_out"; selain itu
+     * opt_in_at terisi (atau status 'opted_in') → "opted_in"; selain
+     * itu "none". `opt_in_source`: 'keyword' | 'manual'.
+     */
+    optInSource: varchar("opt_in_source", { length: 64 }),
+    optInAt: timestamp("opt_in_at", { withTimezone: true }),
+    lastContactedAt: timestamp("last_contacted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("contacts_tenant_id_idx").on(t.tenantId),
+    index("contacts_tenant_phone_idx").on(t.tenantId, t.phone),
+    index("contacts_tenant_email_idx").on(t.tenantId, t.email),
+  ],
+);
+
+export const media = pgTable(
+  "media",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Object key di bucket Cloudflare R2 tenant/lingkungan ini. */
+    r2Key: varchar("r2_key", { length: 512 }).notNull(),
+    fileName: varchar("file_name", { length: 255 }),
+    mimeType: varchar("mime_type", { length: 128 }),
+    sizeBytes: integer("size_bytes"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("media_tenant_id_idx").on(t.tenantId)],
+);
+
+export const conversations = pgTable(
+  "conversations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    channelAccountId: uuid("channel_account_id")
+      .notNull()
+      .references(() => channelAccounts.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    /** Denormalisasi dari channel_accounts.provider agar daftar inbox murah. */
+    provider: channelProviderEnum("provider").notNull(),
+    /**
+     * Id chat di sisi provider = ALAMAT BALASAN percakapan ini (Fase 6A.1).
+     * Pada Telegram: `chat.id` sebagai string — positif untuk chat privat
+     * (== id user), negatif untuk grup/supergrup. Sampai 6A poller
+     * menganggap alamat balasan = identitas kontak, yang hanya benar untuk
+     * privat; kolom ini memisahkan keduanya. NULL untuk baris lama /
+     * provider lain — poller jatuh kembali ke external_id identitas kontak.
+     */
+    providerChatId: varchar("provider_chat_id", { length: 255 }),
+    /**
+     * Judul percakapan di provider (Fase 6A.1) — diisi untuk percakapan
+     * grup & channel Telegram (`chat.title`); percakapan privat & provider
+     * lain NULL dan tampil memakai nama kontak. (Sampai 6A.1 kehadiran
+     * judul adalah penanda grup; sejak 6A.2 penanda jenis adalah kolom
+     * `kind` di bawah — judul kini murni label tampilan.)
+     */
+    title: varchar("title", { length: 255 }),
+    /**
+     * Jenis percakapan di provider (Fase 6A.2): 'private' (1:1), 'group'
+     * (banyak anggota, dua arah), atau 'channel' (siaran satu arah —
+     * linimasa postingan Telegram, BUKAN antrean kerja). Sampai 6A.1
+     * jenis disimpulkan dari kehadiran `title`; kolom eksplisit ini
+     * menjadi sumber kebenaran tunggal: `isGroup`/`isChannel` di API
+     * diturunkan darinya, dan jalur evaluasi automation/agent MENOLAK
+     * memproses pesan percakapan 'channel'. Default 'private' juga
+     * berlaku untuk provider lain (webchat selalu privat).
+     */
+    kind: varchar("kind", { length: 16 }).notNull().default("private"),
+    status: conversationStatusEnum("status").notNull().default("open"),
+    assigneeUserId: uuid("assignee_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /** Apakah AI agent boleh membalas otomatis di percakapan ini. */
+    agentEnabled: boolean("agent_enabled").notNull().default(true),
+    unreadCount: integer("unread_count").notNull().default(0),
+    lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("conversations_tenant_id_idx").on(t.tenantId),
+    // Fase 9C: filter inbox "milik saya / belum ditugaskan".
+    index("conversations_tenant_assignee_idx").on(t.tenantId, t.assigneeUserId),
+    index("conversations_tenant_status_last_message_idx").on(
+      t.tenantId,
+      t.status,
+      t.lastMessageAt,
+    ),
+    index("conversations_contact_id_idx").on(t.contactId),
+    index("conversations_channel_account_id_idx").on(t.channelAccountId),
+    check(
+      "conversations_kind_valid",
+      sql`${t.kind} IN ('private', 'group', 'channel')`,
+    ),
+  ],
+);
+
+export const messages = pgTable(
+  "messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    direction: messageDirectionEnum("direction").notNull(),
+    senderType: messageSenderTypeEnum("sender_type").notNull(),
+    /**
+     * Nama pengirim per pesan (Fase 6A.1) — snapshot nama anggota saat
+     * pesan grup Telegram masuk. Percakapan grup menampung banyak
+     * pengirim, sedangkan baris percakapan hanya menunjuk SATU kontak,
+     * jadi atribusi penulis per pesan hidup di sini. NULL di luar grup
+     * (privat: pengirimnya ya kontak percakapan itu sendiri).
+     */
+    senderName: varchar("sender_name", { length: 255 }),
+    type: messageTypeEnum("type").notNull().default("text"),
+    contentText: text("content_text"),
+    mediaId: uuid("media_id").references(() => media.id, { onDelete: "set null" }),
+    /** Id pesan di provider; dipakai untuk dedup webhook & rekonsiliasi status. */
+    providerMessageId: varchar("provider_message_id", { length: 255 }),
+    status: messageStatusEnum("status").notNull().default("received"),
+    errorCode: varchar("error_code", { length: 128 }),
+    /**
+     * Klaim pengiriman (Hotfix analisis 2026-11-03): diisi poller tepat
+     * sebelum mengirim lewat `claimOutboundMessage` (UPDATE atomik).
+     * Mencegah dua replica API mengirim baris `queued` yang sama tanpa
+     * menambah nilai enum status baru — status tetap `queued` sampai
+     * provider menjawab, sehingga reconcile broadcast & UI tidak berubah.
+     * Klaim yang lebih tua dari OUTBOUND_CLAIM_STALE_MS dianggap basi
+     * (proses mati di tengah pengiriman) dan boleh diambil alih poller
+     * lain. NULL = belum pernah diklaim.
+     */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    /** User pengirim untuk pesan outbound manual dari inbox (sender_type='user'). */
+    sentByUserId: uuid("sent_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    /**
+     * Pesan yang dikutip pesan ini (Fase 7B.5 — reply quote): tautan ke
+     * baris `messages` LAIN dalam percakapan yang sama. ID provider dari
+     * pesan target TIDAK disalin ke sini — poller menurunkannya saat
+     * kirim dari `provider_message_id` baris target (sumber kebenaran
+     * tunggal, tidak bisa basi). ON DELETE SET NULL: purge channel
+     * (Fase 6I) menghapus baris target tanpa menggagalkan penghapusan
+     * dan tanpa menghapus balasan — kutipannya lepas dengan anggun
+     * (kolom menjadi NULL, persis perilaku tautan integration_log).
+     */
+    replyToMessageId: uuid("reply_to_message_id").references(
+      (): AnyPgColumn => messages.id,
+      { onDelete: "set null" },
+    ),
+    /**
+     * Snapshot kutipan cadangan (Hotfix 7B.6): salinan ringkas isi pesan
+     * yang dikutip SEBAGAIMANA dikirim provider di dalam payload webhook
+     * (Telegram menyertakan teks + penulis pesan asal pada
+     * `reply_to_message`). Diisi saat ingest Telegram SETIAP kali payload
+     * membawa pesan yang dikutip — bukan hanya saat tautan gagal — agar
+     * kutipan tetap terlihat bila baris target kelak terhapus (tautan di
+     * atas menjadi NULL oleh SET NULL, snapshot ini bertahan). Serializer
+     * & UI SELALU mendahulukan tautan `replyToMessageId` yang teresolusi;
+     * snapshot hanya cadangan tampil. NULL untuk pesan yang tidak
+     * mengutip, dan untuk provider yang payload kutipannya hanya membawa
+     * id tanpa teks (WhatsApp & Meta — memang tidak bisa di-snapshot).
+     */
+    replyToSnapshot: jsonb("reply_to_snapshot").$type<{
+      authorLabel: string | null;
+      contentPreview: string | null;
+    }>(),
+    /**
+     * Muatan template WhatsApp (Fase 10A) untuk pesan keluar bertipe
+     * 'template': nama + bahasa template Meta dan parameter BODY yang
+     * SUDAH terisi untuk penerima pesan ini. Poller Meta membaca kolom
+     * ini untuk memutuskan mengirim `type: "template"` (Cloud API)
+     * alih-alih teks bebas; `content_text` baris yang sama menampung
+     * render pratinjau BODY dengan parameter terisi (yang dibaca
+     * manusia di inbox). NULL untuk semua pesan non-template. Sengaja
+     * disimpan di baris pesan (bukan diturunkan poller dari broadcast)
+     * agar scan pengiriman lintas tenant tetap satu tabel seperti pola
+     * replyToMessageId 7B.5.
+     */
+    templatePayload: jsonb("template_payload").$type<{
+      name: string;
+      languageCode: string;
+      bodyParams: string[];
+    }>(),
+    /**
+     * Id komentar Meta yang menjadi alamat kirim pesan ini (Fase 10B):
+     * DM privat balasan-atas-komentar (private reply) dikirim Send API
+     * dengan `recipient: { comment_id }`, BUKAN id pengguna — itulah
+     * satu-satunya cara mendahului percakapan dengan penulis komentar
+     * yang belum pernah DM. Poller Meta membaca kolom ini: terisi →
+     * kirim sebagai private reply; sesudah penulis membalas, percakapan
+     * berlanjut normal (identitas kontak sama, alamat provider_chat_id).
+     * NULL untuk semua pesan selain DM comment-to-DM pertama.
+     */
+    providerCommentId: varchar("provider_comment_id", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("messages_tenant_id_idx").on(t.tenantId),
+    index("messages_conversation_created_idx").on(t.conversationId, t.createdAt),
+    index("messages_reply_to_message_id_idx").on(t.replyToMessageId),
+    // Hotfix analisis 2026-11-03: index parsial untuk pindai antrean
+    // pengiriman lintas tenant (listQueuedMetaDeliveries &
+    // listQueuedTelegramDeliveries di core) yang dijalankan poller API
+    // tiap ±2 detik dengan filter persis ini + ORDER BY created_at.
+    // Tanpa index ini setiap tick = full scan tabel messages terbesar.
+    index("messages_outbound_queued_created_idx")
+      .on(t.createdAt)
+      .where(sql`${t.direction} = 'outbound' AND ${t.status} = 'queued'`),
+    uniqueIndex("messages_provider_message_id_unique")
+      .on(t.providerMessageId)
+      .where(sql`${t.providerMessageId} IS NOT NULL`),
+  ],
+);
+
+export type Contact = typeof contacts.$inferSelect;
+export type NewContact = typeof contacts.$inferInsert;
+export type Media = typeof media.$inferSelect;
+export type NewMedia = typeof media.$inferInsert;
+export type Conversation = typeof conversations.$inferSelect;
+export type NewConversation = typeof conversations.$inferInsert;
+export type Message = typeof messages.$inferSelect;
+export type NewMessage = typeof messages.$inferInsert;
+
+/**
+ * Catatan internal percakapan (Fase 9C) — tabel TERPISAH dari `messages`
+ * secara sengaja: semua jalur keluar (poller provider, flush webchat,
+ * broadcast, agent) hanya membaca `messages`, jadi catatan di sini tidak
+ * bisa terkirim ke kontak — bukan difilter, melainkan tidak berada di
+ * tabel yang dibaca pengirim. `author_user_id` ON DELETE SET NULL:
+ * catatan bertahan walau penulis keluar/terhapus (UI menampilkan label
+ * cadangan untuk penulis null).
+ */
+export const conversationNotes = pgTable(
+  "conversation_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    authorUserId: uuid("author_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("conversation_notes_tenant_id_idx").on(t.tenantId),
+    index("conversation_notes_conversation_created_idx").on(
+      t.conversationId,
+      t.createdAt,
+    ),
+  ],
+);
+
+export type ConversationNote = typeof conversationNotes.$inferSelect;
+export type NewConversationNote = typeof conversationNotes.$inferInsert;
+export const channelIdentities = pgTable(
+  "channel_identities",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    channelAccountId: uuid("channel_account_id")
+      .notNull()
+      .references(() => channelAccounts.id, { onDelete: "cascade" }),
+    provider: channelProviderEnum("provider").notNull(),
+    /** Id user di provider untuk akun channel ini (PSID/IGSID/wa_id/chat_id/...). */
+    externalUserId: varchar("external_user_id", { length: 255 }).notNull(),
+    username: varchar("username", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("channel_identities_account_external_user_unique").on(
+      t.channelAccountId,
+      t.externalUserId,
+    ),
+    index("channel_identities_tenant_id_idx").on(t.tenantId),
+    index("channel_identities_contact_id_idx").on(t.contactId),
+  ],
+);
+
+export type ChannelIdentity = typeof channelIdentities.$inferSelect;
+export type NewChannelIdentity = typeof channelIdentities.$inferInsert;

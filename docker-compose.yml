@@ -1,0 +1,48 @@
+# Docker Compose untuk pengembangan LOKAL.
+#
+# Hanya infrastruktur (Postgres + pgvector, Redis). Aplikasi dijalankan di
+# host lewat `pnpm dev` supaya hot reload tetap cepat dan debugger tidak
+# perlu menembus container.
+#
+#   docker compose up -d
+#   cp .env.example .env      # isi secret lokal
+#   pnpm --filter @sahabat-kreator/db db:migrate
+#   pnpm dev
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: sk-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sahabat
+      POSTGRES_PASSWORD: sahabat
+      POSTGRES_DB: sahabat_kreator
+    ports:
+      - "5432:5432"
+    volumes:
+      - sk-dev-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sahabat -d sahabat_kreator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: sk-dev-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - sk-dev-redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  sk-dev-pgdata:
+  sk-dev-redisdata:

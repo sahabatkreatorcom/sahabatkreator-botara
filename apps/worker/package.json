@@ -1,0 +1,43 @@
+{
+  "dependencies": {
+    "@sahabat-kreator/ai": "workspace:*",
+    "@sahabat-kreator/channel-messenger": "workspace:*",
+    "@sahabat-kreator/config": "workspace:*",
+    "@sahabat-kreator/core": "workspace:*",
+    "@sahabat-kreator/db": "workspace:*",
+    "@sahabat-kreator/queue": "workspace:*",
+    "bullmq": "^5.34.0",
+    "drizzle-orm": "^0.44.6",
+    "pg": "^8.13.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "main": "./src/index.ts",
+  "name": "@sahabat-kreator/worker",
+  "private": true,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "verify:agent-tools": "tsx scripts/verify-agent-tools.ts",
+    "verify:agent-playground": "tsx scripts/verify-agent-playground.ts",
+    "verify:kb-embeddings": "tsx scripts/verify-kb-embeddings.ts",
+    "verify:sequences": "tsx scripts/verify-sequences.ts",
+    "verify:platform-settings": "tsx scripts/verify-platform-settings.ts",
+    "purge:channels": "tsx scripts/purge-trashed-channels.ts",
+    "prune:logs": "tsx scripts/prune-integration-logs.ts",
+    "meta:token-lifecycle": "tsx scripts/meta-token-lifecycle.ts"
+  },
+  "type": "module",
+  "types": "./src/index.ts",
+  "version": "0.1.0"
+}

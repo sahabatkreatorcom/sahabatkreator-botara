@@ -1,0 +1,114 @@
+# Docker Compose produksi — Sahabat Kreator (botara.my.id).
+#
+# Topologi:
+#   cloudflared (tunnel, di host) → web (nginx :80) → api / realtime
+#                                                   → db, redis
+#
+# `api`, `worker`, dan `realtime` memakai IMAGE YANG SAMA (target `server`);
+# yang berbeda hanya perintah start. Ini disengaja: ketiganya berbagi seluruh
+# paket workspace dan harus selalu ber-versi sama — memisahkan image membuat
+# worker bisa tertinggal satu rilis dari API tanpa ada yang menyadarinya.
+#
+# Migrasi TIDAK dijalankan otomatis oleh api/worker: container `migrate`
+# berjalan sekali (profile `tools`) supaya replika API tidak berlomba
+# menjalankan DDL yang sama.
+
+name: sahabat-kreator
+
+x-server-image: &server-image
+  image: sahabat-kreator/server:latest
+  build:
+    context: ..
+    dockerfile: Dockerfile
+    target: server
+  env_file:
+    - .env
+  restart: unless-stopped
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sahabat
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?wajib diisi}
+      POSTGRES_DB: sahabat_kreator
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sahabat -d sahabat_kreator"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    <<: *server-image
+    profiles: ["tools"]
+    restart: "no"
+    command: ["node", "-e", "process.exit(0)"]
+    entrypoint: ["/bin/sh", "-lc"]
+    # Dijalankan manual: docker compose --profile tools run --rm migrate \
+    #   "cd packages/db && npx drizzle-kit migrate"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    <<: *server-image
+    command: ["node", "apps/api/dist/index.js"]
+    ports:
+      - "127.0.0.1:3101:3101"
+
+  worker:
+    <<: *server-image
+    command: ["node", "apps/worker/dist/index.js"]
+
+  realtime:
+    <<: *server-image
+    command: ["node", "apps/realtime/dist/index.js"]
+    ports:
+      - "127.0.0.1:3103:3103"
+
+  web:
+    image: sahabat-kreator/web:latest
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: web
+    restart: unless-stopped
+    ports:
+      # Port 5180 DISENGAJA: ingress Cloudflare Tunnel untuk botara.my.id
+      # sudah menunjuk ke http://localhost:5180 (warisan `vite preview`
+      # dari setup lama). Mengganti port di sini berarti harus mengganti
+      # ingress di dashboard Cloudflare — dan ingress itu tidak dapat
+      # diubah dari server karena tunnel berjalan dalam mode token.
+      - "127.0.0.1:5180:80"
+    depends_on:
+      - api
+      - realtime
+
+volumes:
+  pgdata:
+  redisdata:

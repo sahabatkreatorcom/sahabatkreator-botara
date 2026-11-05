@@ -1,0 +1,1 @@
+{"devDependencies":{"tsup":"^8.3.5","typescript":"^5.6.3"},"exports":{".":"./src/index.ts"},"main":"./src/index.ts","name":"@sahabat-kreator/embed","private":true,"scripts":{"build":"tsup && node scripts/publish.mjs","typecheck":"tsc --noEmit"},"type":"module","types":"./src/index.ts","version":"0.1.0"}

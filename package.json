@@ -1,0 +1,35 @@
+{
+  "name": "sahabat-kreator",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @sahabat-kreator/api --filter @sahabat-kreator/web dev",
+    "dev:api": "pnpm --filter @sahabat-kreator/api dev",
+    "dev:web": "pnpm --filter @sahabat-kreator/web dev",
+    "dev:worker": "pnpm --filter @sahabat-kreator/worker dev",
+    "dev:realtime": "pnpm --filter @sahabat-kreator/realtime dev",
+    "build": "pnpm -r --if-present build",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "verify:ci": "pnpm check:drift && pnpm test && pnpm --filter @sahabat-kreator/db verify && pnpm --filter @sahabat-kreator/core verify && pnpm --filter @sahabat-kreator/worker verify:agent-tools && pnpm --filter @sahabat-kreator/worker verify:sequences && pnpm --filter @sahabat-kreator/worker verify:kb-embeddings && pnpm --filter @sahabat-kreator/worker verify:agent-playground && pnpm --filter @sahabat-kreator/worker verify:platform-settings && pnpm --filter @sahabat-kreator/api verify:http && pnpm --filter @sahabat-kreator/api verify:oauth-kv && pnpm --filter @sahabat-kreator/api verify:meta-discovery && pnpm --filter @sahabat-kreator/api verify:meta-send && pnpm --filter @sahabat-kreator/api verify:meta-token-lifecycle",
+    "check:drift": "pnpm --filter @sahabat-kreator/sdk run check:drift",
+    "db:doctor": "pnpm --filter @sahabat-kreator/db run db:doctor"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.17.0",
+    "@vitest/coverage-v8": "^2.1.8",
+    "eslint": "^9.17.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.18.2",
+    "vitest": "^2.1.8"
+  }
+}

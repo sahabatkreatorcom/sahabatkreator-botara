@@ -1,0 +1,9 @@
+# Normalisasi akhir baris: repo disimpan LF, checkout LF di semua OS.
+# Ini penting karena server deploy Linux menjalankan skrip shell & SQL;
+# CRLF membuat `#!/usr/bin/env bash` gagal dan migrasi SQL berisi \r.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.jpg binary
+*.webp binary
