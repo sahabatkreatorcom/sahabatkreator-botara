@@ -141,12 +141,16 @@ if [ "$DOW" = "7" ]; then
 fi
 
 # --- 5. Off-site (opsional) --------------------------------------------------
+OFFSITE_OK=1
 if [ -n "${BACKUP_UPLOAD_CMD:-}" ]; then
   if sh -c "$BACKUP_UPLOAD_CMD" -- "$file"; then
     log "off-site: terkirim"
   else
-    # Backup lokal tetap sah; off-site gagal TIDAK membatalkan backup,
-    # tetapi harus berisik karena berarti tidak ada salinan di luar VPS.
+    # Backup lokal tetap sah dan TIDAK dihapus; yang gagal hanya salinan
+    # di luar VPS. Tetap ditandai gagal (exit != 0) karena kontrak skrip
+    # ini adalah "backup + off-site" — setengah berhasil bukan berhasil,
+    # dan tanpa exit code cron tidak punya cara memberi tahu siapa pun.
+    OFFSITE_OK=0
     log "PERINGATAN: off-site gagal — salinan hanya ada di VPS ini"
     notify "Backup lokal sukses, tetapi unggahan off-site GAGAL."
   fi
@@ -164,3 +168,8 @@ find "$BACKUP_DIR/weekly" -name '*.dump' -type f -mtime "+$KEEP_WEEKLY" -delete
 kept_daily="$(find "$BACKUP_DIR/daily" -name '*.dump' -type f | wc -l)"
 kept_weekly="$(find "$BACKUP_DIR/weekly" -name '*.dump' -type f | wc -l)"
 log "selesai: tersimpan $kept_daily harian, $kept_weekly mingguan di $BACKUP_DIR"
+
+if [ "$OFFSITE_OK" = "0" ]; then
+  log "GAGAL (sebagian): backup lokal ada, salinan off-site TIDAK"
+  exit 1
+fi
