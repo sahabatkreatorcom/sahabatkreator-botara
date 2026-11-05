@@ -125,10 +125,25 @@ Karena tunnel memakai token, konfigurasi ingress **tidak** ada di server
 ```bash
 curl -s http://127.0.0.1:5180/health   | head -c 200
 curl -s http://127.0.0.1:5180/ready    | head -c 300
+curl -s http://127.0.0.1:5180/realtime/health
 curl -sI https://botara.my.id | head -5
 ```
 
 `/ready` harus `200` dengan `checks.database.ok` dan `checks.redis.ok`.
+
+Untuk membuktikan proxy WebSocket hidup, minta upgrade ke
+`/realtime/dashboard` **tanpa sesi**: jawaban yang benar adalah `401`,
+bukan `404` dan bukan `502`. `404` berarti path salah, `502` berarti
+nginx tidak dapat menjangkau container `realtime` (biasanya karena
+`REALTIME_HOST` masih `127.0.0.1`).
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  'http://127.0.0.1:5180/realtime/dashboard?tenantId=11111111-1111-4111-8111-111111111111'
+# harus 401
+```
 
 ## 7. Update rilis
 
@@ -137,12 +152,26 @@ cd /home/ubuntu/sahabat-kreator
 git pull --ff-only
 cd deploy
 docker compose -f docker-compose.prod.yml build
-docker compose -f docker-compose.prod.yml run --rm \
-  --entrypoint sh migrate -lc "cd /app && pnpm --filter @sahabat-kreator/db db:migrate"
+docker compose -f docker-compose.prod.yml --profile tools run --rm \
+  -e DATABASE_URL="postgres://sahabat:$PG_PW@db:5432/sahabat_kreator" \
+  migrate "cd /app && pnpm --filter @sahabat-kreator/db db:migrate"
 docker compose -f docker-compose.prod.yml up -d
 ```
 
 `up -d` hanya membuat ulang container yang image-nya berubah.
+
+### Dua jebakan yang sudah terbukti menggigit
+
+1. **Container `migrate` memakai IMAGE, bukan repo.** Ia tidak melihat
+   hasil `git pull` sampai image dibangun ulang. Urutannya karena itu
+   `build` DULU, baru `migrate`. Migrasi yang dijalankan sebelum build
+   adalah migrasi versi lama — dan drizzle akan melaporkan
+   "applied successfully" untuk rangkaian yang salah.
+2. **`drizzle-kit migrate` membaca `meta/_journal.json`, bukan direktori
+   `migrations/`.** Berkas `.sql` yang tidak terdaftar di journal
+   dilewati tanpa suara. `pnpm --filter @sahabat-kreator/db verify`
+   kini membandingkan keduanya dan gagal keras bila tidak selaras —
+   jalankan itu sebelum push bila menyentuh migrasi.
 
 ## 8. Rollback
 
