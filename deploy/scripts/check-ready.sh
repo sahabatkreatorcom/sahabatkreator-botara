@@ -7,6 +7,9 @@
 #   check-ready.sh --dry-run       periksa dan cetak aksi, tanpa kirim apa pun
 #   check-ready.sh --force-fail    perlakukan sebagai gagal (uji jalur alert)
 #
+# Flag bisa digabung: `--dry-run --force-fail` mencetak isi pesan alarm
+# tanpa mengirimkannya dan tanpa mengubah state.
+#
 # Yang diperiksa: `GET /api/ready` LEWAT nginx (127.0.0.1:5180), bukan
 # langsung ke container api. Dengan begitu satu pemeriksaan mencakup rantai
 # yang benar-benar dilalui pengguna: nginx → api → Postgres + Redis. Kalau
@@ -50,20 +53,27 @@ READY_TIMEOUT_SECONDS="${READY_TIMEOUT_SECONDS:-10}"
 READY_FAIL_THRESHOLD="${READY_FAIL_THRESHOLD:-2}"
 
 MODE="run"
-case "${1:-}" in
-  "") MODE="run" ;;
-  --dry-run) MODE="dry" ;;
-  --status) MODE="status" ;;
-  --force-fail) MODE="force-fail" ;;
-  -h | --help)
-    sed -n '2,42p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
-    exit 0
-    ;;
-  *)
-    echo "pemakaian: $0 [--dry-run|--status|--force-fail]" >&2
-    exit 2
-    ;;
-esac
+FORCE_FAIL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --dry-run) MODE="dry" ;;
+    --status) MODE="status" ;;
+    --force-fail) FORCE_FAIL=1 ;;
+    -h | --help)
+      sed -n "2,46p" "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    *)
+      echo "pemakaian: $0 [--dry-run] [--status] [--force-fail]" >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
+# --force-fail bisa digabung dengan --dry-run untuk melihat isi pesan tanpa
+# mengirim apa pun.
+[ "$FORCE_FAIL" -eq 1 ] && MODE_FORCE_FAIL=1 || MODE_FORCE_FAIL=0
 
 # Kredensial notifikasi hidup di backup.env (mode 600, tidak masuk git).
 BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$DEPLOY_DIR/backup.env}"
@@ -114,7 +124,7 @@ read_state
 
 CODE="000"
 BODY=""
-if [ "$MODE" = "force-fail" ]; then
+if [ "$MODE_FORCE_FAIL" -eq 1 ]; then
   BODY='{"status":"simulasi-kegagalan"}'
 else
   CODE="$(curl -sS -m "$READY_TIMEOUT_SECONDS" -o "$BODY_FILE" \
@@ -137,7 +147,12 @@ Waktu: $(date -u +%FT%TZ)"
     fi
   fi
 
-  write_state ok 0
+  if [ "$MODE" = "dry" ]; then
+    log "[dry-run] sehat: HTTP $CODE dari $READY_URL"
+  fi
+
+  # Dry-run TIDAK mengubah state: ia hanya melaporkan apa yang akan terjadi.
+  [ "$MODE" = "dry" ] || write_state ok 0
 
   # Dead-man's switch: ketuk HANYA saat sehat.
   if [ -n "${READY_HEARTBEAT_URL:-}" ]; then
@@ -156,14 +171,13 @@ fi
 # --- gagal -----------------------------------------------------------------
 
 COUNT=$((COUNT + 1))
-write_state fail "$COUNT"
+[ "$MODE" = "dry" ] || write_state fail "$COUNT"
 
 SNIPPET="$(printf '%s' "$BODY" | tr -d '\r' | tr '\n' ' ' | cut -c1-200)"
 log "GAGAL ($COUNT/$READY_FAIL_THRESHOLD): HTTP $CODE dari $READY_URL ${SNIPPET:+| $SNIPPET}"
 
 # Kirim tepat sekali per insiden: pada saat ambang tercapai.
-if [ "$COUNT" -eq "$READY_FAIL_THRESHOLD" ]; then
-  MSG="🔴 botara.my.id TIDAK SIAP.
+MSG="🔴 botara.my.id TIDAK SIAP.
 URL    : $READY_URL
 HTTP   : $CODE
 Gagal  : $COUNT kali berturut-turut
@@ -174,11 +188,11 @@ Cek cepat:
   docker compose -f $DEPLOY_DIR/docker-compose.prod.yml ps
   docker compose -f $DEPLOY_DIR/docker-compose.prod.yml logs --tail 50 api"
 
-  if [ "$MODE" = "dry" ]; then
-    log "[dry-run] akan kirim: $MSG"
-  else
-    notify "$MSG" || true
-  fi
+if [ "$MODE" = "dry" ]; then
+  log "[dry-run] gagal $COUNT/$READY_FAIL_THRESHOLD — pesan berikut dikirim saat ambang tercapai:"
+  log "$MSG"
+elif [ "$COUNT" -eq "$READY_FAIL_THRESHOLD" ]; then
+  notify "$MSG" || true
 fi
 
 exit 1
