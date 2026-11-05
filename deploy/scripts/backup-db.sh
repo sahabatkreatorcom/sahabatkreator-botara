@@ -72,21 +72,87 @@ chmod 700 "$BACKUP_DIR"
 
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 
+# Escape untuk body JSON. Isi pesan dibuat oleh skrip ini sendiri (bukan
+# input pengguna), jadi cukup menangani yang memang bisa muncul: backslash,
+# kutip ganda, dan baris baru. Tanpa ini, satu pesan yang memuat `"` membuat
+# body tidak valid dan notifikasi hilang tanpa jejak.
+json_escape() {
+  printf '%s' "$1" |
+    sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' |
+    awk 'BEGIN { ORS = "" } NR > 1 { print "\\n" } { print }'
+}
+
+# Kirim notifikasi ke webhook. Bentuk body BERGANTUNG penyedia — ini bukan
+# kerapian belaka: Slack/Mattermost menerima {"text":...}, Discord menolak
+# body tanpa {"content":...} (400 "Cannot send an empty message"), dan
+# Telegram Bot API sama sekali bukan JSON melainkan form-encoded. Satu
+# bentuk untuk semua berarti notifikasi diam-diam hilang di dua dari tiga
+# penyedia.
 notify() {
   local msg="$1"
-  if [ -n "${ALERT_WEBHOOK_URL:-}" ]; then
-    # Payload "text" diterima Slack, Discord, dan Mattermost.
-    curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
-      -d "$(printf '{"text":%s}' "$(printf '%s' "$msg" | python3 -c 'import json,sys;print(json.dumps(sys.stdin.read()))' 2>/dev/null || printf '"%s"' "$msg")")" \
-      "$ALERT_WEBHOOK_URL" >/dev/null 2>&1 || log "PERINGATAN: notifikasi gagal dikirim"
+  [ -n "${ALERT_WEBHOOK_URL:-}" ] || return 0
+
+  if printf '%s' "$ALERT_WEBHOOK_URL" | grep -q 'api\.telegram\.org'; then
+    # chat_id harus sudah ada di URL (…/bot<token>/sendMessage?chat_id=123)
+    # supaya tidak perlu variabel lingkungan kedua.
+    curl -fsS -m 10 --data-urlencode "text=$msg" \
+      "$ALERT_WEBHOOK_URL" >/dev/null 2>&1 || {
+      log "PERINGATAN: notifikasi gagal dikirim"
+      return 1
+    }
+    return 0
   fi
+
+  local body
+  case "$ALERT_WEBHOOK_URL" in
+    *discord.com* | *discordapp.com*)
+      body="{\"content\":\"$(json_escape "$msg")\"}"
+      ;;
+    *)
+      # Slack, Mattermost, dan webhook generik.
+      body="{\"text\":\"$(json_escape "$msg")\"}"
+      ;;
+  esac
+
+  # --data-raw, bukan -d: `-d` memperlakukan nilai berawalan `@` sebagai
+  # nama berkas.
+  curl -fsS -m 10 -X POST -H 'Content-Type: application/json' \
+    --data-raw "$body" "$ALERT_WEBHOOK_URL" >/dev/null 2>&1 || {
+    log "PERINGATAN: notifikasi gagal dikirim"
+    return 1
+  }
+  return 0
 }
 
 fail() {
   log "GAGAL: $*"
-  notify "Backup Sahabat Kreator GAGAL: $*"
+  notify "Backup Sahabat Kreator GAGAL: $*" || true
   exit 1
 }
+
+# --- 0. Mode uji notifikasi -------------------------------------------------
+#
+# Menguji jalur notifikasi tanpa menunggu backup benar-benar gagal, dan
+# tanpa menyentuh database:
+#   ALERT_WEBHOOK_URL=... ./backup-db.sh --test-notify
+# URL webhook TIDAK dicetak: di Slack/Discord URL itu sendiri adalah
+# rahasia (siapa pun yang memegangnya bisa menulis ke kanal tersebut).
+if [ "${1:-}" = "--test-notify" ]; then
+  if [ -z "${ALERT_WEBHOOK_URL:-}" ]; then
+    log "GAGAL: ALERT_WEBHOOK_URL kosong — tidak ada yang bisa diuji"
+    exit 2
+  fi
+  # Pesan uji sengaja memuat karakter yang biasanya merusak JSON dan
+  # encoding URL: kutip ganda, backslash, ampersand, plus. Kalau pesan ini
+  # sampai utuh, pesan sungguhan juga akan sampai.
+  log "mengirim notifikasi uji…"
+  if notify "Uji notifikasi Sahabat Kreator — \"kutip\" \\ backslash & plus + tanda=tanya?"; then
+    log "notifikasi uji TERKIRIM — cek kanal tujuan"
+    exit 0
+  fi
+  log "GAGAL: notifikasi tidak terkirim (periksa URL/izin webhook)"
+  exit 1
+fi
 
 # --- 1. Pagar ruang disk ----------------------------------------------------
 free_kb="$(df -Pk "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
@@ -152,7 +218,7 @@ if [ -n "${BACKUP_UPLOAD_CMD:-}" ]; then
     # dan tanpa exit code cron tidak punya cara memberi tahu siapa pun.
     OFFSITE_OK=0
     log "PERINGATAN: off-site gagal — salinan hanya ada di VPS ini"
-    notify "Backup lokal sukses, tetapi unggahan off-site GAGAL."
+    notify "Backup lokal sukses, tetapi unggahan off-site GAGAL." || true
   fi
 else
   log "off-site: tidak dikonfigurasi (BACKUP_UPLOAD_CMD kosong)"
