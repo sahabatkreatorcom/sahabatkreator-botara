@@ -296,7 +296,7 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
           ) : null}
           <div className="mt-3 space-y-3">
             {dupGroups.map((group, gi) => {
-              const [survivor, ...others] = group.contacts;
+              const [survivor] = group.contacts;
               if (!survivor) return null;
               return (
                 <div

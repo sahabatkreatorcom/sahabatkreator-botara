@@ -356,7 +356,7 @@ function PaymentsSection({
 
           {provider === "midtrans" ? (
             <div className="mt-5 rounded-xl border border-line bg-surface p-4">
-              <h3 className="text-sm font-bold text-ink">Midtrans</h3>
+              <h3 className="text-sm font-bold text-ink">{t("settings.payments.midtransTitle")}</h3>
               {renderEnvGroup(
                 t("settings.payments.sandboxTitle"),
                 MIDTRANS_KEY_FIELDS.filter((f) => f.env === "sandbox"),
@@ -370,7 +370,7 @@ function PaymentsSection({
 
           {provider === "xendit" ? (
             <div className="mt-5 rounded-xl border border-line bg-surface p-4">
-              <h3 className="text-sm font-bold text-ink">Xendit</h3>
+              <h3 className="text-sm font-bold text-ink">{t("settings.payments.xenditTitle")}</h3>
               {renderEnvGroup(
                 t("settings.payments.sandboxTitle"),
                 XENDIT_KEY_FIELDS.filter((f) => f.env === "sandbox"),
@@ -390,10 +390,10 @@ function PaymentsSection({
               {t("settings.payments.webhookBody")}
             </p>
             <p className="mt-2 break-all font-mono text-xs text-ink">
-              Midtrans: {settings.webhookUrls.midtrans}
+              {t("settings.payments.webhookMidtrans", { url: settings.webhookUrls.midtrans })}
             </p>
             <p className="mt-1 break-all font-mono text-xs text-ink">
-              Xendit: {settings.webhookUrls.xendit}
+              {t("settings.payments.webhookXendit", { url: settings.webhookUrls.xendit })}
             </p>
           </div>
 

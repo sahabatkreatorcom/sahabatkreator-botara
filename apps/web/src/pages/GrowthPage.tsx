@@ -55,6 +55,14 @@ interface FormState {
   isActive: boolean;
 }
 
+/**
+ * Prefiks URL pendek publik yang ditampilkan di samping kolom slug.
+ *
+ * BUKAN teks UI: ini bagian dari alamat yang benar-benar dibuka
+ * pengunjung, jadi menerjemahkannya akan menampilkan URL yang salah.
+ */
+const SHORTLINK_PREFIX = "/go/";
+
 const EMPTY_FORM: FormState = {
   label: "",
   slug: "",
@@ -492,7 +500,7 @@ export function GrowthPage({ t, locale }: GrowthPageProps) {
               <label className="block">
                 <span className="text-sm font-medium">{t("growth.slugLabel")}</span>
                 <div className="mt-1 flex items-center gap-1">
-                  <span className="text-sm text-muted">/go/</span>
+                  <span className="text-sm text-muted">{SHORTLINK_PREFIX}</span>
                   <input
                     value={form.slug}
                     onChange={(e) => setForm({ ...form, slug: e.target.value })}

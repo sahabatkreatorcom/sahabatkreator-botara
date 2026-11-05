@@ -238,7 +238,7 @@ async function grant(client: Client): Promise<boolean> {
 // reset
 // ---------------------------------------------------------------------------
 
-async function reset(client: Client, url: string): Promise<boolean> {
+async function reset(client: Client): Promise<boolean> {
   console.log("Menjatuhkan skema public + drizzle…");
   await client.query("DROP SCHEMA IF EXISTS public CASCADE");
   await client.query("DROP SCHEMA IF EXISTS drizzle CASCADE");
@@ -281,7 +281,7 @@ let ok: boolean;
 try {
   if (mode === "doctor") ok = await doctor(client);
   else if (mode === "grant") ok = (await grant(client)) && (await doctor(client));
-  else if (mode === "reset") ok = (await reset(client, url)) && (await doctor(client));
+  else if (mode === "reset") ok = (await reset(client)) && (await doctor(client));
   else {
     console.error(`Mode tidak dikenal: ${mode} (pakai: doctor|grant|reset)`);
     ok = false;

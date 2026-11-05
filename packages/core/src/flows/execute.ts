@@ -474,7 +474,7 @@ async function executeNodeInTx(
   ctx: RunContext,
   node: FlowGraphNode,
 ): Promise<NodeEffects> {
-  const { run, graph } = ctx;
+  const { run } = ctx;
   const c = node.config;
   switch (node.type) {
     case "trigger":

@@ -13,7 +13,6 @@
  *
  * Jalankan: pnpm --filter @sahabat-kreator/api verify:http
  */
-import assert from "node:assert/strict";
 import { Hono } from "hono";
 import { createRateLimiter } from "../src/rate-limit";
 

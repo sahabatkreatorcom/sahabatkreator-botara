@@ -177,7 +177,7 @@ export class WhatsAppCloudClient extends GraphHttpClient {
     status: number,
     graphCode: number | null,
     description: string,
-    graphSubcode: number | null,
+    _graphSubcode: number | null,
   ): WhatsAppGraphError {
     return new WhatsAppGraphError(status, graphCode, description);
   }

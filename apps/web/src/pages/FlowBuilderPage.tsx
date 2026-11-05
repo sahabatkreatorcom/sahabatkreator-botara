@@ -338,6 +338,16 @@ function rfToGraph(nodes: FlowRfNode[], edges: FlowRfEdge[]): FlowGraph {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Label opsi sumber variabel "custom:*" pada node condition/field.
+ *
+ * BUKAN teks UI: yang ditampilkan adalah sintaks yang harus diketik
+ * pengguna ("custom:<kunci>"). Menerjemahkannya justru menyesatkan,
+ * jadi ia sengaja tidak lewat t() — tetapi tetap diberi nama supaya
+ * alasannya terbaca, bukan sekadar literal di tengah JSX.
+ */
+const CUSTOM_FIELD_OPTION_LABEL = "custom:*";
+
 const KNOWN_STAGES = ["new", "contacted", "qualified", "customer", "lost"];
 
 function stageLabel(t: Translate, stage: string): string {
@@ -924,7 +934,7 @@ function NodeConfigPanel({
               <option value="name">{t("flows.fieldName")}</option>
               <option value="phone">{t("flows.fieldPhone")}</option>
               <option value="email">{t("flows.fieldEmail")}</option>
-              <option value="custom">custom:*</option>
+              <option value="custom">{CUSTOM_FIELD_OPTION_LABEL}</option>
             </select>
           </div>
           {str(config.field).startsWith("custom:") ? (
@@ -1835,7 +1845,7 @@ function NodeConfigPanel({
                               <option value="email">
                                 {t("flows.fieldEmail")}
                               </option>
-                              <option value="custom">custom:*</option>
+                              <option value="custom">{CUSTOM_FIELD_OPTION_LABEL}</option>
                             </select>
                           </div>
                         </div>
@@ -2632,7 +2642,20 @@ function BuilderInner({
     setIssues([]);
     setNotice(null);
     setError(null);
-  }, [flow, setNodes, setEdges]);
+  }, [flow, setNodes, setEdges, t]);
+
+  // Label cabang pada edge mengikuti bahasa aktif. Dipisah dari efek
+  // pemuatan graf di atas dengan sengaja: efek itu dijaga
+  // `initializedForRef` supaya kanvas tidak dimuat ulang (dan perubahan
+  // yang belum disimpan tidak hilang), sehingga pergantian bahasa tidak
+  // akan pernah memperbarui label bila pelabelan menumpang di sana.
+  useEffect(() => {
+    setEdges((eds) =>
+      eds.map((e) =>
+        e.data?.branch ? { ...e, ...branchEdgeLabelProps(t, e.data.branch) } : e,
+      ),
+    );
+  }, [t, setEdges]);
 
   const currentGraph = useMemo(
     () => rfToGraph(nodes, edges),

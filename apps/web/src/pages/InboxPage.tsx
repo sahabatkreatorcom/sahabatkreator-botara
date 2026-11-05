@@ -244,7 +244,7 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
         if (selectedRef.current === conversationId) setMessagesLoading(false);
       }
     },
-    [tenantId, t],
+    [tenantId, t, setFromConversations],
   );
 
   useEffect(() => {

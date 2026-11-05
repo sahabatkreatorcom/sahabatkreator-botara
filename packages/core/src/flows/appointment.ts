@@ -11,9 +11,6 @@ import {
 import {
   FlowGraphNode,
 } from "./graph";
-import {
-  catalogConfigOf,
-} from "./catalog";
 
 // ---------------------------------------------------------------------------
 // Janji temu (Fase 13G) — bentuk config node book_appointment

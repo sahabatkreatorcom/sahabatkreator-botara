@@ -89,9 +89,6 @@ function tokenBase(deps: GoogleDeps): string {
     "",
   );
 }
-function authBase(deps: GoogleDeps): string {
-  return (deps.bases?.authBase ?? GOOGLE_DEFAULT_AUTH_BASE).replace(/\/+$/, "");
-}
 
 // ---------------------------------------------------------------------------
 // Resolusi klien OAuth platform: panel → env (pola Resend 11B)

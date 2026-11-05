@@ -536,7 +536,7 @@ function SuggestionsQueue({
     } finally {
       setLoading(false);
     }
-  }, [tenantId, t]);
+  }, [tenantId, t, refreshBadge]);
 
   useEffect(() => {
     void load();

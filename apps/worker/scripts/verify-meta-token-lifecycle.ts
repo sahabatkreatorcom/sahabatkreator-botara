@@ -91,7 +91,7 @@ async function main(): Promise<void> {
     const client = new MetaGraphClient({
       apiVersion: "v26.0",
       accessToken: "token-uji",
-      fetchImpl: (input) => {
+      fetchImpl: (_input) => {
         fetchCalls += 1;
         return Promise.resolve(
           new Response(JSON.stringify({ message_id: "m_1" }), { status: 200 }),

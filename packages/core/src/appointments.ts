@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, gte, lt } from "drizzle-orm";
+import { and, asc, eq, gt, gte, lt } from "drizzle-orm";
 import {
   appointmentAvailability,
   appointmentServices,
@@ -75,7 +75,16 @@ function dtfFor(tz: string): Intl.DateTimeFormat {
   return dtf;
 }
 
-/** True bila `tz` adalah zona IANA yang dikenal runtime Intl. */
+/**
+ * True bila `tz` adalah zona yang dikenal runtime Intl.
+ *
+ * Selain nama IANA ("Asia/Jakarta"), ECMA-402 juga mengakui pengenal
+ * offset seperti "+07:00". Itu diterima dengan sengaja: zona offset
+ * berperilaku benar di seluruh fungsi di modul ini (tanpa DST, yang
+ * memang artinya), dan menolaknya hanya akan membuat validasi berbeda
+ * dari yang dipahami runtime. Yang ditolak adalah teks yang tidak
+ * dikenali sama sekali, mis. "Asia/Jakartaa".
+ */
 export function isValidTimeZone(tz: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone: tz });

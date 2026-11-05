@@ -893,7 +893,6 @@ function BroadcastForm({ t, tenantId, target, onDone, onCancel }: BroadcastFormP
         });
     }, 400);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     tenantId,
     channelAccountId,
