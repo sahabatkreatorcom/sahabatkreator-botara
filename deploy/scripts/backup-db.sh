@@ -11,12 +11,13 @@
 # Dipanggil oleh cron (lihat deploy/scripts/install-backup-cron.sh) dan
 # boleh dijalankan manual kapan pun.
 #
-# Variabel lingkungan (semua opsional):
+# Variabel lingkungan (semua opsional). Nilai di bawah ini biasanya
+# diletakkan di $DEPLOY_DIR/backup.env, yang dibaca otomatis:
 #   BACKUP_DIR            default ~/backups/sahabat-kreator
 #   KEEP_DAILY            default 7   (hari)
 #   KEEP_WEEKLY           default 28  (hari; cadangan mingguan)
 #   BACKUP_UPLOAD_CMD     perintah off-site; berkas dump diterima sebagai $1.
-#                         Contoh: 'rclone copy "$1" r2:sahabat-kreator-backup'
+#                         Contoh: 'deploy/scripts/upload-backup-r2.sh "$1"'
 #                         Kosong = hanya salinan lokal (BELUM off-site).
 #   ALERT_WEBHOOK_URL     URL webhook (Slack/Discord/generic) untuk notifikasi
 #                         kegagalan. Kosong = hanya log.
@@ -30,6 +31,24 @@ set -euo pipefail
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOY_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$DEPLOY_DIR"
+
+# Konfigurasi off-site & notifikasi dibaca dari berkas terpisah, bukan dari
+# .env aplikasi: .env berisi rahasia runtime (kunci sesi, enkripsi, DSN)
+# yang tidak ada urusannya dengan skrip backup, dan mencampurnya membuat
+# satu berkas menjadi izin akses untuk dua hal berbeda.
+#
+#   BACKUP_ENV_FILE  default $DEPLOY_DIR/backup.env
+#
+# Berkas itu berisi mis.:
+#   BACKUP_UPLOAD_CMD='/path/deploy/scripts/upload-backup-r2.sh "$1"'
+#   ALERT_WEBHOOK_URL='https://...'
+BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-$DEPLOY_DIR/backup.env}"
+if [ -f "$BACKUP_ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$BACKUP_ENV_FILE"
+  set +a
+fi
 
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 DB_SERVICE="${DB_SERVICE:-db}"

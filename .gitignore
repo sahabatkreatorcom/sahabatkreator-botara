@@ -13,6 +13,8 @@ build/
 !.env.example
 *.pem
 *.key
+# Konfigurasi off-site backup (memuat URL webhook notifikasi).
+backup.env
 
 # Log & artefak runtime
 *.log
