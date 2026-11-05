@@ -16,7 +16,7 @@
 #
 # Variabel lingkungan:
 #   R2_REMOTE          default r2
-#   BACKUP_R2_BUCKET   default sahabat-kreator-backup
+#   BACKUP_R2_BUCKET   default sahabat-kreator-db-backup
 #   BACKUP_R2_PREFIX   default db
 #   KEEP_REMOTE_DAYS   default 30 (objek lebih tua dipangkas)
 #   RCLONE             default rclone (atau $HOME/bin/rclone)
@@ -34,7 +34,7 @@ FILE="${1:-}"
 }
 
 R2_REMOTE="${R2_REMOTE:-r2}"
-BACKUP_R2_BUCKET="${BACKUP_R2_BUCKET:-sahabat-kreator-backup}"
+BACKUP_R2_BUCKET="${BACKUP_R2_BUCKET:-sahabat-kreator-db-backup}"
 BACKUP_R2_PREFIX="${BACKUP_R2_PREFIX:-db}"
 KEEP_REMOTE_DAYS="${KEEP_REMOTE_DAYS:-30}"
 

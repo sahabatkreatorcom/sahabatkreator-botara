@@ -126,8 +126,12 @@ secret_access_key = $SECRET_KEY
 endpoint = https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com
 region = auto
 acl = private
-no_check_bucket = true
 CONF
+# Sengaja TIDAK memakai `no_check_bucket = true` di sini. Opsi itu membuat
+# `rclone mkdir` menjadi no-op yang tetap keluar dengan status 0 — bucket
+# yang tidak pernah dibuat lalu baru ketahuan saat unggah gagal. Opsi itu
+# dipakai per-perintah di upload-backup-r2.sh saja, di tempat yang memang
+# butuh.
 
 if [ "$CHECK_ONLY" = "1" ]; then
   # Uji dengan konfigurasi sementara, tanpa menyentuh yang sudah ada.
