@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { z } from "zod";
+import { rejectUpgrade } from "./upgrade";
 import { loadEnv } from "@sahabat-kreator/config";
 import {
   RealtimeNudgeSchema,
@@ -239,11 +240,6 @@ if (env.REDIS_URL) {
 // ---------------------------------------------------------------------------
 
 const wss = new WebSocketServer({ noServer: true });
-
-function rejectUpgrade(socket: Duplex, statusLine: string): void {
-  socket.write(`HTTP/1.1 ${statusLine}\r\nConnection: close\r\n\r\n`);
-  socket.destroy();
-}
 
 const uuidSchema = z.string().uuid();
 
