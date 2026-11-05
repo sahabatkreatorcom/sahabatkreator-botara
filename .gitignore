@@ -16,7 +16,12 @@ build/
 
 # Log & artefak runtime
 *.log
-logs/
+# PERHATIAN: harus berakar ("/logs/"), bukan "logs/". Pola tanpa akar
+# mencocokkan direktori bernama `logs` DI KEDALAMAN MANA PUN — termasuk
+# direktori SUMBER `apps/api/src/modules/logs/`. Itu pernah membuat dua
+# berkas sumber tidak ikut ter-commit dan build Docker gagal dengan
+# "Could not resolve ./modules/logs/routes" padahal typecheck lokal lulus.
+/logs/
 coverage/
 .nyc_output/
 # Direktori temp Vitest (lihat vitest.config.ts: sengaja di root repo,
