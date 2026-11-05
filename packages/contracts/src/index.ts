@@ -17,6 +17,7 @@ export * from "./channels";
 export * from "./meta-oauth";
 export * from "./webchat";
 export * from "./automations";
+export * from "./automation-templates";
 export * from "./comments";
 export * from "./agents";
 export * from "./commerce";

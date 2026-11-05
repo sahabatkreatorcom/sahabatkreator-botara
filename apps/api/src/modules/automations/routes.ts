@@ -1,14 +1,18 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  AUTOMATION_TEMPLATES,
   AutomationListResponseSchema,
   AutomationResponseSchema,
   AutomationRunListResponseSchema,
   AutomationRunResponseSchema,
+  AutomationTemplateListResponseSchema,
   CreateAutomationRequestSchema,
+  InstantiateAutomationTemplateRequestSchema,
   SequenceEnrollmentListResponseSchema,
   SequenceEnrollmentResponseSchema,
   UpdateAutomationRequestSchema,
+  summarizeAutomationTemplate,
   type AutomationResponse,
   type AutomationRunResponse,
   type SequenceEnrollmentResponse,
@@ -16,6 +20,7 @@ import {
 import {
   createAutomation,
   getChannelAccount,
+  instantiateAutomationTemplate,
   listAutomationRuns,
   listAutomations,
   listSequenceEnrollments,
@@ -96,6 +101,10 @@ function serializeRun(row: AutomationRun): AutomationRunResponse {
  *         kind 'sequence': {name, keywords, match, steps[{delayMinutes, text}]}
  *   GET   /tenants/:tenantId/automations            daftar + jumlah run +
  *                                                   kind & langkah sequence
+ *   GET   /tenants/:tenantId/automations/templates  katalog template (14A)
+ *   POST  /tenants/:tenantId/automations/templates/:slug
+ *                                                   buat automation NONAKTIF
+ *                                                   dari template → 201
  *   PATCH /tenants/:tenantId/automations/:id        ubah isActive/name/keywords/match/text
  *                                                   (langkah sequence TIDAK bisa
  *                                                   diubah — buat automation baru)
@@ -115,6 +124,8 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured");
     app.post(base, notConfigured);
     app.get(base, notConfigured);
+    app.get(`${base}/templates`, notConfigured);
+    app.post(`${base}/templates/:slug`, notConfigured);
     app.patch(`${base}/:id`, notConfigured);
     app.get(`${base}/:id/runs`, notConfigured);
     app.get(`${base}/:id/enrollments`, notConfigured);
@@ -215,6 +226,66 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
       automations: rows.map(serializeAutomation),
     });
     return c.json(body);
+  });
+
+  // ---- Galeri template (Fase 16B) ------------------------------------------
+  // Katalog statis dari kontrak (AUTOMATION_TEMPLATES): respons hanya
+  // ringkasan — teks lengkap tidak keluar di daftar; ia disalin server
+  // saat instantiate. Otorisasi mengikuti POST biasa modul ini (setiap
+  // anggota workspace), karena membuat automation memang bukan aksi
+  // owner/admin di sini; rute yang lebih ketat hanya akan jadi pagar
+  // palsu selama POST biasa tetap terbuka.
+  app.get(`${base}/templates`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const body = AutomationTemplateListResponseSchema.parse({
+      templates: AUTOMATION_TEMPLATES.map(summarizeAutomationTemplate),
+    });
+    return c.json(body);
+  });
+
+  // Membuat automation NYATA dari template — selalu NONAKTIF (lihat
+  // catatan keselamatan di kontrak automation-templates): pemilik
+  // meninjau kata kunci & teks, menyunting placeholder, baru
+  // mengaktifkannya. Body boleh kosong; {name} opsional menimpa nama
+  // bawaan. Slug tak dikenal → 404 AUTOMATION_TEMPLATE_NOT_FOUND.
+  app.post(`${base}/templates/:slug`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    let name: string | undefined;
+    try {
+      const json = (await c.req.json()) as { name?: unknown } | null;
+      if (json && typeof json === "object" && json.name !== undefined) {
+        const parsed = InstantiateAutomationTemplateRequestSchema.safeParse(json);
+        if (!parsed.success) {
+          return apiError(c, 400, "VALIDATION_ERROR", "Invalid template payload");
+        }
+        name = parsed.data.name;
+      }
+    } catch {
+      // Body kosong sah = pakai nama bawaan template.
+    }
+    const result = await instantiateAutomationTemplate(
+      bundle.db,
+      { tenantId: tenant.id },
+      { slug: c.req.param("slug") ?? "", name },
+    );
+    if (result.kind === "template_not_found") {
+      return apiError(
+        c,
+        404,
+        "AUTOMATION_TEMPLATE_NOT_FOUND",
+        "Automation template not found",
+      );
+    }
+    return c.json(
+      serializeAutomation({
+        ...result.automation,
+        runCount: 0,
+        stepCount: result.automation.steps.length,
+      }),
+      201,
+    );
   });
 
   app.patch(`${base}/:id`, async (c) => {

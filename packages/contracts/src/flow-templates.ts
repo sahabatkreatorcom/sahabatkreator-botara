@@ -24,11 +24,16 @@ import type { FlowGraph } from "./flows";
  * teks per node — pemilik flow mengeditnya di builder.
  *
  * `needs` = daftar hal yang WAJIB dilengkapi pemilik sebelum flow bisa
- * diaktifkan. Satu-satunya nilai v1: "product" — node
- * `send_payment_link` pada template sengaja membawa `productId`
- * KOSONG (placeholder): aktivasi menolaknya dengan issue
- * PAYMENT_PRODUCT_ID_REQUIRED yang menunjuk node itu sampai pemilik
- * memilih produk aslinya di builder.
+ * diaktifkan. Nilai yang dikenal:
+ * - "product" — node `send_payment_link` pada template sengaja membawa
+ *   `productId` KOSONG (placeholder): aktivasi menolaknya dengan issue
+ *   PAYMENT_PRODUCT_ID_REQUIRED yang menunjuk node itu sampai pemilik
+ *   memilih produk aslinya di builder. Juga dipakai template katalog
+ *   (`show_catalog` hanya bisa menampilkan produk AKTIF — tanpa produk
+ *   daftarnya kosong), meski di sana tidak ada node yang diblokir.
+ * - "service" — node `book_appointment` membawa `serviceId` KOSONG:
+ *   aktivasi menolaknya dengan APPOINTMENT_SERVICE_INVALID sampai
+ *   pemilik memilih layanan janji temu aslinya.
  */
 export const FlowTemplateCategorySchema = z.enum([
   "onboarding",
@@ -39,7 +44,7 @@ export const FlowTemplateCategorySchema = z.enum([
 ]);
 export type FlowTemplateCategory = z.infer<typeof FlowTemplateCategorySchema>;
 
-export const FlowTemplateNeedSchema = z.enum(["product"]);
+export const FlowTemplateNeedSchema = z.enum(["product", "service"]);
 export type FlowTemplateNeed = z.infer<typeof FlowTemplateNeedSchema>;
 
 export interface FlowTemplateDefinition {
@@ -362,6 +367,456 @@ export const FLOW_TEMPLATES: FlowTemplateDefinition[] = [
         { from: "trigger", to: "info" },
         { from: "info", to: "serah" },
         { from: "serah", to: "end" },
+      ],
+    },
+  },
+  {
+    // Fase 16B — kuesioner penangkap lead (node `questionnaire`).
+    // Target pertanyaan SENGAJA hanya field bawaan (name/email/phone):
+    // target `custom:<kunci>` akan ditolak aktivasi dengan
+    // QUESTIONNAIRE_TARGET_UNKNOWN selama belum ada satu pun kontak
+    // workspace yang membawa kunci itu — template harus bisa langsung
+    // diaktifkan tanpa persiapan tersembunyi.
+    slug: "kuesioner-lead",
+    nameKey: "flows.tplKuesionerName",
+    descriptionKey: "flows.tplKuesionerDesc",
+    category: "lead",
+    needs: [],
+    defaultName: "Kuesioner Lead",
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "trigger",
+          config: {
+            kind: "keyword",
+            keywords: ["daftar", "minat", "info"],
+            match: "contains",
+          },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "pembuka",
+          type: "send_message",
+          config: {
+            text: "Halo {name}! Sebelum saya kirim detailnya, boleh saya kenal sedikit dulu? Cukup jawab tiga pertanyaan singkat ya.",
+          },
+          position: { x: 290, y: 0 },
+        },
+        {
+          id: "kuesioner",
+          type: "questionnaire",
+          config: {
+            questions: [
+              {
+                id: "nama",
+                prompt: "Siapa nama lengkap kamu?",
+                answerType: "text",
+                target: "name",
+                required: true,
+              },
+              {
+                id: "email",
+                prompt: "Alamat email yang bisa kami hubungi?",
+                answerType: "email",
+                target: "email",
+                required: true,
+              },
+              {
+                id: "wa",
+                prompt: "Nomor WhatsApp aktif kamu? (contoh: 08123456789)",
+                answerType: "phone",
+                target: "phone",
+                required: false,
+              },
+            ],
+            amount: 6,
+            unit: "hours",
+            maxInvalidAttempts: 3,
+            completionTag: "lead-lengkap",
+          },
+          position: { x: 580, y: 0 },
+        },
+        {
+          id: "terima",
+          type: "send_message",
+          config: {
+            text: "Terima kasih, {name}! Datanya sudah kami terima. Tim kami akan menghubungi kamu dalam 1×24 jam.",
+          },
+          position: { x: 870, y: 0 },
+        },
+        {
+          id: "eskalasi",
+          type: "handoff",
+          config: {},
+          position: { x: 870, y: 200 },
+        },
+        {
+          id: "ingat",
+          type: "send_message",
+          config: {
+            text: "Halo {name}, formulirnya masih terbuka kalau kamu mau lanjut kapan saja — cukup balas pesan ini.",
+          },
+          position: { x: 870, y: -200 },
+        },
+        { id: "end", type: "end", config: {}, position: { x: 1160, y: 0 } },
+      ],
+      edges: [
+        { from: "trigger", to: "pembuka" },
+        { from: "pembuka", to: "kuesioner" },
+        { from: "kuesioner", to: "terima", branch: "completed" },
+        { from: "terima", to: "end" },
+        { from: "kuesioner", to: "eskalasi", branch: "invalid" },
+        { from: "eskalasi", to: "end" },
+        { from: "kuesioner", to: "ingat", branch: "timeout" },
+        { from: "ingat", to: "end" },
+      ],
+    },
+  },
+  {
+    // Fase 16B — katalog belanja + checkout keranjang (13F).
+    // `needs: ["product"]`: show_catalog hanya menampilkan produk AKTIF,
+    // jadi tanpa produk daftarnya kosong (tidak ada node yang diblokir
+    // aktivasi — berbeda dari send_payment_link yang butuh productId).
+    slug: "katalog-keranjang",
+    nameKey: "flows.tplKatalogName",
+    descriptionKey: "flows.tplKatalogDesc",
+    category: "sales",
+    needs: ["product"],
+    defaultName: "Katalog + Keranjang",
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "trigger",
+          config: {
+            kind: "keyword",
+            keywords: ["katalog", "produk", "beli"],
+            match: "contains",
+          },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "katalog",
+          type: "show_catalog",
+          config: {
+            introText: "Ini daftar produk kami, {name}. Balas nomornya untuk menambah ke keranjang.",
+            showDescription: true,
+            amount: 12,
+            unit: "hours",
+            maxInvalidAttempts: 3,
+            addedMessage: "Sudah masuk keranjang. Mau tambah lagi atau langsung checkout?",
+          },
+          position: { x: 290, y: 0 },
+        },
+        {
+          id: "checkout",
+          type: "cart_checkout",
+          config: {
+            emptyMessage: "Keranjangmu masih kosong. Balas KATALOG kalau mau pilih produk dulu.",
+          },
+          position: { x: 580, y: 0 },
+        },
+        {
+          id: "kosong",
+          type: "send_message",
+          config: {
+            text: "Keranjangmu masih kosong, {name}. Balas KATALOG kalau mau lihat pilihannya lagi.",
+          },
+          position: { x: 870, y: 200 },
+        },
+        {
+          id: "eskalasi",
+          type: "handoff",
+          config: {},
+          position: { x: 580, y: -200 },
+        },
+        { id: "end", type: "end", config: {}, position: { x: 1160, y: 0 } },
+      ],
+      edges: [
+        { from: "trigger", to: "katalog" },
+        { from: "katalog", to: "checkout", branch: "added" },
+        { from: "checkout", to: "end", branch: "checked_out" },
+        { from: "checkout", to: "kosong", branch: "empty_cart" },
+        { from: "kosong", to: "end" },
+        { from: "katalog", to: "eskalasi", branch: "invalid" },
+        { from: "eskalasi", to: "end" },
+        { from: "katalog", to: "end", branch: "timeout" },
+      ],
+    },
+  },
+  {
+    // Fase 16B — pemesanan janji temu (13G). `serviceId` placeholder
+    // kosong: aktivasi menolaknya (APPOINTMENT_SERVICE_INVALID) sampai
+    // pemilik memilih layanan aslinya — pola yang sama dengan
+    // send_payment_link, jadi template ini ditandai `needs: ["service"]`.
+    slug: "booking-janji-temu",
+    nameKey: "flows.tplBookingName",
+    descriptionKey: "flows.tplBookingDesc",
+    category: "event",
+    needs: ["service"],
+    defaultName: "Booking Janji Temu",
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "trigger",
+          config: {
+            kind: "keyword",
+            keywords: ["jadwal", "booking", "janji"],
+            match: "contains",
+          },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "pembuka",
+          type: "send_message",
+          config: {
+            text: "Siap, {name}! Berikut slot yang masih kosong. Balas nomornya untuk memesan ya.",
+          },
+          position: { x: 290, y: 0 },
+        },
+        {
+          id: "jadwal",
+          type: "book_appointment",
+          // Placeholder SENGAJA kosong (lihat `needs`).
+          config: {
+            serviceId: "",
+            daysAhead: 7,
+            slotsPerMessage: 5,
+            amount: 2,
+            unit: "hours",
+            maxInvalidAttempts: 3,
+            bookedMessage: "Janji temumu sudah tercatat. Sampai jumpa!",
+          },
+          position: { x: 580, y: 0 },
+        },
+        {
+          id: "konfirmasi",
+          type: "send_message",
+          config: {
+            text: "Terima kasih, {name}! Kami akan mengirimkan pengingat menjelang jadwalnya.",
+          },
+          position: { x: 870, y: 0 },
+        },
+        {
+          id: "eskalasi",
+          type: "handoff",
+          config: {},
+          position: { x: 870, y: -200 },
+        },
+        { id: "end", type: "end", config: {}, position: { x: 1160, y: 0 } },
+      ],
+      edges: [
+        { from: "trigger", to: "pembuka" },
+        { from: "pembuka", to: "jadwal" },
+        { from: "jadwal", to: "konfirmasi", branch: "booked" },
+        { from: "konfirmasi", to: "end" },
+        { from: "jadwal", to: "eskalasi", branch: "invalid" },
+        { from: "eskalasi", to: "end" },
+        { from: "jadwal", to: "end", branch: "timeout" },
+        { from: "jadwal", to: "end", branch: "slot_taken" },
+      ],
+    },
+  },
+  {
+    // Fase 16B — uji A/B mode EKSPERIMEN (13D): penugasan deterministik
+    // per kontak, dan `conversionNodeId` menunjuk node tawaran sehingga
+    // dashboard eksperimen flow bisa membandingkan kedua varian.
+    slug: "uji-ab-pembuka",
+    nameKey: "flows.tplAbSplitName",
+    descriptionKey: "flows.tplAbSplitDesc",
+    category: "sales",
+    needs: [],
+    defaultName: "Uji A/B Pesan Pembuka",
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "trigger",
+          config: { kind: "any_message" },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "split",
+          type: "ab_split",
+          config: {
+            percentA: 50,
+            experiment: true,
+            experimentLabel: "Pembuka A vs B",
+            conversionNodeId: "tawaran",
+          },
+          position: { x: 290, y: 0 },
+        },
+        {
+          id: "varianA",
+          type: "send_message",
+          config: {
+            text: "Halo {name}! Lagi cari rekomendasi produk? Saya bantu pilihkan yang paling cocok.",
+          },
+          position: { x: 580, y: -160 },
+        },
+        {
+          id: "varianB",
+          type: "send_message",
+          config: {
+            text: "Hai {name}, selamat datang! Mau saya kirimkan katalog, atau mau tanya-tanya dulu?",
+          },
+          position: { x: 580, y: 160 },
+        },
+        {
+          id: "tawaran",
+          type: "send_message",
+          config: {
+            text: "Kalau mau, balas KATALOG dan saya kirimkan pilihan yang paling sesuai kebutuhanmu.",
+          },
+          position: { x: 870, y: 0 },
+        },
+        { id: "end", type: "end", config: {}, position: { x: 1160, y: 0 } },
+      ],
+      edges: [
+        { from: "trigger", to: "split" },
+        { from: "split", to: "varianA", branch: "a" },
+        { from: "split", to: "varianB", branch: "b" },
+        { from: "varianA", to: "tawaran" },
+        { from: "varianB", to: "tawaran" },
+        { from: "tawaran", to: "end" },
+      ],
+    },
+  },
+  {
+    // Fase 16B — konfirmasi transfer: wait_reply + tag + serah ke admin.
+    slug: "konfirmasi-transfer",
+    nameKey: "flows.tplTransferName",
+    descriptionKey: "flows.tplTransferDesc",
+    category: "support",
+    needs: [],
+    defaultName: "Konfirmasi Transfer",
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "trigger",
+          config: {
+            kind: "keyword",
+            keywords: ["sudah bayar", "sudah transfer", "bukti transfer"],
+            match: "contains",
+          },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "minta",
+          type: "send_message",
+          config: {
+            text: "Terima kasih, {name}! Mohon kirimkan foto atau screenshot bukti transfernya di sini ya, supaya bisa kami verifikasi.",
+          },
+          position: { x: 290, y: 0 },
+        },
+        {
+          id: "tunggu",
+          type: "wait_reply",
+          config: { amount: 12, unit: "hours" },
+          position: { x: 580, y: 0 },
+        },
+        {
+          id: "tandai",
+          type: "add_tag",
+          config: { tag: "perlu-verifikasi" },
+          position: { x: 870, y: 0 },
+        },
+        {
+          id: "serah",
+          type: "handoff",
+          config: {},
+          position: { x: 1160, y: 0 },
+        },
+        {
+          id: "ingat",
+          type: "send_message",
+          config: {
+            text: "Halo {name}, kami belum menerima bukti transfernya. Kalau sudah sempat, kirim di sini ya.",
+          },
+          position: { x: 870, y: 200 },
+        },
+        { id: "end", type: "end", config: {}, position: { x: 1450, y: 0 } },
+      ],
+      edges: [
+        { from: "trigger", to: "minta" },
+        { from: "minta", to: "tunggu" },
+        { from: "tunggu", to: "tandai", branch: "replied" },
+        { from: "tandai", to: "serah" },
+        { from: "serah", to: "end" },
+        { from: "tunggu", to: "ingat", branch: "timeout" },
+        { from: "ingat", to: "end" },
+      ],
+    },
+  },
+  {
+    // Fase 16B — tindak lanjut promo bercabang menurut tag pelanggan.
+    slug: "tindak-lanjut-pelanggan",
+    nameKey: "flows.tplTindakLanjutName",
+    descriptionKey: "flows.tplTindakLanjutDesc",
+    category: "sales",
+    needs: [],
+    defaultName: "Tindak Lanjut Promo",
+    graph: {
+      nodes: [
+        {
+          id: "trigger",
+          type: "trigger",
+          config: {
+            kind: "keyword",
+            keywords: ["promo", "diskon"],
+            match: "contains",
+          },
+          position: { x: 0, y: 0 },
+        },
+        {
+          id: "cek",
+          type: "condition",
+          config: { predicate: "has_tag", tag: "pelanggan-lama" },
+          position: { x: 290, y: 0 },
+        },
+        {
+          id: "loyal",
+          type: "send_message",
+          config: {
+            text: "Khusus kamu, {name}: ada potongan tambahan untuk pelanggan lama. Mau saya kirimkan detailnya?",
+          },
+          position: { x: 580, y: -160 },
+        },
+        {
+          id: "umum",
+          type: "send_message",
+          config: {
+            text: "Ada promo yang sedang berjalan, {name}! Saya kirimkan ringkasannya sebentar lagi ya.",
+          },
+          position: { x: 580, y: 160 },
+        },
+        {
+          id: "jeda",
+          type: "delay",
+          config: { amount: 2, unit: "hours" },
+          position: { x: 870, y: 160 },
+        },
+        {
+          id: "ringkas",
+          type: "send_message",
+          config: {
+            text: "Ini ringkasan promonya, {name}. Balas PROMO kalau mau saya bantu pilih yang paling pas.",
+          },
+          position: { x: 1160, y: 160 },
+        },
+        { id: "end", type: "end", config: {}, position: { x: 1450, y: 0 } },
+      ],
+      edges: [
+        { from: "trigger", to: "cek" },
+        { from: "cek", to: "loyal", branch: "yes" },
+        { from: "loyal", to: "end" },
+        { from: "cek", to: "umum", branch: "no" },
+        { from: "umum", to: "jeda" },
+        { from: "jeda", to: "ringkas" },
+        { from: "ringkas", to: "end" },
       ],
     },
   },

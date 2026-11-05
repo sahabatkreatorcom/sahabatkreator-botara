@@ -129,6 +129,8 @@ export {
   type EvaluateInboundResult,
   type ExecuteSequenceStepResult,
   type SequenceEnrollmentWithTotal,
+  instantiateAutomationTemplate,
+  type InstantiateAutomationTemplateResult,
 } from "./automations";
 export {
   relayUnpublishedOutboxEvents,

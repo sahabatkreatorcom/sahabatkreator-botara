@@ -16,6 +16,7 @@ import type {
   AutomationResponse,
   AutomationRunListResponse,
   AutomationRunResponse,
+  AutomationTemplateListResponse,
   BroadcastAudiencePreviewResponse,
   BroadcastAbResultsResponse,
   BroadcastListResponse,
@@ -48,6 +49,7 @@ import type {
   InvitableRole,
   CreateAgentRequest,
   CreateAutomationRequest,
+  InstantiateAutomationTemplateRequest,
   CreateContactRequest,
   CreateFlowRequest,
   CreateGrowthLinkRequest,
@@ -738,6 +740,31 @@ export const api = {
     ): Promise<AutomationResponse> {
       return request<AutomationResponse>(
         `/api/tenants/${tenantId}/automations`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /**
+     * GET /api/tenants/:tenantId/automations/templates — katalog template
+     * (Fase 16B). Ringkasan saja; teks lengkap disalin server.
+     */
+    listTemplates(tenantId: string): Promise<AutomationTemplateListResponse> {
+      return request<AutomationTemplateListResponse>(
+        `/api/tenants/${tenantId}/automations/templates`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/automations/templates/:slug — membuat
+     * automation NYATA dari template, SELALU nonaktif agar pemilik bisa
+     * menyunting placeholder sebelum ada pesan yang terkirim.
+     */
+    instantiateTemplate(
+      tenantId: string,
+      slug: string,
+      input: InstantiateAutomationTemplateRequest = {},
+    ): Promise<AutomationResponse> {
+      return request<AutomationResponse>(
+        `/api/tenants/${tenantId}/automations/templates/${slug}`,
         { method: "POST", body: JSON.stringify(input) },
       );
     },

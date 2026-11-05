@@ -125,6 +125,9 @@ export const ErrorCodeSchema = z.enum([
   "XENDIT_AUTH_FAILED",
   "XENDIT_CREATE_FAILED",
   "XENDIT_UNREACHABLE",
+  // Fase 16B: instantiate galeri template automation dengan slug tak
+  // dikenal → 404 (padanan FLOW_TEMPLATE_NOT_FOUND untuk /automations).
+  "AUTOMATION_TEMPLATE_NOT_FOUND",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

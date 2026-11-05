@@ -10,6 +10,8 @@ import type {
   AutomationMatch,
   AutomationResponse,
   AutomationRunResponse,
+  AutomationTemplateCategory,
+  AutomationTemplateSummary,
   ChannelAccountResponse,
   CommentResponse,
   SequenceEnrollmentResponse,
@@ -40,6 +42,13 @@ function parseKeywords(raw: string): string[] {
 function shortId(id: string): string {
   return id.length > 13 ? `${id.slice(0, 8)}…` : id;
 }
+
+const TPL_CATEGORY_KEYS: Record<AutomationTemplateCategory, TranslationKey> = {
+  faq: "automations.tplCatFaq",
+  sales: "automations.tplCatSales",
+  support: "automations.tplCatSupport",
+  followup: "automations.tplCatFollowup",
+};
 
 interface AutomationsPageProps {
   t: Translate;
@@ -73,6 +82,15 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
     null,
   );
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  // Fase 16B — galeri template. `templates === null` = belum dimuat;
+  // pemuatan malas (baru saat panel dibuka) supaya halaman daftar tidak
+  // menunggu katalog yang mungkin tidak dipakai.
+  const [galleryOpen, setGalleryOpen] = useState(false);
+  const [templates, setTemplates] = useState<
+    AutomationTemplateSummary[] | null
+  >(null);
+  const [usingSlug, setUsingSlug] = useState<string | null>(null);
+  const [templateNotice, setTemplateNotice] = useState<string | null>(null);
   const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
@@ -105,6 +123,49 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const loadTemplates = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      const res = await api.automations.listTemplates(tenantId);
+      setTemplates(res.templates);
+    } catch (err) {
+      setError(translateApiError(t, err));
+      setTemplates([]);
+    }
+  }, [tenantId, t]);
+
+  useEffect(() => {
+    if (galleryOpen && templates === null) void loadTemplates();
+  }, [galleryOpen, templates, loadTemplates]);
+
+  /**
+   * "Pakai template" membuat automation NYATA tetapi NONAKTIF (keputusan
+   * server, lihat kontrak automation-templates). Karena itu tidak ada
+   * konfirmasi tambahan di sini — yang lahir belum bisa mengirim apa pun.
+   * Sesudahnya daftar dimuat ulang dan pemilik diarahkan menyunting
+   * placeholder + mengaktifkan sendiri.
+   */
+  const applyTemplate = async (tpl: AutomationTemplateSummary) => {
+    if (!tenantId || usingSlug) return;
+    setUsingSlug(tpl.slug);
+    setError(null);
+    setTemplateNotice(null);
+    try {
+      const created = await api.automations.instantiateTemplate(
+        tenantId,
+        tpl.slug,
+      );
+      setTemplateNotice(
+        t("automations.tplCreatedNotice", { name: created.name }),
+      );
+      await load();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setUsingSlug(null);
+    }
+  };
 
   const handleToggle = async (automation: AutomationResponse) => {
     if (!tenantId || togglingId) return;
@@ -178,14 +239,87 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
           <h1 className="text-2xl font-bold text-ink">{t("automations.title")}</h1>
           <p className="mt-1 text-sm text-muted">{t("automations.subtitle")}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setFormTarget("create")}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
-        >
-          {t("automations.addButton")}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setGalleryOpen((v) => !v)}
+            className="rounded-lg border border-line px-4 py-2 text-sm font-medium text-ink hover:bg-elevated"
+          >
+            {t("automations.tplGalleryButton")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setFormTarget("create")}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          >
+            {t("automations.addButton")}
+          </button>
+        </div>
       </div>
+
+      {galleryOpen ? (
+        <div className="mt-4 rounded-xl border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold text-ink">
+            {t("automations.tplGalleryTitle")}
+          </h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            {t("automations.tplGallerySubtitle")}
+          </p>
+          {templates === null ? (
+            <p className="mt-4 text-sm text-muted">{t("workspace.loading")}</p>
+          ) : templates.length === 0 ? (
+            <p className="mt-4 text-sm text-muted">
+              {t("automations.tplGalleryEmpty")}
+            </p>
+          ) : (
+            <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {templates.map((tpl) => (
+                <li
+                  key={tpl.slug}
+                  className="flex flex-col rounded-xl border border-line bg-elevated/40 p-4"
+                >
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-semibold text-ink">
+                      {t(tpl.nameKey as TranslationKey)}
+                    </span>
+                    <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                      {t(TPL_CATEGORY_KEYS[tpl.category])}
+                    </span>
+                  </div>
+                  <p className="mt-2 flex-1 text-sm text-muted">
+                    {t(tpl.descriptionKey as TranslationKey)}
+                  </p>
+                  <p className="mt-2 text-xs text-muted">
+                    {tpl.kind === "sequence"
+                      ? t("automations.tplSequenceMeta", {
+                          count: tpl.stepCount,
+                        })
+                      : t("automations.tplKeywordMeta", {
+                          count: tpl.keywordCount,
+                        })}
+                  </p>
+                  <button
+                    type="button"
+                    disabled={usingSlug !== null}
+                    onClick={() => void applyTemplate(tpl)}
+                    className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                  >
+                    {usingSlug === tpl.slug
+                      ? t("automations.tplUsing")
+                      : t("automations.tplUseButton")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
+
+      {templateNotice ? (
+        <p className="mt-4 rounded-lg bg-success/15 px-3 py-2 text-sm text-success">
+          {templateNotice}
+        </p>
+      ) : null}
 
       <FieldError message={error} />
 

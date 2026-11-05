@@ -1,4 +1,5 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { findAutomationTemplate } from "@sahabat-kreator/contracts";
 import {
   auditLogs,
   automationRuns,
@@ -91,6 +92,13 @@ export interface CreateAutomationInput {
   publicReplyText?: string | null;
   /** Fase 10B (kind='comment'): sembunyikan komentar yang cocok. */
   hideComment?: boolean;
+  /**
+   * Fase 16B — status awal. Default `true` (perilaku seluruh pemanggil
+   * lama tidak berubah). Pembuatan DARI TEMPLATE memakai `false`:
+   * teks template memuat placeholder yang wajib disunting pemilik, dan
+   * automation aktif langsung membalas pelanggan sungguhan.
+   */
+  isActive?: boolean;
 }
 
 export interface UpdateAutomationInput {
@@ -149,7 +157,7 @@ export async function createAutomation(
               }
             : { text: kind === "keyword" ? (input.text ?? "") : "" },
         kind,
-        isActive: true,
+        isActive: input.isActive ?? true,
       })
       .returning();
     let steps: AutomationStep[] = [];
@@ -170,6 +178,50 @@ export async function createAutomation(
     }
     return { ...row, steps };
   });
+}
+
+export type InstantiateAutomationTemplateResult =
+  | {
+      kind: "created";
+      automation: Automation & { steps: AutomationStep[] };
+    }
+  | { kind: "template_not_found" };
+
+/**
+ * Membuat automation dari template katalog (Fase 16B).
+ *
+ * Selalu NONAKTIF — lihat alasan keselamatan di
+ * `packages/contracts/src/automation-templates.ts`: teks template
+ * memuat placeholder `[...]` yang wajib disunting pemilik, dan
+ * automation aktif langsung membalas pelanggan sungguhan tanpa
+ * pratinjau apa pun di antaranya.
+ *
+ * Pemanggil (rute API) bertanggung jawab atas otorisasi owner/admin —
+ * fungsi ini hanya menyentuh data dalam konteks RLS tenant.
+ */
+export async function instantiateAutomationTemplate(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  input: { slug: string; name?: string },
+): Promise<InstantiateAutomationTemplateResult> {
+  const template = findAutomationTemplate(input.slug);
+  if (!template) return { kind: "template_not_found" };
+
+  const name = input.name?.trim() ? input.name.trim() : template.defaultName;
+  const shared = {
+    name,
+    keywords: template.keywords,
+    match: template.match,
+    isActive: false,
+  };
+  const automation = await createAutomation(
+    db,
+    ctx,
+    template.kind === "sequence"
+      ? { ...shared, kind: "sequence", steps: template.steps }
+      : { ...shared, kind: "keyword", text: template.text },
+  );
+  return { kind: "created", automation };
 }
 
 export async function listAutomations(

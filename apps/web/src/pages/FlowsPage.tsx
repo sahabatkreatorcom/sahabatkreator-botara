@@ -299,7 +299,9 @@ export function FlowsPage({ t, locale, onOpenBuilder }: FlowsPageProps) {
                           .map((n) =>
                             n === "product"
                               ? t("flows.tplNeedsProduct")
-                              : n,
+                              : n === "service"
+                                ? t("flows.tplNeedsService")
+                                : n,
                           )
                           .join(", ")}
                       </span>
