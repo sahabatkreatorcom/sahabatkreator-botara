@@ -612,8 +612,15 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
       // Tampilkan langsung pesan returned (status queued), lalu segarkan
       // utas & daftar dari server agar konsisten dengan sumber kebenaran.
       setMessages((prev) => [...prev, created]);
-      await loadMessages(selectedId);
-      await loadConversations();
+      // Spinner kirim berhenti DI SINI, bukan sesudah refresh. Pesan sudah
+      // tampil dari respons POST, jadi menunggu dua GET di bawah tidak lagi
+      // termasuk "sedang mengirim" — dulu `setSending(false)` baru berjalan
+      // di `finally` sesudah keduanya, sehingga tombol terlihat berputar
+      // selama tiga request berturut-turut.
+      setSending(false);
+      // Kedua refresh dijalankan PARALEL: sebelumnya berurutan
+      // (`await` … lalu `await` …), jadi waktunya dijumlahkan.
+      await Promise.all([loadMessages(selectedId), loadConversations()]);
     } catch (err) {
       setSendError(translateApiError(t, err));
     } finally {
