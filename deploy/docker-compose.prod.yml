@@ -9,18 +9,22 @@
 # paket workspace dan harus selalu ber-versi sama — memisahkan image membuat
 # worker bisa tertinggal satu rilis dari API tanpa ada yang menyadarinya.
 #
+# PENTING — hanya SATU layanan yang memiliki blok `build:`. Blok itu ada di
+# `api`; `worker`, `realtime`, dan `migrate` hanya menyebut `image:` yang
+# sama. Bila ketiganya ikut mendeklarasikan `build:` dengan tag identik,
+# `docker compose build` membangun tag itu tiga kali secara paralel dan
+# gagal dengan `image "sahabat-kreator/server:latest": already exists`.
+# Karena itu konfigurasi bersama dipisah ke anchor `server-base` (tanpa
+# build) dan hanya `api` yang menambahkannya.
+#
 # Migrasi TIDAK dijalankan otomatis oleh api/worker: container `migrate`
 # berjalan sekali (profile `tools`) supaya replika API tidak berlomba
 # menjalankan DDL yang sama.
 
 name: sahabat-kreator
 
-x-server-image: &server-image
+x-server-base: &server-base
   image: sahabat-kreator/server:latest
-  build:
-    context: ..
-    dockerfile: Dockerfile
-    target: server
   env_file:
     - .env
   restart: unless-stopped
@@ -64,29 +68,32 @@ services:
       retries: 20
 
   migrate:
-    <<: *server-image
+    <<: *server-base
     profiles: ["tools"]
     restart: "no"
     command: ["node", "-e", "process.exit(0)"]
     entrypoint: ["/bin/sh", "-lc"]
-    # Dijalankan manual: docker compose --profile tools run --rm migrate \
-    #   "cd packages/db && npx drizzle-kit migrate"
-    depends_on:
-      db:
-        condition: service_healthy
+    # Dijalankan manual (lihat docs/DEPLOY-STAGING.md §4):
+    #   docker compose run --rm -e DATABASE_URL=... migrate "cd /app && pnpm --filter @sahabat-kreator/db db:migrate"
 
+  # SATU-SATUNYA pemilik blok `build:` untuk image server — lihat catatan
+  # di kepala berkas.
   api:
-    <<: *server-image
+    <<: *server-base
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: server
     command: ["node", "apps/api/dist/index.js"]
     ports:
       - "127.0.0.1:3101:3101"
 
   worker:
-    <<: *server-image
+    <<: *server-base
     command: ["node", "apps/worker/dist/index.js"]
 
   realtime:
-    <<: *server-image
+    <<: *server-base
     command: ["node", "apps/realtime/dist/index.js"]
     # Wajib 0.0.0.0 di Docker: container `web` (nginx) adalah netns lain
     # dan tidak bisa menjangkau 127.0.0.1 milik container ini. Tetap

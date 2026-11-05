@@ -31,30 +31,52 @@ rahasia acak:
 ```bash
 cd deploy
 umask 077
+PG_PW=$(openssl rand -hex 24)      # superuser pemilik skema
+APP_PW=$(openssl rand -hex 24)     # role aplikasi (runtime)
 cat > .env <<EOF
 NODE_ENV=production
 API_PORT=3101
 REALTIME_PORT=3103
+REALTIME_HOST=0.0.0.0
 LOG_LEVEL=info
 
-DATABASE_URL=postgres://sahabat:$(openssl rand -hex 16)@db:5432/sahabat_kreator
-POSTGRES_PASSWORD=<sama dengan di atas>
+POSTGRES_PASSWORD=$PG_PW
+DATABASE_URL=postgres://sk_app:$APP_PW@db:5432/sahabat_kreator
 REDIS_URL=redis://redis:6379
 
-BETTER_AUTH_SECRET=$(openssl rand -base64 48 | tr -d '\n')
+BETTER_AUTH_SECRET=$(openssl rand -hex 32)
 BETTER_AUTH_URL=https://botara.my.id
-CHANNEL_TOKEN_SECRET=$(openssl rand -base64 32)
-WEBCHAT_SECRET=$(openssl rand -base64 32)
-PLATFORM_SETTINGS_SECRET=$(openssl rand -base64 32)
+CHANNEL_TOKEN_SECRET=$(openssl rand -base64 32 | tr -d '\n')
+WEBCHAT_SECRET=$(openssl rand -hex 32)
+PLATFORM_SETTINGS_SECRET=$(openssl rand -base64 32 | tr -d '\n')
 PLATFORM_ADMIN_EMAILS=
 
 LLM_PROVIDER=mock
-META_GRAPH_API_VERSION=v26.0
 META_ENGAGEMENT_SCOPES=0
 EOF
+chmod 600 .env
 ```
 
-Catat `POSTGRES_PASSWORD` — harus sama dengan yang dipakai `DATABASE_URL`.
+### Kenapa ada DUA password database
+
+| Kunci | Role | Dipakai oleh |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | `sahabat` (superuser, pemilik skema) | container `db`, langkah migrasi |
+| password di `DATABASE_URL` | `sk_app` (NOLOGIN sampai diset) | api, worker, realtime |
+
+**RLS tidak berlaku bagi pemilik tabel.** Kalau API menyambung sebagai
+`sahabat`, seluruh isolasi tenant di `0001_rls_tenant_isolation.sql`
+menjadi hiasan — setiap tenant dapat membaca data tenant lain.
+`0002_app_role_grants.sql` membuat `sk_app` dan memberinya hak tabel;
+password-nya di-set sekali pada langkah 4. `pnpm --filter
+@sahabat-kreator/db db:doctor` memeriksa pemisahan ini dan akan gagal
+bila runtime masih memakai role pemilik.
+
+`REALTIME_HOST=0.0.0.0` wajib di Docker: container `realtime` dan `web`
+(nginx) adalah dua netns berbeda, sehingga bind `127.0.0.1` tidak dapat
+dijangkau nginx dan proxy `/realtime/` akan gagal 502. Port-nya tetap
+hanya di-publish ke loopback host (`127.0.0.1:3103`), jadi tidak terbuka
+ke internet.
 
 ## 4. Build dan jalankan
 
@@ -64,11 +86,22 @@ docker compose -f docker-compose.prod.yml build
 docker compose -f docker-compose.prod.yml up -d db redis
 ```
 
-Migrasi dijalankan sekali, bukan oleh replika API:
+Migrasi dijalankan sekali, bukan oleh replika API — dan **sebagai role
+pemilik skema**, bukan role aplikasi (`sk_app` tidak punya hak CREATE,
+jadi DDL akan ditolak):
 
 ```bash
 docker compose -f docker-compose.prod.yml run --rm \
-  --entrypoint sh migrate -lc "cd /app && pnpm --filter @sahabat-kreator/db db:migrate"
+  -e DATABASE_URL="postgres://sahabat:$PG_PW@db:5432/sahabat_kreator" \
+  migrate "cd /app && pnpm --filter @sahabat-kreator/db db:migrate"
+```
+
+Sesudah migrasi, beri `sk_app` kemampuan login (sekali saja; idempoten):
+
+```bash
+docker compose -f docker-compose.prod.yml exec -T db \
+  psql -U sahabat -d sahabat_kreator \
+  -c "ALTER ROLE sk_app WITH LOGIN PASSWORD '$APP_PW'"
 ```
 
 Lalu seluruh layanan:
