@@ -71,20 +71,22 @@ rotasi. Liveness yang memicu restart.
 ## 6. Backup
 
 Backup **otomatis dan teruji** — bukan sekadar perintah yang didokumentasikan.
-Tiga skrip di `deploy/scripts/`:
+Empat skrip di `deploy/scripts/`:
 
 | Skrip | Fungsi |
 | --- | --- |
-| `install-backup-cron.sh` | memasang jadwal: backup harian 02:30 UTC, uji restore mingguan Minggu 03:30 UTC |
+| `install-backup-cron.sh` | memasang jadwal: backup harian 02:30 UTC, drill mingguan Minggu 03:30 UTC |
 | `backup-db.sh` | `pg_dump` format custom → `~/backups/sahabat-kreator/{daily,weekly}`, lalu memverifikasi dump dapat dibaca ulang |
-| `verify-backup.sh` | memulihkan dump ke database UJI, membandingkan baris tiap tabel + struktur dengan produksi |
+| `verify-backup-fresh-cluster.sh` | **drill bencana**: memulihkan dump ke cluster Postgres baru (volume kosong), membandingkan isi + struktur dengan produksi |
+| `verify-backup.sh` | pemeriksaan cepat: memulihkan ke database UJI di cluster yang sama |
 | `restore-db.sh` | pemulihan sungguhan ke produksi (menimpa; butuh `--yes`) |
 
 ```bash
 cd /home/ubuntu/sahabat-kreator/deploy/scripts
-./install-backup-cron.sh     # sekali, saat deploy awal
-./backup-db.sh               # boleh dijalankan manual kapan pun
-./verify-backup.sh           # buktikan backup terbaru dapat dipulihkan
+./install-backup-cron.sh             # sekali, saat deploy awal
+./backup-db.sh                       # boleh dijalankan manual kapan pun
+./verify-backup-fresh-cluster.sh     # buktikan dump dapat menghidupkan mesin baru
+./verify-backup.sh                   # pemeriksaan cepat, tanpa container tambahan
 ```
 
 Keputusan yang mengikat:
@@ -96,13 +98,31 @@ Keputusan yang mengikat:
   besar dan terlihat wajar sampai seseorang mencoba restore. `backup-db.sh`
   menjalankan `pg_restore --list` dan menolak dump yang tidak terbaca —
   lebih baik tidak punya berkas daripada punya berkas yang dikira backup.
-- **Uji restore membandingkan structure, bukan hanya baris.** Empat
-  hitungan diperiksa: tabel, index, constraint, dan **policy RLS**. Dump
-  tanpa policy berarti restore ke cluster baru berjalan tanpa isolasi
-  tenant — tepat kegagalan yang dulu terjadi lewat `_journal.json`.
+- **Yang dijadwalkan mingguan adalah drill, bukan `verify-backup.sh`.**
+  `verify-backup.sh` memulihkan ke database uji di dalam cluster produksi,
+  yang sudah punya ekstensi `vector`/`btree_gist` dan role `sk_app`. Itu
+  membuktikan dump terbaca, tetapi tidak menguji skenario sebenarnya:
+  mesinnya hilang. Drill menyalakan container `pgvector/pgvector:pg16`
+  dengan volume kosong dan `--network none`, memastikan titik awalnya
+  benar-benar 0 tabel dan 0 ekstensi, baru memulihkan.
+- **Uji restore membandingkan isi, bukan hanya jumlah baris.** Untuk tabel
+  ≤ 50.000 baris, md5 dari seluruh barisnya yang terurut dibandingkan —
+  jumlah baris yang sama di atas isi yang berbeda tetap lolos kalau hanya
+  `count(*)` yang diperiksa.
+- **Uji restore membandingkan struktur, bukan hanya baris.** Lima hitungan
+  diperiksa: tabel, index, constraint, **policy RLS**, dan **tabel dengan
+  RLS aktif**. Policy di atas tabel yang RLS-nya dimatikan tidak melakukan
+  apa pun, sehingga hitungan policy bisa cocok sempurna sementara isolasi
+  tenant sebenarnya tidak berlaku.
+- **Role `sk_app` tidak pernah ikut dump** karena ia hidup di level
+  cluster, bukan di dalam database. Restore bencana karena itu wajib
+  menjalankan migrasi (`0002` membuat role) atau `restore-db.sh` yang
+  membuat ulang role + GRANT. Drill mencetak fakta ini setiap kali jalan
+  supaya tidak jadi kejutan saat benar-benar dipakai.
 - **Off-site belum aktif.** `BACKUP_UPLOAD_CMD` kosong = salinan hanya ada
   di VPS ini. Selama itu belum diisi, VPS yang mati berarti backup ikut
-  hilang. Isi setelah kredensial R2 tersedia, mis.:
+  hilang — dan drill yang lolos tetap tidak menolong. Isi setelah
+  kredensial R2 tersedia, mis.:
   `BACKUP_UPLOAD_CMD='rclone copy "$1" r2:sahabat-kreator-backup'`.
 - Volume Redis **tidak** perlu dibackup: isinya antrean dan cache. Job
   yang hilang dipulihkan dari `outbox_events` yang belum terbit.

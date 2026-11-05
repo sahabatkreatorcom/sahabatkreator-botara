@@ -85,15 +85,24 @@ docker run -d --name "$DRILL" --network none \
   -v "$DRILL_VOL":/var/lib/postgresql/data \
   "$DRILL_IMAGE" >/dev/null
 
+# Jangan pakai pg_isready saja. Pada volume kosong, entrypoint resmi
+# menjalankan server SEMENTARA untuk initdb dan skrip init, lalu mematikannya
+# dan menyalakan server final. pg_isready bisa lolos pada server sementara
+# itu, sehingga pemeriksaan berikutnya menabrak socket yang sudah hilang.
+# Karena itu: minta satu kueri sungguhan berhasil, jeda, lalu minta lagi —
+# dua keberhasilan berurutan menandakan server final sudah stabil.
 ready=""
-for _ in $(seq 1 60); do
-  if docker exec "$DRILL" pg_isready -U "$DB_USER" -d "$DB_NAME" >/dev/null 2>&1; then
-    ready=1
-    break
+for _ in $(seq 1 90); do
+  if docker exec "$DRILL" psql -U "$DB_USER" -d "$DB_NAME" -tAc 'select 1' >/dev/null 2>&1; then
+    sleep 2
+    if docker exec "$DRILL" psql -U "$DB_USER" -d "$DB_NAME" -tAc 'select 1' >/dev/null 2>&1; then
+      ready=1
+      break
+    fi
   fi
   sleep 1
 done
-[ -n "$ready" ] || { docker logs --tail 30 "$DRILL" 2>&1 || true; die "cluster drill tidak siap dalam 60 detik"; }
+[ -n "$ready" ] || { docker logs --tail 30 "$DRILL" 2>&1 || true; die "cluster drill tidak siap dalam ~3 menit"; }
 log "cluster perawan siap"
 
 # Bukti bahwa titik awalnya memang kosong — tanpa ini, "restore berhasil"
@@ -196,28 +205,38 @@ struct_q() {
     (select count(*) from pg_tables where schemaname='public') || '|' ||
     (select count(*) from pg_indexes where schemaname='public') || '|' ||
     (select count(*) from pg_constraint c join pg_namespace n on n.oid=c.connamespace where n.nspname='public') || '|' ||
-    (select count(*) from pg_policies where schemaname='public')"
+    (select count(*) from pg_policies where schemaname='public') || '|' ||
+    (select count(*) from pg_class c join pg_namespace n on n.oid=c.relnamespace
+       where n.nspname='public' and c.relkind='r' and c.relrowsecurity)"
 }
 
 prod_struct="$(psql_prod "$(struct_q)")"
 fresh_struct="$(psql_drill "$(struct_q)")"
 
-IFS='|' read -r p_tbl p_idx p_con p_pol <<<"$prod_struct"
-IFS='|' read -r f_tbl f_idx f_con f_pol <<<"$fresh_struct"
+IFS='|' read -r p_tbl p_idx p_con p_pol p_rls <<<"$prod_struct"
+IFS='|' read -r f_tbl f_idx f_con f_pol f_rls <<<"$fresh_struct"
 
-log "struktur produksi     : tabel=$p_tbl index=$p_idx constraint=$p_con policy=$p_pol"
-log "struktur cluster baru : tabel=$f_tbl index=$f_idx constraint=$f_con policy=$f_pol"
+log "struktur produksi     : tabel=$p_tbl index=$p_idx constraint=$p_con policy=$p_pol rls_aktif=$p_rls"
+log "struktur cluster baru : tabel=$f_tbl index=$f_idx constraint=$f_con policy=$f_pol rls_aktif=$f_rls"
 
 [ "$p_tbl" = "$f_tbl" ] || die "jumlah tabel berbeda"
 [ "$p_idx" = "$f_idx" ] || die "jumlah index berbeda"
 [ "$p_con" = "$f_con" ] || die "jumlah constraint berbeda"
 [ "$p_pol" = "$f_pol" ] || die "jumlah policy RLS berbeda — restore kehilangan isolasi tenant"
 
+# Policy yang ada di atas tabel dengan RLS dimatikan tidak melakukan apa pun.
+# Hitungan policy bisa cocok sempurna sementara isolasi tenant sebenarnya
+# tidak berlaku — jadi jumlah tabel ber-RLS aktif dibandingkan terpisah.
+[ "$p_rls" = "$f_rls" ] || die "jumlah tabel dengan RLS aktif berbeda — isolasi tenant tidak utuh"
+
 # Constraint exclusion pada bookings (migrasi 0003) pernah hilang tanpa
-# ketahuan karena tidak tercatat di _journal.json. Periksa namanya, bukan
-# hanya jumlahnya.
-psql_drill "select 1 from pg_constraint where conname='bookings_no_overlap'" | grep -q 1 \
-  || die "constraint 'bookings_no_overlap' tidak ikut dipulihkan"
+# ketahuan karena migrasinya tidak tercatat di _journal.json. Periksa
+# namanya, bukan hanya jumlahnya — kode menangkap pelanggaran lewat
+# SQLSTATE 23P01 atau nama `bookings_no_overlap_confirmed`
+# (lihat isExclusionViolation() di packages/core/src/appointments.ts),
+# jadi nama itu bagian dari kontrak, bukan sekadar label.
+psql_drill "select 1 from pg_constraint where conname='bookings_no_overlap_confirmed' and contype='x'" | grep -q 1 \
+  || die "constraint exclusion 'bookings_no_overlap_confirmed' tidak ikut dipulihkan"
 
 # --- 7. Yang TIDAK dibawa dump -----------------------------------------------
 #
