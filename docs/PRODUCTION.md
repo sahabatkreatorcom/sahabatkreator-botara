@@ -32,17 +32,35 @@ Jangan mengedit migrasi yang sudah ter-commit. Rantai saat ini:
 
 ## 3. Env wajib produksi
 
-API menolak boot bila kunci bertanda `[wajib-produksi]` kosong.
+API menolak boot bila salah satu kunci di `PRODUCTION_REQUIRED_KEYS`
+(`packages/config/src/index.ts`) kosong:
 
-- `DATABASE_URL`, `REDIS_URL`
+- `DATABASE_URL`
 - `BETTER_AUTH_SECRET` (≥32 char), `BETTER_AUTH_URL` (origin **browser**)
 - `CHANNEL_TOKEN_SECRET` (base64 32 byte — AES-256-GCM)
 - `WEBCHAT_SECRET`, `PLATFORM_SETTINGS_SECRET`
-- `META_APP_SECRET`, `META_WEBHOOK_VERIFY_TOKEN`
 
-Kunci provider lain (OpenRouter, R2, Resend, Google, Midtrans/Xendit)
-**sebaiknya** diisi lewat Panel Admin (`platform_settings` terenkripsi);
-env hanya fallback.
+`REDIS_URL` **tidak** wajib-boot (ada fallback in-memory), tetapi di
+produksi ia praktis wajib: tanpa Redis, sesi OAuth Meta dan cache rate
+limit hidup di memori satu proses.
+
+Kunci provider lain (OpenRouter, R2, Resend, Google, Midtrans/Xendit,
+Meta) **tidak** masuk daftar itu dan sengaja tidak: platform harus bisa
+boot dengan Telegram/webchat saja. Konsekuensinya kegagalan kunci-kunci
+itu **tidak terlihat saat boot** — muncul belakangan sebagai fitur yang
+menolak jalan. Dua yang paling mudah terlewat:
+
+- `META_WEBHOOK_VERIFY_TOKEN` — **hanya dari env**, tidak ada di Panel
+  Admin. Tanpa ini `GET /api/meta/webhook` menjawab 503, dan Panel Admin
+  menampilkan "verify token belum diset, webhook tidak bisa didaftarkan".
+  Nilainya kita yang menentukan (`openssl rand -hex 24` cukup), lalu
+  ditempel ke Meta App Dashboard → Webhooks → Verify token. Owner/admin
+  bisa membacanya lagi lewat `GET /channels/meta-webhook-info`.
+- `META_APP_SECRET` — boleh env, tetapi **lebih baik lewat Panel Admin**
+  (`meta_app_secret`), karena resolver panel → env dibaca ulang per
+  request. Tanpa ini `POST /api/meta/webhook` menjawab 503; dengan ini
+  tapi tanda tangan salah, jawabannya 401 `META_SIGNATURE_INVALID` —
+  bedakan keduanya saat mendiagnosis.
 
 ## 4. Rate limit
 
@@ -119,18 +137,39 @@ Keputusan yang mengikat:
   menjalankan migrasi (`0002` membuat role) atau `restore-db.sh` yang
   membuat ulang role + GRANT. Drill mencetak fakta ini setiap kali jalan
   supaya tidak jadi kejutan saat benar-benar dipakai.
-- **Off-site belum aktif.** `BACKUP_UPLOAD_CMD` kosong = salinan hanya ada
-  di VPS ini. Selama itu belum diisi, VPS yang mati berarti backup ikut
-  hilang — dan drill yang lolos tetap tidak menolong. Isi setelah
-  kredensial R2 tersedia, mis.:
-  `BACKUP_UPLOAD_CMD='rclone copy "$1" r2:sahabat-kreator-backup'`.
+- **Off-site aktif lewat Cloudflare R2**, memakai rclone. Kredensialnya
+  tidak disalin tangan: satu-satunya sumber adalah Panel Admin
+  (`platform_settings`, terenkripsi). `deploy/scripts/sync-r2-credentials.sh`
+  menariknya dari panel, mendekripsinya di dalam container `api`, lalu
+  menulis `~/.config/rclone/rclone.conf` (mode 600) — nilai rahasia tidak
+  pernah dicetak. Jalankan ulang skrip itu setiap kali kunci dirotasi;
+  ada `--check` untuk menguji kredensial tanpa menulis apa pun.
+  Konfigurasi off-site (perintah unggah, URL webhook) tinggal di
+  `deploy/backup.env`, terpisah dari `.env` aplikasi — `.env` memuat
+  rahasia runtime yang tidak ada urusannya dengan skrip backup.
+- **Unggahan off-site diverifikasi ukurannya, bukan hanya "rclone tidak
+  melapor galat".** `rclone copy` yang selesai tanpa galat berarti tidak
+  ada galat yang dilaporkan, bukan bahwa objeknya ada dan utuh. Ukuran
+  objek di R2 dibandingkan dengan berkas lokal; beda = gagal.
+- **Off-site gagal = exit != 0.** Salinan lokal tetap disimpan dan tidak
+  dihapus, tetapi kontrak skrip ini adalah "backup + off-site", jadi
+  setengah berhasil ditandai gagal supaya cron punya sesuatu untuk
+  dilaporkan. Tanpa itu, kegagalan off-site hanya jadi satu baris di
+  `backup.log` yang tidak dibaca siapa pun.
+- **Retensi berbeda di tiap sisi:** 7 harian + 28 hari mingguan di VPS,
+  30 hari di R2. Off-site justru untuk menutup kasus "VPS-nya hilang",
+  jadi wajar disimpan lebih lama di sana.
 - Volume Redis **tidak** perlu dibackup: isinya antrean dan cache. Job
   yang hilang dipulihkan dari `outbox_events` yang belum terbit.
 - Media di R2 mengikuti retensi bucket.
 
-Retensi default: 7 dump harian + 28 hari cadangan mingguan. Retensi
-dijalankan **sesudah** backup baru sukses, sehingga kegagalan backup tidak
-pernah mengurangi jumlah salinan yang ada.
+Retensi default: 7 dump harian + 28 hari cadangan mingguan di VPS, 30 hari
+di R2. Retensi lokal dijalankan **sesudah** backup baru sukses, sehingga
+kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.
+
+Prasyarat di host: `rclone` tersedia di `$PATH` atau `~/bin/rclone`
+(biner statis, tidak butuh root). Tanpa itu, backup lokal tetap jalan dan
+off-site dilaporkan gagal — bukan diam-diam dilewati.
 
 ## 7. Skala
 
