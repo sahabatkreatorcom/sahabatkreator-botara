@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ChannelProviderSchema } from "./inbox";
 
 // ---------------------------------------------------------------------------
 // Contacts (Fase 1D)
@@ -91,6 +92,14 @@ export const ContactResponseSchema = z.object({
   optInAt: z.string().datetime().nullable(),
   consentAt: z.string().datetime().nullable(),
   lastContactedAt: z.string().datetime().nullable(),
+  /**
+   * Kanal tempat kontak ini BENAR-BENAR punya percakapan (badge di daftar
+   * kontak). Diturunkan dari `conversations.provider`, bukan kolom di
+   * `contacts` — jadi badge tidak pernah mengklaim kanal yang belum dipakai.
+   * Array kosong = kontak belum pernah menghubungi lewat kanal mana pun
+   * (mis. dibuat manual lewat impor/CRM).
+   */
+  platforms: z.array(ChannelProviderSchema),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),
 });

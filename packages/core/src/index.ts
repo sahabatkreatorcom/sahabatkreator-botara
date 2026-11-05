@@ -31,6 +31,7 @@ export {
   updateContact,
   findDuplicateContacts,
   mergeContacts,
+  listContactPlatforms,
   effectiveOptInStatus,
   setContactConsent,
   type CreateContactInput,

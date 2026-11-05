@@ -66,6 +66,14 @@ export interface WhatsAppPhoneNumberProfile {
   verifiedName: string | null;
   /** Nomor tampil terformat (display_phone_number, mis. "+62 812-3456-7890"). */
   displayPhoneNumber: string | null;
+  /**
+   * Status registrasi nomor di Cloud API (`status`): "CONNECTED" berarti
+   * nomor siap menerima pesan; "PENDING" berarti nomor sudah terdaftar
+   * tetapi belum aktif — Meta TIDAK mengirimkan pesan masuk ke webhook
+   * untuk nomor PENDING, berapa pun langganan aplikasinya. Null bila
+   * Graph tidak menyertakan field ini (mis. token tanpa izin baca status).
+   */
+  status: string | null;
 }
 
 /** Satu tombol komponen BUTTONS template (URL / QUICK_REPLY / PHONE_NUMBER / COPY_CODE …). */
@@ -302,9 +310,10 @@ export class WhatsAppCloudClient extends GraphHttpClient {
   }
 
   /**
-   * Profil nomor (`GET /{phone_number_id}?fields=verified_name,display_phone_number`)
-   * — memvalidasi token + mengambil nama bisnis & nomor tampil saat
-   * connect. Token/nomor yang ditolak Graph melempar WhatsAppGraphError.
+   * Profil nomor (`GET /{phone_number_id}?fields=verified_name,display_phone_number,status`)
+   * — memvalidasi token + mengambil nama bisnis, nomor tampil, dan status
+   * registrasi saat connect. Token/nomor yang ditolak Graph melempar
+   * WhatsAppGraphError.
    */
   async getPhoneNumberProfile(
     phoneNumberId: string,
@@ -313,8 +322,9 @@ export class WhatsAppCloudClient extends GraphHttpClient {
       id?: string;
       verified_name?: string;
       display_phone_number?: string;
+      status?: string;
     }>(
-      `${encodeURIComponent(phoneNumberId)}?fields=verified_name,display_phone_number`,
+      `${encodeURIComponent(phoneNumberId)}?fields=verified_name,display_phone_number,status`,
     );
     return {
       id: typeof body.id === "string" ? body.id : phoneNumberId,
@@ -324,6 +334,7 @@ export class WhatsAppCloudClient extends GraphHttpClient {
         typeof body.display_phone_number === "string"
           ? body.display_phone_number
           : null,
+      status: typeof body.status === "string" ? body.status : null,
     };
   }
 

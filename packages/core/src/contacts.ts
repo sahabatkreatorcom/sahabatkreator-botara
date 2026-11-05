@@ -924,3 +924,80 @@ export async function mergeContacts(
   });
 }
 
+
+/**
+ * Platform tempat kontak ini punya percakapan (badge di daftar kontak).
+ *
+ * Satu kontak bisa dijangkau lewat beberapa kanal sekaligus — mis. orang yang
+ * sama menghubungi lewat WhatsApp lalu lanjut di Telegram — dan agen perlu
+ * melihat itu tanpa membuka kontaknya satu per satu.
+ *
+ * Diturunkan dari `conversations.provider`, bukan dari kolom di `contacts`:
+ * sumber kebenarannya adalah percakapan yang benar-benar ada, sehingga badge
+ * tidak pernah mengklaim kanal yang belum pernah dipakai. Konsekuensinya
+ * kontak tanpa percakapan mengembalikan array kosong, dan itu memang benar.
+ *
+ * Hasil diurutkan menurut `PLATFORM_ORDER` (bukan urutan temuan query) supaya
+ * badge tidak berpindah-pindah antar pemuatan.
+ */
+const PLATFORM_ORDER = [
+  "whatsapp",
+  "instagram",
+  "messenger",
+  "telegram",
+  "webchat",
+] as const;
+
+/**
+ * Tipe platform = nilai enum kolom `conversations.provider` (bukan union
+ * yang ditulis ulang di sini) — kalau suatu saat provider baru masuk enum
+ * database, tipe ini ikut bergerak dan pemanggil yang memetakannya ke
+ * kontrak akan gagal typecheck, bukan diam-diam mengirim nilai asing.
+ */
+export type ContactPlatform = (typeof conversations.provider.enumValues)[number];
+
+export async function listContactPlatforms(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  contactIds: string[],
+): Promise<Map<string, ContactPlatform[]>> {
+  if (contactIds.length === 0) return new Map();
+
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const rows = await tx
+      .selectDistinct({
+        contactId: conversations.contactId,
+        provider: conversations.provider,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          inArray(conversations.contactId, contactIds),
+        ),
+      );
+
+    const byContact = new Map<string, ContactPlatform[]>();
+    for (const row of rows) {
+      if (!row.contactId) continue;
+      const list = byContact.get(row.contactId);
+      if (list) {
+        list.push(row.provider);
+      } else {
+        byContact.set(row.contactId, [row.provider]);
+      }
+    }
+
+    // Platform yang belum ada di daftar urutan tetap tampil — di belakang.
+    const rank = (provider: string): number => {
+      const index = (PLATFORM_ORDER as readonly string[]).indexOf(provider);
+      return index < 0 ? PLATFORM_ORDER.length : index;
+    };
+
+    for (const list of byContact.values()) {
+      list.sort((a, b) => rank(a) - rank(b));
+    }
+
+    return byContact;
+  });
+}

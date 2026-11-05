@@ -14,6 +14,7 @@ import {
   effectiveOptInStatus,
   findDuplicateContacts,
   getContact,
+  listContactPlatforms,
   listContacts,
   listProfilePhotoOwnerIds,
   listSegmentMemberIds,
@@ -37,6 +38,12 @@ import { resolveTenantForUser } from "../tenants/guard";
 export function serializeContact(
   row: Contact,
   avatarUrl: string | null = null,
+  /**
+   * Kanal tempat kontak ini punya percakapan. Default kosong supaya
+   * pemanggil yang belum menghitungnya tetap sah — badge hanya muncul bila
+   * datanya memang disediakan.
+   */
+  platforms: ContactResponse["platforms"] = [],
 ): ContactResponse {
   return ContactResponseSchema.parse({
     id: row.id,
@@ -55,6 +62,7 @@ export function serializeContact(
     optInAt: row.optInAt?.toISOString() ?? null,
     consentAt: row.consentAt?.toISOString() ?? null,
     lastContactedAt: row.lastContactedAt?.toISOString() ?? null,
+    platforms,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });
@@ -151,17 +159,19 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
       { tenantId: tenant.id },
       { ...query.data, onlyIds },
     );
-    const withPhoto = await listProfilePhotoOwnerIds(
-      bundle.db,
-      { tenantId: tenant.id },
-      "contact",
-      result.contacts.map((row) => row.id),
-    );
+    const listedIds = result.contacts.map((row) => row.id);
+    // Foto & platform dihitung bersamaan: keduanya query independen, dan
+    // daftar kontak adalah endpoint terpanas di halaman ini.
+    const [withPhoto, platforms] = await Promise.all([
+      listProfilePhotoOwnerIds(bundle.db, { tenantId: tenant.id }, "contact", listedIds),
+      listContactPlatforms(bundle.db, { tenantId: tenant.id }, listedIds),
+    ]);
     const body = ContactListResponseSchema.parse({
       contacts: result.contacts.map((row) =>
         serializeContact(
           row,
           withPhoto.has(row.id) ? contactAvatarUrl(tenant.id, row.id) : null,
+          platforms.get(row.id) ?? [],
         ),
       ),
       total: result.total,
@@ -177,18 +187,18 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
     if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
     const groups = await findDuplicateContacts(bundle.db, { tenantId: tenant.id });
-    const withPhoto = await listProfilePhotoOwnerIds(
-      bundle.db,
-      { tenantId: tenant.id },
-      "contact",
-      groups.flatMap((g) => g.contacts.map((row) => row.id)),
-    );
+    const groupIds = groups.flatMap((g) => g.contacts.map((row) => row.id));
+    const [withPhoto, platforms] = await Promise.all([
+      listProfilePhotoOwnerIds(bundle.db, { tenantId: tenant.id }, "contact", groupIds),
+      listContactPlatforms(bundle.db, { tenantId: tenant.id }, groupIds),
+    ]);
     const body = ContactDuplicatesResponseSchema.parse({
       groups: groups.map((g) => ({
         contacts: g.contacts.map((row) =>
           serializeContact(
             row,
             withPhoto.has(row.id) ? contactAvatarUrl(tenant.id, row.id) : null,
+            platforms.get(row.id) ?? [],
           ),
         ),
         reasons: g.reasons,
@@ -206,8 +216,12 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     }
     const contact = await getContact(bundle.db, { tenantId: tenant.id }, id);
     if (!contact) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    const [avatarUrl, platforms] = await Promise.all([
+      singleContactAvatarUrl(bundle, tenant.id, id),
+      listContactPlatforms(bundle.db, { tenantId: tenant.id }, [id]),
+    ]);
     return c.json(
-      serializeContact(contact, await singleContactAvatarUrl(bundle, tenant.id, id)),
+      serializeContact(contact, avatarUrl, platforms.get(id) ?? []),
     );
   });
 
@@ -248,10 +262,18 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     if (result.kind === "same_contact") {
       return apiError(c, 422, "CONTACT_MERGE_SAME", "A contact cannot be merged into itself");
     }
+    // Platform dihitung ULANG untuk survivor: merge memindahkan
+    // percakapan kontak yang digabung ke survivor, jadi badge-nya
+    // berubah — mengembalikan nilai lama akan menampilkan badge basi.
+    const [avatarUrl, platforms] = await Promise.all([
+      singleContactAvatarUrl(bundle, tenant.id, result.survivor.id),
+      listContactPlatforms(bundle.db, { tenantId: tenant.id }, [result.survivor.id]),
+    ]);
     return c.json(
       serializeContact(
         result.survivor,
-        await singleContactAvatarUrl(bundle, tenant.id, result.survivor.id),
+        avatarUrl,
+        platforms.get(result.survivor.id) ?? [],
       ),
     );
   });
@@ -282,8 +304,14 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
       { ...parsed.data, actorUserId: c.get("appUser").id },
     );
     if (!contact) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    // UI menimpa baris daftar dengan respons PATCH ini, jadi platform
+    // harus ikut dihitung — kalau tidak, badge hilang sesudah menyunting.
+    const [avatarUrl, platforms] = await Promise.all([
+      singleContactAvatarUrl(bundle, tenant.id, id),
+      listContactPlatforms(bundle.db, { tenantId: tenant.id }, [id]),
+    ]);
     return c.json(
-      serializeContact(contact, await singleContactAvatarUrl(bundle, tenant.id, id)),
+      serializeContact(contact, avatarUrl, platforms.get(id) ?? []),
     );
   });
 

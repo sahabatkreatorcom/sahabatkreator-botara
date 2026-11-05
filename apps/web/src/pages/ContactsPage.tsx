@@ -67,6 +67,47 @@ function parseTags(raw: string): string[] {
     .filter(Boolean);
 }
 
+/**
+ * Badge platform kontak — penanda dari mana saja kontak ini pernah
+ * menulis. Diturunkan server dari `conversations.provider` (bukan dari
+ * data tersimpan di kontak), jadi kontak tanpa percakapan tidak
+ * menampilkan badge apa pun. Urutan sudah stabil dari server
+ * (WhatsApp → Instagram → Messenger → Telegram → Webchat), sehingga
+ * badge tidak "melompat" antar pemuatan.
+ */
+function PlatformBadges({
+  t,
+  platforms,
+  className = "",
+  showEmpty = false,
+}: {
+  t: Translate;
+  platforms: ContactResponse["platforms"];
+  className?: string;
+  showEmpty?: boolean;
+}) {
+  if (platforms.length === 0) {
+    if (!showEmpty) return null;
+    return (
+      <span className={`text-[11px] text-muted ${className}`}>
+        {t("contacts.platformsNone")}
+      </span>
+    );
+  }
+  return (
+    <span className={`flex flex-wrap items-center gap-1 ${className}`}>
+      {platforms.map((provider) => (
+        <span
+          key={provider}
+          className="rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium text-ink"
+        >
+          {t(`inbox.providers.${provider}` as TranslationKey)}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 interface ContactsPageProps {
   t: Translate;
   locale: Locale;
@@ -450,6 +491,11 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
                         .filter(Boolean)
                         .join(" · ") || "—"}
                     </span>
+                    <PlatformBadges
+                      t={t}
+                      platforms={contact.platforms}
+                      className="mt-1"
+                    />
                     {contact.tags.length > 0 ? (
                       <span className="mt-1 flex flex-wrap gap-1">
                         {contact.tags.map((tag) => (
@@ -718,6 +764,16 @@ function ContactDetailModal({
               <h2 className="text-lg font-bold text-ink">{t("contacts.detailTitle")}</h2>
               <p className="mt-0.5 text-sm text-muted">
                 {[contact.phone, contact.email].filter(Boolean).join(" · ") || "—"}
+              </p>
+              <p className="mt-1 flex flex-wrap items-center gap-1 text-[11px] text-muted">
+                <span className="font-medium text-ink">
+                  {t("contacts.platformsLabel")}:
+                </span>
+                <PlatformBadges
+                  t={t}
+                  platforms={contact.platforms}
+                  showEmpty
+                />
               </p>
             </div>
           </div>

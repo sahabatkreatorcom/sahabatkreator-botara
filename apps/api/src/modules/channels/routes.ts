@@ -1407,6 +1407,11 @@ async function fetchAndStoreMetaAccountPhoto(
  *    — kegagalan/kosong tidak menggagalkan connect; kartu jatuh ke
  *    inisial. Foto profil KONTAK WhatsApp tidak ada di API (privasi),
  *    jadi tidak ada pengambilan foto kontak untuk provider ini.
+ * 5. WABA di-subscribe ke aplikasi (`POST /{waba-id}/subscribed_apps`)
+ *    — WAJIB untuk jalur tempel token: OAuth Unified Login melakukannya
+ *    otomatis, jalur manual tidak, dan tanpa langganan itu pesan masuk
+ *    tidak pernah dikirim Meta ke webhook kita. Best-effort: gagal →
+ *    peringatan META_SUBSCRIBE_FAILED, koneksi tetap aktif.
  */
 async function connectWhatsApp(
   c: Parameters<typeof apiError>[0],
@@ -1430,6 +1435,10 @@ async function connectWhatsApp(
   if (!input.wabaId) {
     return apiError(c, 400, "VALIDATION_ERROR", "wabaId is required for whatsapp");
   }
+  // Simpan sebagai konstanta: dipakai juga di dalam penutup connect
+  // (closure) yang tidak mewarisi penyempitan tipe dari penjaga di atas.
+  const accessToken = input.accessToken;
+  const wabaId = input.wabaId;
   if (!opts.channelTokenSecret) {
     return apiError(c, 503, "INTERNAL_ERROR", "WhatsApp is not configured");
   }
@@ -1463,6 +1472,66 @@ async function connectWhatsApp(
     return apiError(c, 503, "INTERNAL_ERROR", "Channel credential encryption is not configured");
   }
 
+  /**
+   * Penutup connect untuk setiap jalur yang MENYIMPAN kredensial
+   * (create, revive, dan connect ulang idempoten).
+   *
+   * LANGGANAN WABA (perbaikan celah yang ditemukan pemilik): jalur OAuth
+   * Unified Login MENSUBSCRIBE WABA ke aplikasi secara otomatis,
+   * sedangkan penyambungan lewat TEMPEL TOKEN tidak. Akibatnya token
+   * valid dan webhook aplikasi benar, tetapi pesan masuk tidak pernah
+   * tiba karena WABA belum berlangganan aplikasi ini — persis gejala
+   * "nomor tersambung tetapi tidak menerima pesan". Di sini langganan
+   * dilakukan eksplisit memakai token yang baru diserahkan.
+   *
+   * `POST /{waba-id}/subscribed_apps` bersifat idempoten, jadi jalur
+   * connect ulang idempoten pun memanggilnya — itu sekaligus jalan
+   * perbaikan bagi akun yang terhubung SEBELUM perbaikan ini ada
+   * (cukup sambungkan ulang nomornya, tanpa memutus koneksi).
+   * Kegagalan TIDAK menggagalkan koneksi: menjadi peringatan
+   * META_SUBSCRIBE_FAILED pada respons, pola yang sama dengan varian
+   * SUAT Instagram (7D.3) dan complete OAuth.
+   */
+  const finishSavedConnect = async (
+    row: ChannelAccount,
+    status: 200 | 201,
+  ) => {
+    const serialized = await serializeChannelWithAvatar(bundle, row);
+    // WABA tersimpan adalah sumber kebenaran untuk akun yang sudah ada;
+    // input form hanya cadangan bila baris lama belum menyimpannya.
+    const waba = row.parentExternalId ?? wabaId;
+    const warnings: Array<
+      "META_SUBSCRIBE_FAILED" | "WHATSAPP_NUMBER_NOT_CONNECTED"
+    > = [];
+
+    // Status registrasi nomor (temuan pemeriksaan produksi): nomor
+    // berstatus PENDING/RESTRICTED sudah terdaftar tetapi Meta TIDAK
+    // mengirim pesan masuknya ke webhook — gejalanya sama dengan "belum
+    // subscribe", jadi keduanya harus bisa dibedakan oleh operator.
+    // Hanya dilaporkan bila Graph benar-benar menyertakan status.
+    if (profile.status && profile.status.toUpperCase() !== "CONNECTED") {
+      warnings.push("WHATSAPP_NUMBER_NOT_CONNECTED");
+      console.error(
+        `[whatsapp] nomor akun ${row.id} berstatus ${profile.status} — pesan masuk tidak akan tiba sampai statusnya CONNECTED`,
+      );
+    }
+
+    try {
+      const graph = new MetaGraphClient({
+        baseUrl: opts.metaApiBase,
+        apiVersion: META_GRAPH_API_VERSION,
+        accessToken,
+      });
+      await graph.subscribeAppToObject(waba);
+    } catch {
+      warnings.push("META_SUBSCRIBE_FAILED");
+      console.error(
+        `[whatsapp] subscribe subscribed_apps WABA ${waba} untuk akun ${row.id} gagal — koneksi tetap aktif`,
+      );
+    }
+    return c.json({ ...serialized, warnings }, status);
+  };
+
   // Penjaga "satu nomor = satu koneksi" per phone_number_id.
   const existing = await lookupChannelAccountsByProviderExternalId(
     bundle.db,
@@ -1488,7 +1557,7 @@ async function connectWhatsApp(
         { tenantId: input.tenantId },
         own.id,
       );
-      if (row) return c.json(await serializeChannelWithAvatar(bundle, row), 200);
+      if (row) return finishSavedConnect(row, 200);
     }
     // Akun milik workspace ini 'disconnected'/'error': hidupkan lagi
     // baris yang sama dengan kredensial baru (pola revive Meta).
@@ -1522,7 +1591,7 @@ async function connectWhatsApp(
         input.phoneNumberId,
       ),
     );
-    return c.json(await serializeChannelWithAvatar(bundle, updated), 200);
+    return finishSavedConnect(updated, 200);
   }
 
   let row: ChannelAccount;
@@ -1591,7 +1660,7 @@ async function connectWhatsApp(
       input.phoneNumberId,
     ),
   );
-  return c.json(await serializeChannelWithAvatar(bundle, row), 201);
+  return finishSavedConnect(row, 201);
 }
 
 /**

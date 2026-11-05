@@ -149,7 +149,7 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
   const [oauthBannerError, setOauthBannerError] = useState<string | null>(
     null,
   );
-  const [oauthWarning, setOauthWarning] = useState<string | null>(null);
+  const [connectWarning, setConnectWarning] = useState<string | null>(null);
   const oauthParamsHandled = useRef(false);
   const [copiedWebhookField, setCopiedWebhookField] = useState<string | null>(
     null,
@@ -414,7 +414,7 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       // Peringatan subscribe varian SUAT memakai banner yang sama
       // seperti alur OAuth (koneksi berhasil, webhook belum tentu).
       if (created.warnings?.includes("META_SUBSCRIBE_FAILED")) {
-        setOauthWarning(t("channels.oauthSubscribeWarning"));
+        setConnectWarning(t("channels.oauthSubscribeWarning"));
       }
       await load();
       finishConnect(created.id);
@@ -447,6 +447,20 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       setWaName("");
       setWaWabaId("");
       setWaPhoneId("");
+      // Jalur tempel token WAJIB subscribe WABA sendiri (OAuth
+      // melakukannya otomatis). Bila langganan itu gagal, nomor tetap
+      // terhubung tetapi pesan masuk tidak akan tiba — beri tahu di
+      // banner yang sama dengan alur OAuth, bukan diam-diam. Status
+      // nomor yang belum CONNECTED adalah penyebab lain dengan gejala
+      // yang sama, jadi keduanya dilaporkan bila muncul bersamaan.
+      const notices: string[] = [];
+      if (created.warnings?.includes("WHATSAPP_NUMBER_NOT_CONNECTED")) {
+        notices.push(t("channels.whatsappStatusWarning"));
+      }
+      if (created.warnings?.includes("META_SUBSCRIBE_FAILED")) {
+        notices.push(t("channels.oauthSubscribeWarning"));
+      }
+      if (notices.length > 0) setConnectWarning(notices.join(" "));
       await load();
       finishConnect(created.id);
     } catch (err) {
@@ -512,7 +526,7 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       setOauthSessionId(null);
       setOauthSession(null);
       if (result.warnings.includes("META_SUBSCRIBE_FAILED")) {
-        setOauthWarning(t("channels.oauthSubscribeWarning"));
+        setConnectWarning(t("channels.oauthSubscribeWarning"));
       }
       await load();
       finishConnect(result.channel.id);
@@ -692,12 +706,12 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
         </div>
       ) : null}
 
-      {oauthWarning ? (
+      {connectWarning ? (
         <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-line bg-elevated px-3 py-2">
-          <p className="text-sm text-ink">{oauthWarning}</p>
+          <p className="text-sm text-ink">{connectWarning}</p>
           <button
             type="button"
-            onClick={() => setOauthWarning(null)}
+            onClick={() => setConnectWarning(null)}
             className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-muted hover:text-ink"
           >
             {t("common.close")}
