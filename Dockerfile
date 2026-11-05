@@ -30,6 +30,11 @@ FROM node:22-bookworm-slim AS server
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+# corepack disiapkan JUGA di runtime: container `migrate` menjalankan
+# `pnpm --filter @sahabat-kreator/db db:migrate` (lihat
+# docs/DEPLOY-STAGING.md §4). Tanpa ini perintah itu gagal
+# "/bin/sh: 1: pnpm: not found" — node:*-slim tidak membawa pnpm.
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=build /app /app
