@@ -7,6 +7,7 @@ import {
 } from "@sahabat-kreator/contracts";
 import {
   attributeContactToGrowthLink,
+  flushQueuedWebchatMessages,
   getWebchatChannelAccountStatus,
   listMessagesPage,
   openWebchatSession,
@@ -183,7 +184,7 @@ export function createWebchatRoutes(
     if (accountStatus !== "connected") {
       return apiError(c, 409, "CHANNEL_DISCONNECTED", "Channel is disconnected");
     }
-    const page = await listMessagesPage(
+    let page = await listMessagesPage(
       bundle.db,
       { tenantId: payload.tid },
       payload.cv,
@@ -191,6 +192,36 @@ export function createWebchatRoutes(
     );
     if (page.kind !== "ok") {
       return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    // Fase 16F — polling widget adalah BUKTI PENGIRIMAN, bukan sekadar
+    // pembacaan. Widget merender SETIAP pesan yang dikembalikan endpoint
+    // ini, jadi begitu respons ini dibangun, balasan agen yang masih
+    // `queued` benar-benar sudah sampai ke layar pengunjung. Tanpa
+    // penandaan di sini, satu-satunya pemicu `queued → sent` adalah
+    // socket connect: pengunjung yang widget-nya tetap terbuka (polling
+    // 4 detik) menerima pesannya, sementara dashboard terus menampilkan
+    // "Queued" — agen mengira balasannya belum terkirim padahal sudah.
+    //
+    // Diperiksa dari hasil yang SUDAH dimuat supaya tidak menambah query
+    // pada 99% polling yang tidak punya antrean; halaman dimuat ulang
+    // hanya pada jalur langka itu agar respons tidak memuat status basi.
+    if (
+      page.messages.some(
+        (message) => message.direction === "outbound" && message.status === "queued",
+      )
+    ) {
+      await flushQueuedWebchatMessages(
+        bundle.db,
+        { tenantId: payload.tid, conversationId: payload.cv },
+        { via: "widget-poll" },
+      );
+      const refreshed = await listMessagesPage(
+        bundle.db,
+        { tenantId: payload.tid },
+        payload.cv,
+        { limit: 100 },
+      );
+      if (refreshed.kind === "ok") page = refreshed;
     }
     const body = MessageListResponseSchema.parse({
       messages: page.messages.map(serializeMessage),

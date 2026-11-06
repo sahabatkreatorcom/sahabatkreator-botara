@@ -75,6 +75,28 @@ Tiga lapis, sengaja berlapis:
 per proses. Itu benar untuk satu replika, **salah** untuk banyak. Di
 produksi `REDIS_URL` wajib.
 
+Saat Redis mati, limiter **fail-open** ke memori proses: request tidak
+pernah gagal karena Redis bermasalah, tetapi batas efektif lintas replika
+menjadi `limit × jumlah replika` selama 30 detik terakhir (limiter
+berhenti mencoba Redis selama itu, lalu menyambung lagi). Ini trade-off
+yang disengaja — alternatifnya menolak semua trafik, atau memindahkan
+penghitung ke Postgres, yaitu database yang justru sedang dilindungi
+limiter ini.
+
+Karena itu degradasinya **terbaca di setiap respons**, bukan hanya di log:
+
+```bash
+curl -sI https://api.contoh.id/v1/ping | grep -i x-ratelimit
+# X-RateLimit-Limit: 600
+# X-RateLimit-Remaining: 597
+# X-RateLimit-Scope: global        ← dihitung bersama semua replika
+# X-RateLimit-Scope: process       ← HANYA proses ini; batas berlipat
+```
+
+`X-RateLimit-Scope: process` pada trafik normal berarti Redis sedang tidak
+terjangkau (atau `REDIS_URL` memang kosong). Log mencatat satu baris
+`ratelimit.redis_unavailable` per periode degradasi — bukan per request.
+
 ## 5. Kesehatan
 
 | Endpoint | Arti |
@@ -343,6 +365,31 @@ SELECT created_at, actor_id, meta
 Perhatikan bedanya: `failed` pada BullMQ berbunyi di SETIAP percobaan,
 termasuk yang akhirnya berhasil. Yang dicatat ke audit hanya yang
 MENYERAH — jadi daftar ini tidak berisi kegagalan yang sudah pulih.
+
+### Kalau balasan webchat tertulis "Menunggu pengunjung"
+
+Itu **bukan** kegagalan pengiriman dan bukan antrean yang macet. Balasan
+sudah tersimpan di kotak masuk widget dan akan tampil begitu pengunjung
+membuka chat lagi — status berubah menjadi `sent` saat widget memuat
+riwayat (polling 4 detik) atau saat socket pengunjung tersambung. Usia di
+samping label menunjukkan sudah berapa lama ia menunggu, sehingga agen
+bisa memutuskan menghubungi lewat jalur lain (email/telepon).
+
+Kalau status itu bertahan berjam-jam untuk banyak kontak sekaligus,
+periksa hal lain dulu sebelum menuduh webchat: akun channel yang
+`disconnected` menghentikan seluruh arus pengunjung (409
+`CHANNEL_DISCONNECTED` di sisi widget), dan pesan sengaja TIDAK ditandai
+terkirim selama channel mati.
+
+```sql
+-- balasan webchat yang menunggu, terlama dulu
+SELECT m.created_at, c.id AS conversation_id, left(m.content_text, 60) AS isi
+  FROM messages m
+  JOIN conversations c ON c.id = m.conversation_id
+ WHERE c.provider = 'webchat' AND m.direction = 'outbound' AND m.status = 'queued'
+ ORDER BY m.created_at
+ LIMIT 20;
+```
 
 ### Kalau channel Meta tidak menerima pesan
 

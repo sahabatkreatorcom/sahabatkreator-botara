@@ -134,6 +134,14 @@ check(
   preflight.status !== 429,
   `status=${preflight.status}`,
 );
+// Fase 16H: tanpa Redis, penghitung memang per proses — dan respons harus
+// mengatakannya. Batas efektif lintas replika menjadi `limit × replika`;
+// menyembunyikan itu berarti membiarkan angka `Limit` berbohong.
+check(
+  "limiter: X-RateLimit-Scope=process tanpa Redis",
+  first.headers.get("x-ratelimit-scope") === "process",
+  String(first.headers.get("x-ratelimit-scope")),
+);
 
 limiter.close();
 

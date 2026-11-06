@@ -1037,6 +1037,40 @@ export async function listQueuedMetaDeliveries(
 ): Promise<MetaQueuedDelivery[]> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT set_config('app.system_delivery', 'meta', true)`);
+    /**
+     * Alamat tujuan: `provider_chat_id` percakapan lebih dulu, identitas
+     * kontak sebagai cadangan (Fase 16G).
+     *
+     * Sebelumnya ini INNER JOIN ke `channel_identities`. Akibatnya
+     * percakapan yang SUDAH punya `provider_chat_id` — alamat yang
+     * lengkap dan pasti benar — tetap dibuang bila baris identitasnya
+     * tidak ada. Baris seperti itu berakhir `queued` selamanya tanpa
+     * satu pun error: pesan ada, alamat ada, tetapi pemindai tidak
+     * pernah melihatnya.
+     *
+     * Subquery (bukan LEFT JOIN) dipilih karena `channel_identities`
+     * TIDAK punya unique index pada (channel_account_id, contact_id):
+     * satu kontak bisa punya lebih dari satu identitas di akun yang
+     * sama (mis. nomor WhatsApp berpindah). JOIN akan menggandakan baris
+     * pesan dan menghabiskan slot batch — dengan `limit` 25, beberapa
+     * kontak saja bisa menahan seluruh antrean. `LIMIT 1` dengan urutan
+     * tetap membuat pilihannya deterministik, bukan sembarang baris.
+     *
+     * `IS NOT NULL` pada WHERE menggantikan fungsi penyaring yang dulu
+     * diam-diam dijalankan INNER JOIN: percakapan tanpa alamat sama
+     * sekali memang tidak bisa dikirimi, dan tidak boleh menempati slot.
+     */
+    const recipientExternalId = sql<string>`coalesce(
+      ${conversations.providerChatId},
+      (
+        SELECT ci.external_user_id
+          FROM channel_identities ci
+         WHERE ci.channel_account_id = ${channelAccounts.id}
+           AND ci.contact_id = ${conversations.contactId}
+         ORDER BY ci.created_at ASC
+         LIMIT 1
+      )
+    )`;
     const rows = await tx
       .select({
         tenantId: messages.tenantId,
@@ -1051,20 +1085,13 @@ export async function listQueuedMetaDeliveries(
         accountExternalId: channelAccounts.externalId,
         tokenType: channelAccounts.tokenType,
         encryptedAccessToken: channelAccounts.accessTokenEncrypted,
-        recipientExternalId: sql<string>`coalesce(${conversations.providerChatId}, ${channelIdentities.externalUserId})`,
+        recipientExternalId,
       })
       .from(messages)
       .innerJoin(conversations, eq(messages.conversationId, conversations.id))
       .innerJoin(
         channelAccounts,
         eq(conversations.channelAccountId, channelAccounts.id),
-      )
-      .innerJoin(
-        channelIdentities,
-        and(
-          eq(channelIdentities.channelAccountId, channelAccounts.id),
-          eq(channelIdentities.contactId, conversations.contactId),
-        ),
       )
       .where(
         and(
@@ -1078,6 +1105,7 @@ export async function listQueuedMetaDeliveries(
             lt(messages.claimedAt, outboundClaimStale),
           ),
           inArray(conversations.provider, ["messenger", "instagram", "whatsapp"]),
+          sql`${recipientExternalId} IS NOT NULL`,
         ),
       )
       .orderBy(asc(messages.createdAt))

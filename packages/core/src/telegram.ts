@@ -709,6 +709,23 @@ export async function listQueuedTelegramDeliveries(
     await tx.execute(
       sql`SELECT set_config('app.system_delivery', 'telegram', true)`,
     );
+    // Alamat chat: `provider_chat_id` percakapan lebih dulu, identitas
+    // kontak sebagai cadangan (Fase 16G). Lihat catatan panjang di
+    // `listQueuedMetaDeliveries`: INNER JOIN ke channel_identities
+    // membuang percakapan yang alamatnya sudah pasti hanya karena baris
+    // identitasnya tidak ada, dan JOIN itu juga menggandakan baris pesan
+    // (tidak ada unique index pada pasangan akun+kontak).
+    const chatExternalId = sql<string>`coalesce(
+      ${conversations.providerChatId},
+      (
+        SELECT ci.external_user_id
+          FROM channel_identities ci
+         WHERE ci.channel_account_id = ${channelAccounts.id}
+           AND ci.contact_id = ${conversations.contactId}
+         ORDER BY ci.created_at ASC
+         LIMIT 1
+      )
+    )`;
     const rows = await tx
       .select({
         tenantId: messages.tenantId,
@@ -719,7 +736,7 @@ export async function listQueuedTelegramDeliveries(
         channelAccountId: channelAccounts.id,
         botExternalId: channelAccounts.externalId,
         encryptedBotToken: channelAccounts.accessTokenEncrypted,
-        chatExternalId: sql<string>`coalesce(${conversations.providerChatId}, ${channelIdentities.externalUserId})`,
+        chatExternalId,
       })
       .from(messages)
       .innerJoin(
@@ -729,13 +746,6 @@ export async function listQueuedTelegramDeliveries(
       .innerJoin(
         channelAccounts,
         eq(conversations.channelAccountId, channelAccounts.id),
-      )
-      .innerJoin(
-        channelIdentities,
-        and(
-          eq(channelIdentities.channelAccountId, channelAccounts.id),
-          eq(channelIdentities.contactId, conversations.contactId),
-        ),
       )
       .where(
         and(
@@ -749,6 +759,7 @@ export async function listQueuedTelegramDeliveries(
             lt(messages.claimedAt, outboundClaimStale),
           ),
           eq(conversations.provider, "telegram"),
+          sql`${chatExternalId} IS NOT NULL`,
         ),
       )
       .orderBy(asc(messages.createdAt))

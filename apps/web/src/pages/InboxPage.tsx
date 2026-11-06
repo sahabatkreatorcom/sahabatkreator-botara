@@ -27,7 +27,7 @@ import {
 } from "../hooks/usePolling";
 import { useNudgeSubscription } from "../hooks/useRealtime";
 import { useUnreadBadge } from "../inbox/UnreadBadgeProvider";
-import { formatListTime, formatTime } from "../utils/format";
+import { formatListTime, formatRelativeTime, formatTime } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
 type Translate = (
@@ -1364,6 +1364,18 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                       {messages.map((msg) => {
                       const outbound = msg.direction === "outbound";
                       const highlighted = highlightedId === msg.id;
+                      // Fase 16F: pada webchat, `queued` BUKAN "sedang
+                      // dikirim" seperti pada WhatsApp/Telegram — pesan
+                      // sudah ada di kotak masuk widget dan akan tampil
+                      // saat pengunjung membuka widget lagi. Label
+                      // "Queued" membuat agen mengira balasannya belum
+                      // keluar, padahal masalahnya pengunjung tidak
+                      // sedang online. Usianya ditampilkan supaya agen
+                      // bisa memutuskan menghubungi lewat jalur lain.
+                      const waitingForVisitor =
+                        outbound &&
+                        msg.status === "queued" &&
+                        selected?.provider === "webchat";
                       return (
                         <div
                           key={msg.id}
@@ -1459,9 +1471,16 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                               ) : null}
                               <span>{formatTime(msg.createdAt, locale)}</span>
                               {outbound ? (
-                                <span>
-                                  {t(`inbox.messageStatus.${msg.status}` as TranslationKey)}
-                                </span>
+                                waitingForVisitor ? (
+                                  <span title={t("inbox.messageStatus.queuedWebchatHint")}>
+                                    {t("inbox.messageStatus.queuedWebchat")} ·{" "}
+                                    {formatRelativeTime(msg.createdAt, locale)}
+                                  </span>
+                                ) : (
+                                  <span>
+                                    {t(`inbox.messageStatus.${msg.status}` as TranslationKey)}
+                                  </span>
+                                )
                               ) : null}
                             </div>
                           </div>

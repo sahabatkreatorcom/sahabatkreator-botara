@@ -16,6 +16,15 @@
  * - `OPTIONS` tidak dihitung (preflight CORS widget).
  * - Respons 429 memakai kontrak `{ error: { code: "RATE_LIMITED" } }` plus
  *   `Retry-After` dan `X-RateLimit-*`.
+ *
+ * Fase 16H — degradasi dibuat TERBACA, bukan tersembunyi:
+ * saat Redis mati, penghitung menjadi per proses, sehingga batas efektif
+ * lintas replika adalah `limit × jumlah replika`. Itu trade-off yang
+ * diterima (alternatifnya menolak semua request, atau memindahkan
+ * penghitung ke Postgres — persis database yang sedang dilindungi
+ * limiter ini), tetapi TIDAK boleh tak terlihat. Setiap respons membawa
+ * `X-RateLimit-Scope: global|process`, jadi degradasi terbaca pada trafik
+ * normal tanpa harus menunggu 429 atau menggali log.
  */
 import type { Context, MiddlewareHandler } from "hono";
 import type { Logger } from "@sahabat-kreator/config";
@@ -64,7 +73,15 @@ export interface RateLimiter {
 interface MemoryBucket {
   count: number;
   resetAt: number;
+  /**
+   * Dari mana angka ini berasal. `global` = Redis, dihitung bersama
+   * seluruh replika. `process` = memori proses ini saja, artinya batas
+   * efektif lintas replika menjadi `limit × jumlah replika`.
+   */
+  scope: RateLimitScope;
 }
+
+export type RateLimitScope = "global" | "process";
 
 const REDIS_RETRY_AFTER_MS = 30_000;
 const MEMORY_PRUNE_THRESHOLD = 10_000;
@@ -104,9 +121,14 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   function logRedisFailure(reason: unknown): void {
     if (redisFailureLogged) return;
     redisFailureLogged = true;
+    // Disebutkan eksplisit bahwa batas menjadi per proses: pesan "Redis
+    // tidak tersedia" saja membuat orang mengira rate limit mati total,
+    // padahal ia masih bekerja — hanya berlipat sebanyak replika.
     options.logger?.warn("ratelimit.redis_unavailable", {
       reason,
       retryAfterMs: REDIS_RETRY_AFTER_MS,
+      degradedScope: "process",
+      note: "batas efektif lintas replika menjadi limit × jumlah replika sampai Redis pulih",
     });
   }
 
@@ -124,7 +146,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
     // TTL 2x window: key lama dibersihkan otomatis oleh Redis, bukan oleh
     // proses (tidak ada negara yang perlu dijaga di memori aplikasi).
     if (count === 1) await client.expire(key, windowSeconds * 2);
-    return { count, resetAt: 0 };
+    return { count, resetAt: 0, scope: "global" };
   }
 
   function hitMemory(key: string, resetAt: number): MemoryBucket {
@@ -136,7 +158,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
           if (bucket.resetAt <= currentTime) memory.delete(bucketKey);
         }
       }
-      const fresh: MemoryBucket = { count: 1, resetAt };
+      const fresh: MemoryBucket = { count: 1, resetAt, scope: "process" };
       memory.set(key, fresh);
       return fresh;
     }
@@ -156,7 +178,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       try {
         const result = await hitRedis(key, windowSeconds);
         redisFailureLogged = false;
-        return { count: result.count, resetAt };
+        return { count: result.count, resetAt, scope: "global" };
       } catch (firstErr) {
         // Socket basi adalah penyebab tersering (server Redis sehat,
         // klien ephemeral mati sesudah idle — pola insiden oauth-kv
@@ -166,7 +188,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
         try {
           const result = await hitRedis(key, windowSeconds);
           redisFailureLogged = false;
-          return { count: result.count, resetAt };
+          return { count: result.count, resetAt, scope: "global" };
         } catch {
           redisRetryAt = now() + REDIS_RETRY_AFTER_MS;
           logRedisFailure(firstErr);
@@ -195,6 +217,11 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       c.header("X-RateLimit-Limit", String(rule.limit));
       c.header("X-RateLimit-Remaining", String(remaining));
       c.header("X-RateLimit-Reset", String(Math.ceil(result.resetAt / 1000)));
+      // Terbaca pada SETIAP respons, bukan hanya 429: saat Redis mati,
+      // `Limit` di atas tetap angka konfigurasi padahal yang berlaku
+      // hanya untuk proses ini. Tanpa header ini, satu-satunya jejaknya
+      // adalah satu baris log yang mudah terlewat.
+      c.header("X-RateLimit-Scope", result.scope);
 
       if (result.count > rule.limit) {
         const retryAfter = Math.max(1, Math.ceil((result.resetAt - now()) / 1000));

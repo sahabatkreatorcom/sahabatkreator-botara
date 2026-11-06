@@ -275,6 +275,9 @@ export const en = {
     },
     messageStatus: {
       queued: "Queued",
+      queuedWebchat: "Waiting for visitor",
+      queuedWebchatHint:
+        "This reply is already saved in the widget's inbox. It appears as soon as the visitor opens the chat again — the age above tells you how long it has been waiting.",
       sent: "Sent",
       delivered: "Delivered",
       read: "Read",

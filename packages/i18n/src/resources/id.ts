@@ -274,6 +274,9 @@ export const id: Resources = {
     },
     messageStatus: {
       queued: "Antre",
+      queuedWebchat: "Menunggu pengunjung",
+      queuedWebchatHint:
+        "Balasan ini sudah tersimpan di kotak masuk widget. Ia muncul begitu pengunjung membuka chat lagi — usia di atas menunjukkan sudah berapa lama menunggu.",
       sent: "Terkirim",
       delivered: "Sampai",
       read: "Dibaca",

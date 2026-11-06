@@ -327,10 +327,18 @@ export async function recordWebchatInboundMessage(
  * `queued` (tidak terkirim, tidak hilang, tanpa audit `message.sent`)
  * dan ter-flush seperti biasa begitu channel dihubungkan lagi dan
  * pengunjung terhubung. Mengembalikan [] juga bila percakapan tak ada.
+ *
+ * Fase 16F: `via` mencatat PEMICU flush di audit (`message.sent`).
+ * Sebelumnya satu-satunya pemicu adalah socket connect, sehingga pesan
+ * yang jelas-jelas sudah dibaca widget (ia memuat riwayat lewat REST
+ * setiap 4 detik) tetap berstatus `queued` di dashboard. Sekarang
+ * polling widget sendiri adalah bukti pengiriman — dan audit harus bisa
+ * membedakan keduanya saat menelusuri insiden.
  */
 export async function flushQueuedWebchatMessages(
   db: Database,
   ctx: { tenantId: string; conversationId: string },
+  options: { via?: "ws-connect-flush" | "widget-poll" } = {},
 ): Promise<Message[]> {
   return withTenantDb(db, ctx.tenantId, async (tx) => {
     const [conv] = await tx
@@ -393,7 +401,7 @@ export async function flushQueuedWebchatMessages(
         conversationId: ctx.conversationId,
         messageIds: ids,
         channel: "webchat",
-        via: "ws-connect-flush",
+        via: options.via ?? "ws-connect-flush",
       },
     });
 

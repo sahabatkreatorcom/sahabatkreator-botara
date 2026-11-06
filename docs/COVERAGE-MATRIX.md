@@ -17,6 +17,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Instagram API with Instagram Login | ❌ | sengaja belum ada (§12.7) |
 | Telegram Bot API | ✅ | `channel-telegram`, `modules/telegram` |
 | Webchat widget | ✅ | `packages/embed`, `modules/webchat` |
+| Kebenaran pengiriman webchat (polling widget = terkirim) | ✅ | `flushQueuedWebchatMessages({ via })`, `webchat-delivery.test.ts` |
 | OAuth "Lanjutkan dengan Facebook" | ✅ | `modules/meta-oauth` |
 | Siklus hidup token Meta (refresh, tandai mati) | ✅ | `meta-token-lifecycle`, migrasi 0003 |
 
@@ -100,7 +101,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Jejak job latar yang menyerah | ✅ | `job-failures.ts`, audit `job.failed`, kategori "Background job" |
 | Analytics & dashboard | ✅ | `modules/analytics`, `modules/dashboard` |
 | i18n id/en | ✅ | `packages/i18n` |
-| Rate limit in-app | ⚠️ | fallback in-memory bila Redis mati (salah untuk multi-replika) |
+| Rate limit in-app | ⚠️ | fallback in-memory bila Redis mati (batas = `limit × replika`), tetapi terlihat lewat `X-RateLimit-Scope: process` |
 | Billing/subscription (paket berbayar) | ❌ | `subscriptions` ada, alur tagihan belum |
 
 ## Kualitas
@@ -109,7 +110,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 |---|---|---|
 | Typecheck seluruh paket | ✅ | `pnpm typecheck` |
 | ESLint | ✅ | `pnpm lint` (0 error, 20 warning) |
-| Unit test (RLS, kontrak, jobId, webhook) | ✅ | `pnpm test` (186 test, 18 file) |
+| Unit test (RLS, kontrak, jobId, webhook) | ✅ | `pnpm test` (199 test, 21 file) |
 | Verifikasi migrasi + RLS penuh | ✅ | `pnpm --filter db verify` (44 seksi) |
 | CI | ✅ | `.github/workflows/ci.yml` |
 | Deploy Docker | ✅ | `Dockerfile`, `deploy/` |
