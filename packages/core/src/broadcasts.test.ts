@@ -26,12 +26,19 @@ import { createTestDb, seedContact, TEST_TENANT_ID, type TestDb } from "./testin
  */
 
 /**
- * Hanya `variableCount` dan `bodyText` yang dibaca `classifyBroadcastCandidate`.
- * Cast ini memusatkan pengetahuan itu ke satu tempat alih-alih memaksa
- * setiap test membangun baris template lengkap dari database.
+ * Cast ini memusatkan pengetahuan tentang kolom template yang dibaca
+ * `classifyBroadcastCandidate` ke satu tempat, alih-alih memaksa setiap
+ * test membangun baris template lengkap dari database.
+ *
+ * `components` default kosong: test lama tidak perlu tahu soal komponen.
+ * Test yang menguji header/tombol memberikannya eksplisit.
  */
-function template(variableCount: number, bodyText: string | null): WhatsAppTemplate {
-  return { variableCount, bodyText } as unknown as WhatsAppTemplate;
+function template(
+  variableCount: number,
+  bodyText: string | null,
+  components: unknown[] = [],
+): WhatsAppTemplate {
+  return { variableCount, bodyText, components } as unknown as WhatsAppTemplate;
 }
 
 function candidate(overrides: Partial<AudienceCandidate> = {}): AudienceCandidate {
@@ -49,6 +56,60 @@ function candidate(overrides: Partial<AudienceCandidate> = {}): AudienceCandidat
 }
 
 const NOW = new Date("2026-11-05T12:00:00Z");
+
+describe("gerbang audiens: template yang broadcast belum bisa isi", () => {
+  const base = {
+    candidate: candidate(),
+    provider: "whatsapp" as const,
+    requireOptIn: false,
+    templateVariableSources: ["name"],
+    now: NOW,
+  };
+
+  it("melewati template ber-variabel HEADER dengan alasan yang tepat", () => {
+    // Sebelum Fase 17 penerima ini LOLOS lalu pesannya gagal di Meta:
+    // header `{{1}}` tidak pernah ikut dikirim. Ribuan `failed` dengan
+    // kode Graph yang tidak menjelaskan apa pun.
+    const result = classifyBroadcastCandidate({
+      ...base,
+      waTemplate: template(1, "Halo {{1}}", [
+        { type: "HEADER", format: "TEXT", text: "Pesanan {{1}}" },
+        { type: "BODY", text: "Halo {{1}}" },
+      ]),
+    });
+    expect(result).toEqual({
+      kind: "skip",
+      reason: "template_component_unsupported",
+    });
+  });
+
+  it("melewati template ber-variabel tombol URL", () => {
+    const result = classifyBroadcastCandidate({
+      ...base,
+      waTemplate: template(1, "Halo {{1}}", [
+        { type: "BODY", text: "Halo {{1}}" },
+        { type: "BUTTONS", buttons: [{ type: "URL", url: "https://a.id/{{1}}" }] },
+      ]),
+    });
+    expect(result).toEqual({
+      kind: "skip",
+      reason: "template_component_unsupported",
+    });
+  });
+
+  it("tetap mengirim template yang semua variabelnya di BODY", () => {
+    // Penjaga regresi: aturan baru tidak boleh memblokir template biasa,
+    // yang justru mayoritas.
+    const result = classifyBroadcastCandidate({
+      ...base,
+      waTemplate: template(1, "Halo {{1}}", [
+        { type: "HEADER", format: "TEXT", text: "Promo" },
+        { type: "BODY", text: "Halo {{1}}" },
+      ]),
+    });
+    expect(result).toMatchObject({ kind: "send", templateBodyParams: ["Budi"] });
+  });
+});
 
 describe("gerbang audiens: opt-in dan opt-out", () => {
   it("opt-out selalu dilewati, bahkan bila opt-in dimatikan", () => {

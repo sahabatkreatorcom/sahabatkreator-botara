@@ -689,15 +689,32 @@ export const api = {
      * pesan template terantre (Fase 16C). Satu-satunya pesan yang boleh
      * keluar setelah jendela 24 jam WhatsApp tertutup.
      */
+    /**
+     * Kirim template (Fase 16C; parameter per komponen sejak Fase 17).
+     * Header dan tombol URL membawa variabelnya sendiri — Meta menolak
+     * template ber-header `{{1}}` bila hanya body yang dikirim.
+     */
     sendTemplate(
       tenantId: string,
       conversationId: string,
       templateId: string,
-      bodyParams: string[],
+      params: {
+        bodyParams: string[];
+        headerParams?: string[];
+        buttonParams?: Array<{ index: number; text: string }>;
+      },
     ): Promise<MessageResponse> {
       return request<MessageResponse>(
         `/api/tenants/${tenantId}/conversations/${conversationId}/template`,
-        { method: "POST", body: JSON.stringify({ templateId, bodyParams }) },
+        {
+          method: "POST",
+          body: JSON.stringify({
+            templateId,
+            bodyParams: params.bodyParams,
+            headerParams: params.headerParams ?? [],
+            buttonParams: params.buttonParams ?? [],
+          }),
+        },
       );
     },
     /** GET .../conversations/:id/notes → catatan internal (Fase 9C). */

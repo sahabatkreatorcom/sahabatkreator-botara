@@ -40,6 +40,9 @@ const OTHER_CHANNEL_ID = "88888888-8888-4888-8888-888888888888";
 const TEMPLATE_APPROVED_ID = "99999999-9999-4999-8999-999999999991";
 const TEMPLATE_PENDING_ID = "99999999-9999-4999-8999-999999999992";
 const TEMPLATE_OTHER_ACCOUNT_ID = "99999999-9999-4999-8999-999999999993";
+const TEMPLATE_HEADER_ID = "99999999-9999-4999-8999-999999999994";
+const TEMPLATE_BUTTON_ID = "99999999-9999-4999-8999-999999999995";
+const TEMPLATE_MEDIA_ID = "99999999-9999-4999-8999-999999999996";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -157,13 +160,36 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
        VALUES ($1, $2, 'whatsapp', 'phone-lain', 'connected')`,
       [OTHER_CHANNEL_ID, TEST_TENANT_ID],
     );
+    // `components` WAJIB ikut disemai sejak Fase 17: spesifikasi parameter
+    // diturunkan dari komponen asli (header/body/tombol), bukan dari
+    // `variable_count` yang hanya menghitung BODY. Menyemai tanpa kolom
+    // ini akan menguji jalur yang tidak pernah terjadi di produksi —
+    // setiap baris cermin Meta selalu membawa komponennya.
     await pglite.query(
       `INSERT INTO whatsapp_templates
-         (id, tenant_id, channel_account_id, name, language, category, status, body_text, variable_count)
+         (id, tenant_id, channel_account_id, name, language, category, status,
+          body_text, variable_count, components)
        VALUES
-         ($1, $2, $3, 'pesanan_dikirim', 'id', 'UTILITY', 'APPROVED', 'Halo {{1}}, pesanan {{2}} sedang dikirim.', 2),
-         ($4, $2, $3, 'promo_menunggu', 'id', 'MARKETING', 'PENDING', 'Promo {{1}}', 1),
-         ($5, $2, $6, 'pesanan_akun_lain', 'id', 'UTILITY', 'APPROVED', 'Halo {{1}}', 1)`,
+         ($1, $2, $3, 'pesanan_dikirim', 'id', 'UTILITY', 'APPROVED',
+          'Halo {{1}}, pesanan {{2}} sedang dikirim.', 2,
+          '[{"type":"BODY","text":"Halo {{1}}, pesanan {{2}} sedang dikirim."}]'::jsonb),
+         ($4, $2, $3, 'promo_menunggu', 'id', 'MARKETING', 'PENDING',
+          'Promo {{1}}', 1,
+          '[{"type":"BODY","text":"Promo {{1}}"}]'::jsonb),
+         ($5, $2, $6, 'pesanan_akun_lain', 'id', 'UTILITY', 'APPROVED',
+          'Halo {{1}}', 1,
+          '[{"type":"BODY","text":"Halo {{1}}"}]'::jsonb),
+         ($7, $2, $3, 'resi_dikirim', 'id', 'UTILITY', 'APPROVED',
+          'Halo {{1}}, paket untuk pesanan {{2}} sedang dikirim.', 1,
+          '[{"type":"HEADER","format":"TEXT","text":"Pesanan {{1}}"},
+            {"type":"BODY","text":"Halo {{1}}, paket untuk pesanan {{2}} sedang dikirim."}]'::jsonb),
+         ($8, $2, $3, 'lacak_pesanan', 'id', 'UTILITY', 'APPROVED',
+          'Cek status pengiriman pesanan Anda.', 0,
+          '[{"type":"BODY","text":"Cek status pengiriman pesanan Anda."},
+            {"type":"BUTTONS","buttons":[{"type":"QUICK_REPLY","text":"Batal"},{"type":"URL","text":"Lacak","url":"https://toko.id/lacak/{{1}}"}]}]'::jsonb),
+         ($9, $2, $3, 'promo_bergambar', 'id', 'MARKETING', 'APPROVED',
+          'Lihat promo bulan ini.', 0,
+          '[{"type":"HEADER","format":"IMAGE"},{"type":"BODY","text":"Lihat promo bulan ini."}]'::jsonb)`,
       [
         TEMPLATE_APPROVED_ID,
         TEST_TENANT_ID,
@@ -171,6 +197,9 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
         TEMPLATE_PENDING_ID,
         TEMPLATE_OTHER_ACCOUNT_ID,
         OTHER_CHANNEL_ID,
+        TEMPLATE_HEADER_ID,
+        TEMPLATE_BUTTON_ID,
+        TEMPLATE_MEDIA_ID,
       ],
     );
   }, 120_000);
@@ -387,6 +416,123 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
       languageCode: "id",
       bodyParams: ["Rina", "INV-42"],
     });
+  });
+
+  it("menolak template ber-header variabel bila headernya tidak diisi", async () => {
+    // Inilah dead-end yang ditutup Fase 17: sebelum ini validasi hanya
+    // memeriksa BODY, jadi kiriman ini LOLOS dan baru ditolak Meta —
+    // pesan menjadi `failed` tanpa kolom untuk memperbaikinya.
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      { templateId: TEMPLATE_HEADER_ID, bodyParams: ["Rina", "INV-42"] },
+    );
+    expect(result).toMatchObject({
+      kind: "template_params_invalid",
+      component: "header",
+      expected: 1,
+      received: 0,
+    });
+  });
+
+  it("mengirim template ber-header dan menyimpan parameternya", async () => {
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_HEADER_ID,
+        headerParams: ["INV-42"],
+        bodyParams: ["Rina", "INV-42"],
+      },
+    );
+    expect(result.kind).toBe("queued");
+    if (result.kind !== "queued") return;
+    // Header ikut dirender: inbox menampilkan content_text apa adanya,
+    // dan pelanggan menerima header + body.
+    expect(result.message.contentText).toBe(
+      "Pesanan INV-42\n\nHalo Rina, paket untuk pesanan INV-42 sedang dikirim.",
+    );
+
+    const rows = await pglite.query<{
+      template_payload: {
+        headerParams?: string[];
+        bodyParams: string[];
+      };
+    }>(`SELECT template_payload FROM messages WHERE id = $1`, [
+      result.message.id,
+    ]);
+    // Tanpa headerParams di muatan, poller mengirim komponen body saja —
+    // persis kiriman yang ditolak Meta.
+    expect(rows.rows[0]?.template_payload.headerParams).toEqual(["INV-42"]);
+    expect(rows.rows[0]?.template_payload.bodyParams).toEqual(["Rina", "INV-42"]);
+  });
+
+  it("mencocokkan variabel tombol URL berdasarkan INDEX, bukan urutan", async () => {
+    // Tombol URL ada di posisi 1 (0-based) karena tombol pertama adalah
+    // QUICK_REPLY. Mengirim index 0 berarti mengisi tombol yang salah —
+    // jumlahnya sama, jadi pemeriksaan berbasis jumlah akan lolos.
+    const wrong = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_BUTTON_ID,
+        bodyParams: [],
+        buttonParams: [{ index: 0, text: "INV-42" }],
+      },
+    );
+    expect(wrong).toMatchObject({
+      kind: "template_params_invalid",
+      component: "button",
+    });
+
+    const right = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_BUTTON_ID,
+        bodyParams: [],
+        buttonParams: [{ index: 1, text: "INV-42" }],
+      },
+    );
+    expect(right.kind).toBe("queued");
+    if (right.kind !== "queued") return;
+    const rows = await pglite.query<{
+      template_payload: { buttonParams?: Array<{ index: number; text: string }> };
+    }>(`SELECT template_payload FROM messages WHERE id = $1`, [
+      right.message.id,
+    ]);
+    expect(rows.rows[0]?.template_payload.buttonParams).toEqual([
+      { index: 1, text: "INV-42" },
+    ]);
+  });
+
+  it("menolak template ber-header media SEBELUM masuk antrean", async () => {
+    // Header IMAGE butuh unggahan media, bukan teks. Membiarkannya lolos
+    // berarti pesan masuk antrean lalu gagal di poller sebagai `failed` —
+    // pengguna melihat kegagalan tanpa cara memperbaikinya.
+    const before = await pglite.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM messages WHERE type = 'template'`,
+    );
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      { templateId: TEMPLATE_MEDIA_ID, bodyParams: [] },
+    );
+    expect(result).toMatchObject({
+      kind: "template_media_header_unsupported",
+      format: "IMAGE",
+    });
+    const after = await pglite.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM messages WHERE type = 'template'`,
+    );
+    // Tidak ada baris yang ditulis: penolakan terjadi sebelum insert,
+    // jadi tidak ada `failed` yang menunggu dibersihkan siapa pun.
+    expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
   });
 
   it("menolak template yang belum disetujui Meta", async () => {

@@ -299,6 +299,17 @@ export const messages = pgTable(
       name: string;
       languageCode: string;
       bodyParams: string[];
+      /**
+       * Variabel HEADER teks (Fase 17) — maks satu, `{{1}}`. Kosong/absen
+       * untuk template tanpa header ber-variabel. Tanpa ini, template
+       * ber-header `{{1}}` ditolak Meta meski body-nya sudah lengkap.
+       */
+      headerParams?: string[];
+      /**
+       * Variabel tombol URL (Fase 17). `index` = posisi tombol pada array
+       * `buttons` template (0-based), persis yang dibaca Meta.
+       */
+      buttonParams?: Array<{ index: number; text: string }>;
     }>(),
     /**
      * Id komentar Meta yang menjadi alamat kirim pesan ini (Fase 10B):

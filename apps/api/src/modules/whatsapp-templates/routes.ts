@@ -12,6 +12,7 @@ import {
 import {
   decryptChannelSecret,
   deleteWhatsAppTemplateMirrorByName,
+  deriveTemplateParamSpec,
   getChannelAccount,
   getWhatsAppTemplateById,
   listWhatsAppTemplates,
@@ -71,6 +72,10 @@ export function serializeTemplate(row: WhatsAppTemplate): WhatsAppTemplateRespon
     components: Array.isArray(row.components) ? row.components : [],
     bodyText: row.bodyText,
     variableCount: row.variableCount,
+    // Fase 17: diturunkan di server dari komponen asli. UI memakai ini
+    // untuk menentukan berapa kolom input — bukan `variableCount`, yang
+    // hanya menghitung BODY.
+    params: deriveTemplateParamSpec(row.components),
     syncedAt: row.syncedAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),

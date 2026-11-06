@@ -202,6 +202,10 @@ export const id: Resources = {
       templateNone:
         "Belum ada template yang disetujui untuk nomor WhatsApp ini. Buat di Broadcast → Template, lalu sinkronkan.",
       templateParamLabel: "Variabel {index}",
+      templateHeaderLabel: "Variabel header",
+      templateButtonLabel: "Variabel URL tombol {index}",
+      templateMediaHeader:
+        "Template ini memakai header gambar/video/dokumen. Header media belum didukung dari inbox — kirim lewat aplikasi WhatsApp Business sampai dukungannya ditambahkan.",
       templateSend: "Kirim template",
       templateSending: "Mengirim…",
       templateCancel: "Batal",
@@ -1518,6 +1522,8 @@ export const id: Resources = {
     skipReasonOutside24h: "Di luar jendela pesan 24 jam",
     skipReasonMessageDeleted: "Pesan sudah tidak ada",
     skipReasonTemplateVariableMissing: "Variabel template tidak bisa diisi untuk kontak ini",
+    skipReasonTemplateComponentUnsupported:
+      "Template ini punya variabel di header atau tombol URL yang belum bisa diisi broadcast — kirim lewat inbox, atau pakai template yang semua variabelnya di body",
     skipReasonMissingPhone: "Kontak tidak punya nomor telepon di channel ini",
     templateLabel: "Template WhatsApp",
     templateSelectPlaceholder: "Pilih template yang disetujui…",
@@ -2175,6 +2181,7 @@ export const id: Resources = {
     MESSAGE_TEMPLATE_UNSUPPORTED: "Channel ini tidak memakai template pesan. Kirim balasan biasa sebagai gantinya.",
     MESSAGE_TEMPLATE_NOT_FOUND: "Template itu sudah tidak tersedia untuk nomor WhatsApp ini. Sinkronkan template lalu pilih yang lain.",
     MESSAGE_TEMPLATE_NOT_APPROVED: "Meta belum menyetujui template ini, jadi tidak bisa dikirim. Periksa statusnya di Broadcast → Template.",
+    MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED: "Template ini memakai header gambar/video/dokumen, yang belum bisa dikirim dari sini. Kirim lewat aplikasi WhatsApp Business.",
     MESSAGE_TEMPLATE_PARAMS_INVALID: "Jumlah variabel template tidak cocok dengan template-nya. Isi semua variabel lalu coba lagi.",
     MESSAGING_WINDOW_CLOSED: "Jendela 24 jam WhatsApp sudah tertutup: kontak ini belum menulis dalam 24 jam terakhir. WhatsApp hanya mengizinkan pesan bebas di dalam jendela itu — kirim template yang sudah disetujui sebagai gantinya.",
     MESSAGE_RETRY_UNSUPPORTED: "Provider ini tidak mendukung pengiriman ulang pesan gagal.",

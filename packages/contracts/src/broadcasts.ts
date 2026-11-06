@@ -57,6 +57,12 @@ export const BroadcastSkipReasonSchema = z.enum([
   // atau identitas penerima tidak membawa alamat (nomor) tujuan.
   "template_variable_missing",
   "missing_phone_number",
+  // Fase 17: template memakai variabel di HEADER atau tombol URL, yang
+  // belum bisa dipetakan ke sumber data di broadcast. Tanpa alasan
+  // sendiri, penerima ini tercatat "variabel tidak terpetakan" —
+  // menyesatkan, karena masalahnya bukan data kontak melainkan fitur
+  // yang belum ada.
+  "template_component_unsupported",
 ]);
 export type BroadcastSkipReason = z.infer<typeof BroadcastSkipReasonSchema>;
 
@@ -252,6 +258,7 @@ export const BroadcastAudiencePreviewResponseSchema = z.object({
   skippedOutside24hWindow: z.number().int().nonnegative(),
   skippedMissingPhoneNumber: z.number().int().nonnegative(),
   skippedTemplateVariableMissing: z.number().int().nonnegative(),
+  skippedTemplateComponentUnsupported: z.number().int().nonnegative(),
 });
 export type BroadcastAudiencePreviewResponse = z.infer<
   typeof BroadcastAudiencePreviewResponseSchema
@@ -336,6 +343,7 @@ export const BroadcastVariantSkipReasonsSchema = z.object({
   template_variable_missing: z.number().int().nonnegative(),
   missing_phone_number: z.number().int().nonnegative(),
   message_deleted: z.number().int().nonnegative(),
+  template_component_unsupported: z.number().int().nonnegative(),
 });
 export type BroadcastVariantSkipReasons = z.infer<
   typeof BroadcastVariantSkipReasonsSchema

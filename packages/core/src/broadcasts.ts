@@ -28,6 +28,7 @@ import {
 import type { SegmentDefinition } from "@sahabat-kreator/contracts";
 import { withTenantDb, type DbTx } from "./tx";
 import { renderMessageText } from "./render-text";
+import { deriveTemplateParamSpec } from "./whatsapp-template-params";
 import {
   broadcastExperimentKey,
   broadcastVariantForBucket,
@@ -400,7 +401,8 @@ export type BroadcastSkipClassificationReason =
   | "not_opted_in"
   | "outside_24h_window"
   | "missing_phone_number"
-  | "template_variable_missing";
+  | "template_variable_missing"
+  | "template_component_unsupported";
 
 export type BroadcastCandidateClassification =
   | {
@@ -459,6 +461,14 @@ export function classifyBroadcastCandidate(input: {
     if (!candidate.externalUserId || candidate.externalUserId.trim() === "") {
       return { kind: "skip", reason: "missing_phone_number" };
     }
+    // Fase 17: template ber-variabel HEADER / tombol URL belum bisa
+    // dipetakan ke sumber data di broadcast. Ditolak DI SINI (sebelum
+    // materialisasi) supaya tidak menjadi ribuan pesan `failed` di Meta
+    // dengan kode yang tidak menjelaskan apa pun.
+    const spec = deriveTemplateParamSpec(input.waTemplate.components);
+    if (spec.header.variableCount > 0 || spec.urlButtons.length > 0) {
+      return { kind: "skip", reason: "template_component_unsupported" };
+    }
     const params = resolveTemplateBodyParams(
       input.waTemplate,
       input.templateVariableSources,
@@ -485,6 +495,7 @@ export interface BroadcastAudiencePreview {
   skippedOutside24hWindow: number;
   skippedMissingPhoneNumber: number;
   skippedTemplateVariableMissing: number;
+  skippedTemplateComponentUnsupported: number;
 }
 
 export type PreviewBroadcastAudienceResult =
@@ -564,6 +575,7 @@ export async function previewBroadcastAudience(
       skippedOutside24hWindow: 0,
       skippedMissingPhoneNumber: 0,
       skippedTemplateVariableMissing: 0,
+      skippedTemplateComponentUnsupported: 0,
     };
     const now = new Date();
     for (const candidate of candidates) {
@@ -585,6 +597,8 @@ export async function previewBroadcastAudience(
         preview.skippedOutside24hWindow += 1;
       } else if (classified.reason === "missing_phone_number") {
         preview.skippedMissingPhoneNumber += 1;
+      } else if (classified.reason === "template_component_unsupported") {
+        preview.skippedTemplateComponentUnsupported += 1;
       } else {
         preview.skippedTemplateVariableMissing += 1;
       }

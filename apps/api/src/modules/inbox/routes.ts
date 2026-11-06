@@ -372,13 +372,29 @@ export function createInboxRoutes(
         { status: result.status },
       );
     }
+    if (result.kind === "template_media_header_unsupported") {
+      return apiError(
+        c,
+        422,
+        "MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED",
+        "Templates with a media header cannot be sent yet",
+        { format: result.format },
+      );
+    }
     if (result.kind === "template_params_invalid") {
       return apiError(
         c,
         422,
         "MESSAGE_TEMPLATE_PARAMS_INVALID",
         "Template variables do not match the template",
-        { expected: result.expected, received: result.received },
+        // Fase 17: komponennya disebut supaya UI bisa menyorot kolom yang
+        // salah. Jumlah total bisa benar sementara pembagiannya keliru
+        // (mis. header kosong tetapi body terisi satu lebih).
+        {
+          component: result.component,
+          expected: result.expected,
+          received: result.received,
+        },
       );
     }
     if (publisher) {

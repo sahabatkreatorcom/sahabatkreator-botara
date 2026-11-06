@@ -266,9 +266,22 @@ export class WhatsAppCloudClient extends GraphHttpClient {
    * Kirim pesan TEMPLATE (Cloud API): `POST /{phone_number_id}/messages`
    * `type: "template"` — satu-satunya bentuk pesan proaktif yang sah di
    * luar jendela layanan 24 jam (Fase 10A; dipakai broadcast).
-   * `bodyParams` = nilai variabel BODY {{1}}, {{2}}, … secara berurutan;
-   * array kosong → komponen body tidak dikirim sama sekali (template
-   * tanpa variabel). Mengembalikan wamid seperti sendTextMessage.
+   *
+   * Sejak Fase 17 parameter dipisah PER KOMPONEN, karena Meta
+   * memvalidasinya per komponen:
+   * - `headerParams` = variabel HEADER teks (maks 1; `{{1}}`);
+   * - `bodyParams` = variabel BODY `{{1}}`, `{{2}}`, … berurutan;
+   * - `buttonParams` = variabel tombol URL, masing-masing membawa
+   *   `index` = posisi tombol pada array `buttons` (0-based) — itu yang
+   *   dibaca Meta, BUKAN posisi di antara tombol URL saja.
+   *
+   * Komponen hanya dikirim bila parameternya ada: template tanpa
+   * variabel tidak boleh menerima komponen kosong (Meta menolaknya
+   * sebagai parameter-mismatch). Urutan header → body → button mengikuti
+   * dokumentasi Meta; urutan ini tidak memengaruhi validasi, tetapi
+   * membuat payload mudah dibaca saat menelusuri log.
+   *
+   * Mengembalikan wamid seperti sendTextMessage.
    */
   async sendTemplateMessage(input: {
     phoneNumberId: string;
@@ -276,7 +289,32 @@ export class WhatsAppCloudClient extends GraphHttpClient {
     templateName: string;
     languageCode: string;
     bodyParams: string[];
+    headerParams?: string[];
+    buttonParams?: Array<{ index: number; text: string }>;
   }): Promise<{ providerMessageId: string }> {
+    const headerParams = input.headerParams ?? [];
+    const buttonParams = input.buttonParams ?? [];
+    const components: Array<Record<string, unknown>> = [];
+    if (headerParams.length > 0) {
+      components.push({
+        type: "header",
+        parameters: headerParams.map((text) => ({ type: "text", text })),
+      });
+    }
+    if (input.bodyParams.length > 0) {
+      components.push({
+        type: "body",
+        parameters: input.bodyParams.map((text) => ({ type: "text", text })),
+      });
+    }
+    for (const button of buttonParams) {
+      components.push({
+        type: "button",
+        sub_type: "url",
+        index: String(button.index),
+        parameters: [{ type: "text", text: button.text }],
+      });
+    }
     const body = await this.postJson<{
       messages?: Array<{ id?: string }>;
     }>(`${encodeURIComponent(input.phoneNumberId)}/messages`, {
@@ -287,19 +325,7 @@ export class WhatsAppCloudClient extends GraphHttpClient {
       template: {
         name: input.templateName,
         language: { code: input.languageCode },
-        ...(input.bodyParams.length > 0
-          ? {
-              components: [
-                {
-                  type: "body",
-                  parameters: input.bodyParams.map((text) => ({
-                    type: "text",
-                    text,
-                  })),
-                },
-              ],
-            }
-          : {}),
+        ...(components.length > 0 ? { components } : {}),
       },
     });
     const wamid = body.messages?.[0]?.id;

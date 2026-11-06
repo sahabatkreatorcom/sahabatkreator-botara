@@ -88,6 +88,8 @@ export const SKIP_REASON_LABEL_KEYS: Record<string, TranslationKey> = {
   outside_24h_window: "broadcasts.skipReasonOutside24h",
   message_deleted: "broadcasts.skipReasonMessageDeleted",
   template_variable_missing: "broadcasts.skipReasonTemplateVariableMissing",
+  template_component_unsupported:
+    "broadcasts.skipReasonTemplateComponentUnsupported",
   missing_phone_number: "broadcasts.skipReasonMissingPhone",
 };
 

@@ -420,6 +420,7 @@ export interface BroadcastVariantSkipReasons {
   template_variable_missing: number;
   missing_phone_number: number;
   message_deleted: number;
+  template_component_unsupported: number;
 }
 
 export interface BroadcastVariantStats {
@@ -453,6 +454,7 @@ const emptySkipReasons = (): BroadcastVariantSkipReasons => ({
   template_variable_missing: 0,
   missing_phone_number: 0,
   message_deleted: 0,
+  template_component_unsupported: 0,
 });
 
 const emptyVariantStats = (variant: "a" | "b"): BroadcastVariantStats => ({

@@ -62,7 +62,37 @@ export const WhatsAppTemplateResponseSchema = z.object({
   statusReason: z.string().nullable(),
   components: z.array(z.record(z.string(), z.unknown())),
   bodyText: z.string().nullable(),
+  /**
+   * Jumlah variabel BODY. Dipertahankan apa adanya demi kompatibilitas,
+   * tetapi JANGAN dipakai untuk menentukan berapa kolom yang harus diisi:
+   * header dan tombol URL punya variabelnya sendiri. Pakai `params`.
+   */
   variableCount: z.number().int().nonnegative(),
+  /**
+   * Spesifikasi parameter per KOMPONEN (Fase 17). Diturunkan server dari
+   * `components` supaya UI tidak perlu mem-parse JSON Meta sendiri —
+   * satu tempat salah baca berarti kolom input yang salah jumlahnya.
+   */
+  params: z.object({
+    header: z.object({
+      /** `TEXT` ber-variabel teks; `IMAGE`/`VIDEO`/`DOCUMENT` butuh media. */
+      format: z.string().nullable(),
+      text: z.string().nullable(),
+      variableCount: z.number().int().nonnegative(),
+    }),
+    body: z.object({
+      text: z.string().nullable(),
+      variableCount: z.number().int().nonnegative(),
+    }),
+    /** Tombol URL ber-variabel; `index` = posisi tombol (0-based). */
+    urlButtons: z.array(
+      z.object({
+        index: z.number().int().nonnegative(),
+        variableCount: z.number().int().nonnegative(),
+      }),
+    ),
+    total: z.number().int().nonnegative(),
+  }),
   syncedAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
   updatedAt: z.string().datetime(),

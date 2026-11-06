@@ -167,7 +167,14 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState<string | null>(null);
   const [templateId, setTemplateId] = useState("");
-  const [templateParams, setTemplateParams] = useState<string[]>([]);
+  // Fase 17: parameter dipisah per komponen. Satu daftar datar tidak bisa
+  // menyatakan "satu untuk header, dua untuk body, satu untuk tombol" —
+  // dan Meta memvalidasi per komponen, bukan per total.
+  const [templateHeaderParams, setTemplateHeaderParams] = useState<string[]>([]);
+  const [templateBodyParams, setTemplateBodyParams] = useState<string[]>([]);
+  const [templateButtonParams, setTemplateButtonParams] = useState<
+    Array<{ index: number; text: string }>
+  >([]);
   const [templateSending, setTemplateSending] = useState(false);
   // Fase 16C: pencarian percakapan (nama kontak / nomor / judul).
   const [searchInput, setSearchInput] = useState("");
@@ -256,7 +263,9 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     // lain (dan parameter yang sudah terisi untuk orang lain).
     setTemplateOpen(false);
     setTemplateId("");
-    setTemplateParams([]);
+    setTemplateHeaderParams([]);
+    setTemplateBodyParams([]);
+    setTemplateButtonParams([]);
     setTemplatesError(null);
     void loadConversations();
   }, [loadConversations, tenantId]);
@@ -841,6 +850,16 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const approvedTemplates = templates.filter((tpl) => tpl.status === "APPROVED");
   const selectedTemplate =
     approvedTemplates.find((tpl) => tpl.id === templateId) ?? null;
+  /**
+   * Header media (IMAGE/VIDEO/DOCUMENT) butuh unggahan media, bukan teks.
+   * Belum didukung di inbox — dan mengirim tanpa komponen header akan
+   * ditolak Meta. Lebih baik dikatakan di sini daripada gagal sesudah
+   * tombol ditekan.
+   */
+  const templateHasMediaHeader =
+    selectedTemplate !== null &&
+    selectedTemplate.params.header.format !== null &&
+    selectedTemplate.params.header.format !== "TEXT";
 
   const selectTemplate = (tpl: WhatsAppTemplateResponse) => {
     setTemplateId(tpl.id);
@@ -848,10 +867,16 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     // broadcast (sumber default posisi 1 = "name"). Sisanya dibiarkan
     // kosong: inbox adalah kiriman satu penerima, jadi manusia yang
     // memutuskan isi variabelnya, bukan pemetaan otomatis.
-    setTemplateParams(
-      Array.from({ length: tpl.variableCount }, (_, i) =>
+    setTemplateHeaderParams(
+      Array.from({ length: tpl.params.header.variableCount }, () => ""),
+    );
+    setTemplateBodyParams(
+      Array.from({ length: tpl.params.body.variableCount }, (_, i) =>
         i === 0 ? (selected?.contactName ?? "") : "",
       ),
+    );
+    setTemplateButtonParams(
+      tpl.params.urlButtons.map((button) => ({ index: button.index, text: "" })),
     );
   };
 
@@ -881,7 +906,9 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const closeTemplatePanel = () => {
     setTemplateOpen(false);
     setTemplateId("");
-    setTemplateParams([]);
+    setTemplateHeaderParams([]);
+    setTemplateBodyParams([]);
+    setTemplateButtonParams([]);
     setTemplatesError(null);
   };
 
@@ -894,7 +921,14 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
         tenantId,
         selected.id,
         selectedTemplate.id,
-        templateParams.map((value) => value.trim()),
+        {
+          headerParams: templateHeaderParams.map((value) => value.trim()),
+          bodyParams: templateBodyParams.map((value) => value.trim()),
+          buttonParams: templateButtonParams.map((button) => ({
+            index: button.index,
+            text: button.text.trim(),
+          })),
+        },
       );
       stickToBottomRef.current = true;
       setMessages((prev) => [...prev, created]);
@@ -1736,7 +1770,9 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                               if (next) selectTemplate(next);
                               else {
                                 setTemplateId("");
-                                setTemplateParams([]);
+                                setTemplateHeaderParams([]);
+                                setTemplateBodyParams([]);
+                                setTemplateButtonParams([]);
                               }
                             }}
                             className="mt-1 w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
@@ -1755,40 +1791,98 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                               <p className="text-[11px] text-muted">
                                 {t("inbox.window.templateHint")}
                               </p>
-                              {selectedTemplate.bodyText ? (
+                              {/* Pratinjau = yang diterima pelanggan:
+                                  header lalu body, bukan body saja. */}
+                              {selectedTemplate.params.header.text ||
+                              selectedTemplate.bodyText ? (
                                 <p className="whitespace-pre-wrap rounded bg-elevated px-2 py-1 text-[11px] text-ink">
-                                  {selectedTemplate.bodyText}
+                                  {[
+                                    selectedTemplate.params.header.text,
+                                    selectedTemplate.bodyText,
+                                  ]
+                                    .filter((part): part is string => Boolean(part))
+                                    .join("\n\n")}
                                 </p>
                               ) : null}
-                              {Array.from(
-                                { length: selectedTemplate.variableCount },
-                                (_, i) => (
-                                  <input
-                                    key={i}
-                                    value={templateParams[i] ?? ""}
-                                    onChange={(e) =>
-                                      setTemplateParams((prev) => {
-                                        const next = [...prev];
-                                        next[i] = e.target.value;
-                                        return next;
-                                      })
-                                    }
-                                    placeholder={t(
-                                      "inbox.window.templateParamLabel",
-                                      { index: i + 1 },
-                                    )}
-                                    className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
-                                  />
-                                ),
+                              {templateHasMediaHeader ? (
+                                <p className="rounded bg-warning/10 px-2 py-1 text-[11px] text-ink">
+                                  {t("inbox.window.templateMediaHeader")}
+                                </p>
+                              ) : (
+                                <>
+                                  {templateHeaderParams.map((value, i) => (
+                                    <input
+                                      key={`header-${i}`}
+                                      value={value}
+                                      onChange={(e) =>
+                                        setTemplateHeaderParams((prev) => {
+                                          const next = [...prev];
+                                          next[i] = e.target.value;
+                                          return next;
+                                        })
+                                      }
+                                      placeholder={t(
+                                        "inbox.window.templateHeaderLabel",
+                                      )}
+                                      className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
+                                    />
+                                  ))}
+                                  {templateBodyParams.map((value, i) => (
+                                    <input
+                                      key={`body-${i}`}
+                                      value={value}
+                                      onChange={(e) =>
+                                        setTemplateBodyParams((prev) => {
+                                          const next = [...prev];
+                                          next[i] = e.target.value;
+                                          return next;
+                                        })
+                                      }
+                                      placeholder={t(
+                                        "inbox.window.templateParamLabel",
+                                        { index: i + 1 },
+                                      )}
+                                      className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
+                                    />
+                                  ))}
+                                  {templateButtonParams.map((button) => (
+                                    <input
+                                      key={`button-${button.index}`}
+                                      value={button.text}
+                                      onChange={(e) =>
+                                        setTemplateButtonParams((prev) =>
+                                          prev.map((item) =>
+                                            item.index === button.index
+                                              ? { ...item, text: e.target.value }
+                                              : item,
+                                          ),
+                                        )
+                                      }
+                                      placeholder={t(
+                                        "inbox.window.templateButtonLabel",
+                                        { index: button.index + 1 },
+                                      )}
+                                      className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
+                                    />
+                                  ))}
+                                </>
                               )}
                               <button
                                 type="button"
                                 disabled={
                                   templateSending ||
-                                  templateParams.length !==
-                                    selectedTemplate.variableCount ||
-                                  templateParams.some(
+                                  templateHasMediaHeader ||
+                                  templateHeaderParams.length !==
+                                    selectedTemplate.params.header.variableCount ||
+                                  templateBodyParams.length !==
+                                    selectedTemplate.params.body.variableCount ||
+                                  templateButtonParams.length !==
+                                    selectedTemplate.params.urlButtons.length ||
+                                  [...templateHeaderParams, ...templateBodyParams].some(
                                     (value) => value.trim() === "",
+                                  ) ||
+                                  templateButtonParams.some(
+                                    (button) => button.text.trim() === "",
                                   )
                                 }
                                 onClick={() => void handleSendTemplate()}

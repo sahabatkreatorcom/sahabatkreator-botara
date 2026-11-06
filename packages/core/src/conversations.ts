@@ -19,6 +19,10 @@ import {
   computeMessagingWindow,
   type MessagingWindowState,
 } from "./messaging-window";
+import {
+  deriveTemplateParamSpec,
+  renderTemplateContent,
+} from "./whatsapp-template-params";
 
 /**
  * Service domain percakapan & pesan inbox (Fase 1D, RANCANGAN §5.1 & §6).
@@ -1042,22 +1046,26 @@ export type QueueTemplateMessageResult =
   /** Id template tidak ada di akun WhatsApp percakapan ini. */
   | { kind: "template_not_found" }
   | { kind: "template_not_approved"; status: string }
-  | { kind: "template_params_invalid"; expected: number; received: number };
-
-const TEMPLATE_PLACEHOLDER_RE = /\{\{(\d+)\}\}/g;
-
-/**
- * Isi pesan yang disimpan untuk pesan template: teks BODY dengan
- * parameter terisi. Inbox menampilkan kolom ini apa adanya, jadi tanpa
- * render ia akan menampilkan `{{1}}` — teks yang tidak pernah dikirim
- * ke siapa pun.
- */
-function renderTemplatePreview(bodyText: string, params: string[]): string {
-  return bodyText.replace(TEMPLATE_PLACEHOLDER_RE, (_whole, raw: string) => {
-    const idx = Number(raw) - 1;
-    return idx >= 0 && idx < params.length ? params[idx]! : "";
-  });
-}
+  /**
+   * Template memakai header MEDIA (gambar/video/dokumen). Header seperti
+   * itu memerlukan unggahan media, bukan teks — belum didukung. Ditolak
+   * di sini, bukan dibiarkan lolos lalu ditolak Meta: pengirimnya harus
+   * tahu SEBELUM pesan masuk antrean, karena kegagalan di poller hanya
+   * tampil sebagai `failed` tanpa jalan keluar.
+   */
+  | { kind: "template_media_header_unsupported"; format: string }
+  /**
+   * Jumlah parameter tidak cocok. Sejak Fase 17 `component` menyebutkan
+   * KOMPONEN mana yang salah (header/body/button): "isi semua variabel"
+   * tanpa menyebut komponennya membuat pengguna menebak, karena jumlah
+   * total bisa benar sementara pembagiannya salah.
+   */
+  | {
+      kind: "template_params_invalid";
+      component: "header" | "body" | "button";
+      expected: number;
+      received: number;
+    };
 
 /**
  * Mengantrekan pesan template WhatsApp ke satu percakapan (Fase 16C).
@@ -1082,7 +1090,12 @@ export async function queueTemplateMessage(
   db: Database,
   ctx: Pick<TenantContext, "tenantId" | "userId"> & { userId: string },
   conversationId: string,
-  input: { templateId: string; bodyParams: string[] },
+  input: {
+    templateId: string;
+    bodyParams?: string[];
+    headerParams?: string[];
+    buttonParams?: Array<{ index: number; text: string }>;
+  },
 ): Promise<QueueTemplateMessageResult> {
   return withTenantDb(db, ctx.tenantId, async (tx) => {
     const [conv] = await tx
@@ -1112,8 +1125,10 @@ export async function queueTemplateMessage(
         name: whatsappTemplates.name,
         language: whatsappTemplates.language,
         status: whatsappTemplates.status,
-        bodyText: whatsappTemplates.bodyText,
-        variableCount: whatsappTemplates.variableCount,
+        // Fase 17: spesifikasi parameter diturunkan dari komponen asli,
+        // bukan dari `variable_count` — kolom itu hanya menghitung BODY,
+        // sehingga header/tombol ber-variabel tidak pernah ikut diperiksa.
+        components: whatsappTemplates.components,
       })
       .from(whatsappTemplates)
       .where(
@@ -1129,15 +1144,61 @@ export async function queueTemplateMessage(
       return { kind: "template_not_approved", status: template.status } as const;
     }
 
-    const params = input.bodyParams.map((value) => value.trim());
+    // Fase 17: validasi PER KOMPONEN. Sebelumnya hanya BODY yang
+    // diperiksa, sehingga template ber-header `{{1}}` lolos validasi lalu
+    // ditolak Meta saat dikirim — pesan menjadi `failed` tanpa pengguna
+    // punya cara mengisi variabel yang kurang.
+    const spec = deriveTemplateParamSpec(template.components);
+    if (spec.header.format !== null && spec.header.format !== "TEXT") {
+      return {
+        kind: "template_media_header_unsupported",
+        format: spec.header.format,
+      } as const;
+    }
+    const headerParams = (input.headerParams ?? []).map((value) => value.trim());
+    const bodyParams = (input.bodyParams ?? []).map((value) => value.trim());
+    const buttonParams = (input.buttonParams ?? []).map((button) => ({
+      index: button.index,
+      text: button.text.trim(),
+    }));
+
     if (
-      params.length !== template.variableCount ||
-      params.some((value) => value === "")
+      headerParams.length !== spec.header.variableCount ||
+      headerParams.some((value) => value === "")
     ) {
       return {
         kind: "template_params_invalid",
-        expected: template.variableCount,
-        received: params.length,
+        component: "header",
+        expected: spec.header.variableCount,
+        received: headerParams.length,
+      } as const;
+    }
+    if (
+      bodyParams.length !== spec.body.variableCount ||
+      bodyParams.some((value) => value === "")
+    ) {
+      return {
+        kind: "template_params_invalid",
+        component: "body",
+        expected: spec.body.variableCount,
+        received: bodyParams.length,
+      } as const;
+    }
+    // Tombol dicocokkan per INDEX, bukan per jumlah: template dengan dua
+    // tombol URL yang hanya satu ber-variabel akan lolos pemeriksaan
+    // jumlah bila pengguna mengisi tombol yang salah.
+    const expectedButtonIndexes = spec.urlButtons.map((b) => b.index);
+    const receivedButtonIndexes = buttonParams.map((b) => b.index);
+    if (
+      receivedButtonIndexes.length !== expectedButtonIndexes.length ||
+      expectedButtonIndexes.some((index) => !receivedButtonIndexes.includes(index)) ||
+      buttonParams.some((button) => button.text === "")
+    ) {
+      return {
+        kind: "template_params_invalid",
+        component: "button",
+        expected: expectedButtonIndexes.length,
+        received: receivedButtonIndexes.length,
       } as const;
     }
 
@@ -1149,11 +1210,16 @@ export async function queueTemplateMessage(
         direction: "outbound",
         senderType: "user",
         type: "template",
-        contentText: renderTemplatePreview(template.bodyText ?? "", params),
+        // Header ikut dirender: inbox menampilkan kolom ini apa adanya,
+        // dan pelanggan menerima header + body. Tanpa header, agen
+        // membaca balasan yang berbeda dari yang sebenarnya terkirim.
+        contentText: renderTemplateContent(spec, { headerParams, bodyParams }),
         templatePayload: {
           name: template.name,
           languageCode: template.language,
-          bodyParams: params,
+          bodyParams,
+          ...(headerParams.length > 0 ? { headerParams } : {}),
+          ...(buttonParams.length > 0 ? { buttonParams } : {}),
         },
         status: "queued",
         sentByUserId: ctx.userId,

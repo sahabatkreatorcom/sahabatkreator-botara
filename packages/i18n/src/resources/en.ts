@@ -203,6 +203,10 @@ export const en = {
       templateNone:
         "No approved templates for this WhatsApp number yet. Create one in Broadcasts → Templates, then sync.",
       templateParamLabel: "Variable {index}",
+      templateHeaderLabel: "Header variable",
+      templateButtonLabel: "Button {index} URL variable",
+      templateMediaHeader:
+        "This template has an image/video/document header. Media headers are not supported from the inbox yet — send it from the WhatsApp Business app until it is.",
       templateSend: "Send template",
       templateSending: "Sending…",
       templateCancel: "Cancel",
@@ -1519,6 +1523,8 @@ export const en = {
     skipReasonOutside24h: "Outside the 24-hour messaging window",
     skipReasonMessageDeleted: "Message no longer exists",
     skipReasonTemplateVariableMissing: "A template variable could not be filled for this contact",
+    skipReasonTemplateComponentUnsupported:
+      "This template has variables in its header or URL button, which broadcasts cannot fill yet — send it from the inbox or use a template whose variables are all in the body",
     skipReasonMissingPhone: "Contact has no phone number on this channel",
     templateLabel: "WhatsApp template",
     templateSelectPlaceholder: "Choose an approved template…",
@@ -2176,6 +2182,7 @@ export const en = {
     MESSAGE_TEMPLATE_UNSUPPORTED: "This channel does not use message templates. Send a normal reply instead.",
     MESSAGE_TEMPLATE_NOT_FOUND: "That template is no longer available for this WhatsApp number. Sync templates and pick another one.",
     MESSAGE_TEMPLATE_NOT_APPROVED: "Meta has not approved this template yet, so it cannot be sent. Check its status in Broadcasts → Templates.",
+    MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED: "This template uses an image/video/document header, which cannot be sent from here yet. Send it from the WhatsApp Business app.",
     MESSAGE_TEMPLATE_PARAMS_INVALID: "The number of template variables does not match the template. Fill every variable and try again.",
     MESSAGING_WINDOW_CLOSED: "The 24-hour WhatsApp window is closed: this contact has not written in the last 24 hours. WhatsApp only allows free-form messages inside that window — send an approved template instead.",
     MESSAGE_RETRY_UNSUPPORTED: "This provider does not support resending failed messages.",

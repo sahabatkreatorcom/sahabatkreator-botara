@@ -992,6 +992,10 @@ export interface MetaQueuedDelivery {
     name: string;
     languageCode: string;
     bodyParams: string[];
+    /** Variabel HEADER teks (Fase 17); absen untuk template tanpa header ber-variabel. */
+    headerParams?: string[];
+    /** Variabel tombol URL (Fase 17); `index` = posisi tombol 0-based. */
+    buttonParams?: Array<{ index: number; text: string }>;
   } | null;
   /**
    * Id baris pesan yang dikutip pesan ini (Fase 7B.5), atau null —

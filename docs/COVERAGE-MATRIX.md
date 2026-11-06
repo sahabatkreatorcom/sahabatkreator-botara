@@ -37,6 +37,8 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Nyalakan/matikan AI per percakapan | ✅ | `setConversationAgentEnabled`, `POST …/agent` |
 | Jendela 24 jam WhatsApp (tolak teks bebas di luar jendela) | ✅ | `computeMessagingWindow`, `MESSAGING_WINDOW_CLOSED` |
 | Kirim template WhatsApp dari inbox (jalan keluar jendela tertutup) | ✅ | `queueTemplateMessage`, `POST …/template` |
+| Parameter template per komponen (header teks + tombol URL) | ✅ | `deriveTemplateParamSpec`, `sendTemplateMessage`, panel inbox |
+| Header media (gambar/video/dokumen) pada template | ❌ | ditolak dengan `MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` — belum ada unggahan media |
 | Paginasi pesan lama (`before` + `hasMore`) | ✅ | `listMessagesPage` |
 
 ## Otomasi
@@ -110,7 +112,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 |---|---|---|
 | Typecheck seluruh paket | ✅ | `pnpm typecheck` |
 | ESLint | ✅ | `pnpm lint` (0 error, 20 warning) |
-| Unit test (RLS, kontrak, jobId, webhook) | ✅ | `pnpm test` (199 test, 21 file) |
+| Unit test (RLS, kontrak, jobId, webhook) | ✅ | `pnpm test` (219 test, 23 file) |
 | Verifikasi migrasi + RLS penuh | ✅ | `pnpm --filter db verify` (44 seksi) |
 | CI | ✅ | `.github/workflows/ci.yml` |
 | Deploy Docker | ✅ | `Dockerfile`, `deploy/` |

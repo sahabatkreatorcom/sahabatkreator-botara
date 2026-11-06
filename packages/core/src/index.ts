@@ -629,6 +629,13 @@ export {
   type ApplyWhatsAppTemplateStatusResult,
 } from "./whatsapp-templates";
 export {
+  countTemplateVariables,
+  deriveTemplateParamSpec,
+  renderTemplateContent,
+  renderTemplateText,
+  type WhatsAppTemplateParamSpec,
+} from "./whatsapp-template-params";
+export {
   buildGrowthTargetUrl,
   growthSlugBase,
   createGrowthLink,

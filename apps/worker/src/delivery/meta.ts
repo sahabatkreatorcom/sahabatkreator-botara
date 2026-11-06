@@ -218,6 +218,11 @@ export function startMetaDeliveryPoller(
                   templateName: delivery.templatePayload.name,
                   languageCode: delivery.templatePayload.languageCode,
                   bodyParams: delivery.templatePayload.bodyParams,
+                  // Fase 17: template ber-variabel header/tombol URL hanya
+                  // bisa dikirim bila komponennya ikut — Meta memvalidasi
+                  // per komponen, bukan sebagai satu daftar parameter.
+                  headerParams: delivery.templatePayload.headerParams,
+                  buttonParams: delivery.templatePayload.buttonParams,
                 })
               ).providerMessageId
             : (

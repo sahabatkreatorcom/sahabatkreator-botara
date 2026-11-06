@@ -366,6 +366,23 @@ Perhatikan bedanya: `failed` pada BullMQ berbunyi di SETIAP percobaan,
 termasuk yang akhirnya berhasil. Yang dicatat ke audit hanya yang
 MENYERAH — jadi daftar ini tidak berisi kegagalan yang sudah pulih.
 
+### Kalau template gagal dikirim / tidak bisa dipakai broadcast
+
+Sejak Fase 17 parameter template divalidasi **per komponen** (header,
+body, tombol URL), bukan sebagai satu daftar. Dua kegagalan yang tersisa
+dan artinya:
+
+- **`MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` (422).** Template memakai
+  header gambar/video/dokumen. Header media memerlukan unggahan media,
+  yang belum ada. Ditolak **sebelum** masuk antrean — jadi tidak ada
+  pesan `failed` yang perlu dibersihkan. Kirim lewat aplikasi WhatsApp
+  Business sampai dukungannya ditambahkan.
+- **Broadcast melewati penerima dengan alasan
+  "variabel di header/tombol belum bisa diisi".** Itu disengaja: broadcast
+  belum punya pemetaan sumber data untuk header/tombol URL, dan
+  mengirimnya akan menghasilkan ribuan `failed` di Meta. Pakai template
+  yang semua variabelnya di body, atau kirim satu per satu dari inbox.
+
 ### Kalau balasan webchat tertulis "Menunggu pengunjung"
 
 Itu **bukan** kegagalan pengiriman dan bukan antrean yang macet. Balasan

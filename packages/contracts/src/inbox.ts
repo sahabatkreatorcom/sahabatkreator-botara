@@ -434,6 +434,25 @@ export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>;
 export const SendTemplateMessageRequestSchema = z.object({
   templateId: z.string().uuid(),
   bodyParams: z.array(z.string().trim().max(1024)).max(20).default([]),
+  /**
+   * Variabel HEADER teks (Fase 17) — Meta membatasi satu (`{{1}}`).
+   * Tanpa ini, template ber-header `{{1}}` ditolak Meta meski body-nya
+   * sudah lengkap, dan inbox tidak punya tempat mengisinya.
+   */
+  headerParams: z.array(z.string().trim().max(1024)).max(1).default([]),
+  /**
+   * Variabel tombol URL (Fase 17). `index` = posisi tombol pada template
+   * (0-based) — bukan urutan di antara tombol URL saja.
+   */
+  buttonParams: z
+    .array(
+      z.object({
+        index: z.number().int().min(0).max(9),
+        text: z.string().trim().max(1024),
+      }),
+    )
+    .max(3)
+    .default([]),
 });
 export type SendTemplateMessageRequest = z.infer<
   typeof SendTemplateMessageRequestSchema
