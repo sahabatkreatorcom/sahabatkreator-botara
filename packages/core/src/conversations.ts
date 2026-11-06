@@ -1145,13 +1145,19 @@ export type QueueTemplateMessageResult =
   | { kind: "template_not_found" }
   | { kind: "template_not_approved"; status: string }
   /**
-   * Template memakai header MEDIA (gambar/video/dokumen). Header seperti
-   * itu memerlukan unggahan media, bukan teks — belum didukung. Ditolak
-   * di sini, bukan dibiarkan lolos lalu ditolak Meta: pengirimnya harus
-   * tahu SEBELUM pesan masuk antrean, karena kegagalan di poller hanya
-   * tampil sebagai `failed` tanpa jalan keluar.
+   * Template memakai header MEDIA (gambar/video/dokumen) tetapi tidak ada
+   * lampiran yang disertakan (Fase 18C). Sebelumnya keadaan ini ditolak
+   * sebagai "belum didukung"; sekarang pengirimnya cukup memilih berkas.
    */
-  | { kind: "template_media_header_unsupported"; format: string }
+  | { kind: "template_media_header_required"; format: string }
+  /**
+   * Lampiran tidak cocok dengan format header template — mis. template
+   * ber-header IMAGE dikirimi PDF. Meta akan menolaknya, jadi ditolak di
+   * sini dengan alasan yang bisa ditindaklanjuti.
+   */
+  | { kind: "template_media_header_mismatch"; format: string; mimeType: string | null }
+  /** Lampiran header tidak ada di workspace ini (atau milik tenant lain). */
+  | { kind: "media_not_found" }
   /**
    * Jumlah parameter tidak cocok. Sejak Fase 17 `component` menyebutkan
    * KOMPONEN mana yang salah (header/body/button): "isi semua variabel"
@@ -1193,6 +1199,11 @@ export async function queueTemplateMessage(
     bodyParams?: string[];
     headerParams?: string[];
     buttonParams?: Array<{ index: number; text: string }>;
+    /**
+     * Lampiran untuk header media (Fase 18C). Wajib bila template
+     * ber-header IMAGE/VIDEO/DOCUMENT; diabaikan untuk header teks.
+     */
+    headerMediaId?: string;
   },
 ): Promise<QueueTemplateMessageResult> {
   return withTenantDb(db, ctx.tenantId, async (tx) => {
@@ -1247,11 +1258,51 @@ export async function queueTemplateMessage(
     // ditolak Meta saat dikirim — pesan menjadi `failed` tanpa pengguna
     // punya cara mengisi variabel yang kurang.
     const spec = deriveTemplateParamSpec(template.components);
-    if (spec.header.format !== null && spec.header.format !== "TEXT") {
-      return {
-        kind: "template_media_header_unsupported",
-        format: spec.header.format,
-      } as const;
+    // Fase 18C: header media tidak lagi ditolak — cukup divalidasi.
+    // Yang dijaga: format header menentukan jenis berkas, dan Meta
+    // menolak pasangan yang salah (mis. PDF untuk header IMAGE) dengan
+    // kode yang tidak menjelaskan apa pun ke pengguna.
+    let headerMediaId: string | null = null;
+    const headerFormat = spec.header.format;
+    if (headerFormat !== null && headerFormat !== "TEXT") {
+      if (!input.headerMediaId) {
+        return {
+          kind: "template_media_header_required",
+          format: headerFormat,
+        } as const;
+      }
+      const [attachment] = await tx
+        .select({ id: media.id, mimeType: media.mimeType })
+        .from(media)
+        .where(
+          and(
+            eq(media.tenantId, ctx.tenantId),
+            eq(media.id, input.headerMediaId),
+          ),
+        )
+        .limit(1);
+      if (!attachment) {
+        return { kind: "media_not_found" } as const;
+      }
+      const mime = (attachment.mimeType ?? "").toLowerCase();
+      const matches =
+        headerFormat === "IMAGE"
+          ? mime.startsWith("image/")
+          : headerFormat === "VIDEO"
+            ? mime.startsWith("video/")
+            : // DOCUMENT menerima hampir semua berkas, TETAPI Cloud API
+              // tidak punya header AUDIO sama sekali: berkas audio akan
+              // ditolak Meta dengan kode yang tidak menjelaskan apa pun.
+              // Lebih baik ditolak di sini dengan alasan yang terbaca.
+              !mime.startsWith("audio/");
+      if (!matches) {
+        return {
+          kind: "template_media_header_mismatch",
+          format: headerFormat,
+          mimeType: attachment.mimeType,
+        } as const;
+      }
+      headerMediaId = attachment.id;
     }
     const headerParams = (input.headerParams ?? []).map((value) => value.trim());
     const bodyParams = (input.bodyParams ?? []).map((value) => value.trim());
@@ -1318,6 +1369,7 @@ export async function queueTemplateMessage(
           bodyParams,
           ...(headerParams.length > 0 ? { headerParams } : {}),
           ...(buttonParams.length > 0 ? { buttonParams } : {}),
+          ...(headerMediaId ? { headerMediaId } : {}),
         },
         status: "queued",
         sentByUserId: ctx.userId,

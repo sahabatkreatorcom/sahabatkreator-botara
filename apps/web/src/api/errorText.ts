@@ -133,8 +133,10 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.MESSAGE_TEMPLATE_NOT_FOUND");
     case "MESSAGE_TEMPLATE_NOT_APPROVED":
       return t("errors.MESSAGE_TEMPLATE_NOT_APPROVED");
-    case "MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED":
-      return t("errors.MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED");
+    case "MESSAGE_TEMPLATE_MEDIA_HEADER_REQUIRED":
+      return t("errors.MESSAGE_TEMPLATE_MEDIA_HEADER_REQUIRED");
+    case "MESSAGE_TEMPLATE_MEDIA_HEADER_MISMATCH":
+      return t("errors.MESSAGE_TEMPLATE_MEDIA_HEADER_MISMATCH");
     case "MESSAGE_TEMPLATE_PARAMS_INVALID":
       return t("errors.MESSAGE_TEMPLATE_PARAMS_INVALID");
     case "MEDIA_NOT_FOUND":

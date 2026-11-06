@@ -255,29 +255,69 @@ export function startMetaDeliveryPoller(
           // Fase 10A: pesan bertemplatePayload dikirim sebagai pesan
           // TEMPLATE resmi (satu-satunya bentuk proaktif di luar jendela
           // 24 jam); kutipan tidak berlaku untuk template.
-          return delivery.templatePayload
-            ? (
-                await waClient.sendTemplateMessage({
-                  phoneNumberId: delivery.accountExternalId,
-                  to: delivery.recipientExternalId,
-                  templateName: delivery.templatePayload.name,
-                  languageCode: delivery.templatePayload.languageCode,
-                  bodyParams: delivery.templatePayload.bodyParams,
-                  // Fase 17: template ber-variabel header/tombol URL hanya
-                  // bisa dikirim bila komponennya ikut — Meta memvalidasi
-                  // per komponen, bukan sebagai satu daftar parameter.
-                  headerParams: delivery.templatePayload.headerParams,
-                  buttonParams: delivery.templatePayload.buttonParams,
-                })
-              ).providerMessageId
-            : (
+          if (delivery.templatePayload) {
+            // Fase 18C: header media harus diunggah ke Meta lebih dulu.
+            // Media id kita tidak dikenal Meta, dan Cloud API tidak bisa
+            // menarik berkas dari penyimpanan privat kita.
+            let headerMedia:
+              | { kind: "image" | "video" | "document"; mediaId: string }
+              | undefined;
+            const headerMediaId = delivery.templatePayload.headerMediaId;
+            if (headerMediaId) {
+              if (!opts.mediaStore) throw new Error("media_store_not_configured");
+              const attachment = await getMediaForServing(
+                conn,
+                { tenantId: delivery.tenantId },
+                headerMediaId,
+              );
+              if (!attachment) throw new Error("media_row_missing");
+              const object = await opts.mediaStore.get(attachment.r2Key);
+              if (!object) throw new Error("media_object_missing");
+              const mimeType =
+                attachment.mimeType ??
+                object.contentType ??
+                "application/octet-stream";
+              const uploaded = await waClient.uploadMedia({
+                phoneNumberId: delivery.accountExternalId,
+                data: object.data,
+                mimeType,
+                fileName: attachment.fileName,
+              });
+              // Jenis header diturunkan dari MIME berkas. Antrean sudah
+              // menolak pasangan yang mustahil (gambar untuk header VIDEO,
+              // audio untuk header DOCUMENT), jadi audio di sini berarti
+              // ada jalur yang melewati validasi — gagal keras lebih baik
+              // daripada mengirim header yang pasti ditolak Meta.
+              const headerKind = messageTypeForMime(mimeType);
+              if (headerKind === "audio") {
+                throw new Error("template_header_audio_unsupported");
+              }
+              headerMedia = { kind: headerKind, mediaId: uploaded.mediaId };
+            }
+            return (
+              await waClient.sendTemplateMessage({
+                phoneNumberId: delivery.accountExternalId,
+                to: delivery.recipientExternalId,
+                templateName: delivery.templatePayload.name,
+                languageCode: delivery.templatePayload.languageCode,
+                bodyParams: delivery.templatePayload.bodyParams,
+                // Fase 17: template ber-variabel header/tombol URL hanya
+                // bisa dikirim bila komponennya ikut — Meta memvalidasi
+                // per komponen, bukan sebagai satu daftar parameter.
+                headerParams: delivery.templatePayload.headerParams,
+                buttonParams: delivery.templatePayload.buttonParams,
+                ...(headerMedia ? { headerMedia } : {}),
+              })
+            ).providerMessageId;
+          }
+          return (
                 await waClient.sendTextMessage({
                   phoneNumberId: delivery.accountExternalId,
                   to: delivery.recipientExternalId,
-                  text: delivery.contentText!,
-                  ...(quotedRawId ? { contextMessageId: quotedRawId } : {}),
-                })
-              ).providerMessageId;
+                text: delivery.contentText!,
+                ...(quotedRawId ? { contextMessageId: quotedRawId } : {}),
+              })
+            ).providerMessageId;
         }
 
         const client = new MetaGraphClient({

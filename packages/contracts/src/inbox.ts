@@ -453,6 +453,12 @@ export const SendTemplateMessageRequestSchema = z.object({
     )
     .max(3)
     .default([]),
+  /**
+   * Lampiran header media (Fase 18C) — id baris `media` yang sudah
+   * diunggah lewat `POST /tenants/:tenantId/media`. Wajib bila template
+   * ber-header IMAGE/VIDEO/DOCUMENT.
+   */
+  headerMediaId: z.string().uuid().optional(),
 });
 export type SendTemplateMessageRequest = z.infer<
   typeof SendTemplateMessageRequestSchema

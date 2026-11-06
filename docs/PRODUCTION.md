@@ -245,6 +245,22 @@ jadi jatah itu menutupi gangguan ±25 menit — tanpa jarak, siklus 5 detik
 akan menghabiskannya dalam 25 detik dan satu gangguan sesaat membuat
 media hilang permanen.
 
+**Header media pada template (Fase 18C).** Template ber-header
+`IMAGE`/`VIDEO`/`DOCUMENT` dikirim dengan cara yang sama: worker membaca
+berkas dari direktori media, mengunggahnya ke Meta, lalu memakai media id
+hasil unggahan itu di komponen `header`. Konsekuensi operasionalnya:
+
+- media id Meta **tidak disimpan** — ia berlaku per WABA dan kedaluwarsa,
+  jadi setiap pengiriman mengunggah ulang. Yang kita simpan hanya id
+  lampiran sendiri (`templatePayload.headerMediaId`), sehingga pesan yang
+  diulang setelah gagal tetap punya sumber berkas yang sah;
+- unggahan header menambah satu panggilan API sebelum kirim. Bila kuota
+  atau jaringan Meta sedang bermasalah, pesan gagal di langkah unggah dan
+  dicatat sebagai `failed` — bukan terkirim tanpa gambar;
+- format header menentukan jenis berkas yang sah (`IMAGE` → gambar,
+  `VIDEO` → video, `DOCUMENT` → selain audio). Pasangan yang salah
+  ditolak saat mengantre, bukan setelah Meta menolaknya.
+
 Retensi default: 7 dump harian + 28 hari cadangan mingguan di VPS, 30 hari
 di R2. Retensi lokal dijalankan **sesudah** backup baru sukses, sehingga
 kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.

@@ -382,13 +382,28 @@ export function createInboxRoutes(
         { status: result.status },
       );
     }
-    if (result.kind === "template_media_header_unsupported") {
+    if (result.kind === "media_not_found") {
+      return apiError(c, 404, "MEDIA_NOT_FOUND", "Attachment not found");
+    }
+    if (result.kind === "template_media_header_required") {
+      // Fase 18C: template ini BISA dikirim — pengguna hanya perlu
+      // memilih berkas untuk headernya. Menyebut formatnya membuat UI
+      // bisa membuka pemilih berkas yang tepat.
       return apiError(
         c,
         422,
-        "MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED",
-        "Templates with a media header cannot be sent yet",
+        "MESSAGE_TEMPLATE_MEDIA_HEADER_REQUIRED",
+        "This template needs an attachment for its header",
         { format: result.format },
+      );
+    }
+    if (result.kind === "template_media_header_mismatch") {
+      return apiError(
+        c,
+        422,
+        "MESSAGE_TEMPLATE_MEDIA_HEADER_MISMATCH",
+        "The attachment does not match the template header format",
+        { format: result.format, mimeType: result.mimeType },
       );
     }
     if (result.kind === "template_params_invalid") {

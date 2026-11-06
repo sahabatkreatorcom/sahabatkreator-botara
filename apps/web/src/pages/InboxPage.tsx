@@ -195,6 +195,13 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     Array<{ index: number; text: string }>
   >([]);
   const [templateSending, setTemplateSending] = useState(false);
+  // Fase 18C: lampiran untuk header media. Disimpan terpisah dari
+  // parameter teks karena bentuknya berbeda — berkas yang sudah diunggah,
+  // bukan string yang diketik.
+  const [templateHeaderMedia, setTemplateHeaderMedia] =
+    useState<MediaUploadResponse | null>(null);
+  const [templateHeaderUploading, setTemplateHeaderUploading] = useState(false);
+  const templateFileInputRef = useRef<HTMLInputElement | null>(null);
   // Fase 16C: pencarian percakapan (nama kontak / nomor / judul).
   const [searchInput, setSearchInput] = useState("");
   const searchRef = useRef("");
@@ -907,18 +914,46 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const selectedTemplate =
     approvedTemplates.find((tpl) => tpl.id === templateId) ?? null;
   /**
-   * Header media (IMAGE/VIDEO/DOCUMENT) butuh unggahan media, bukan teks.
-   * Belum didukung di inbox — dan mengirim tanpa komponen header akan
-   * ditolak Meta. Lebih baik dikatakan di sini daripada gagal sesudah
-   * tombol ditekan.
+   * Header media (IMAGE/VIDEO/DOCUMENT) butuh LAMPIRAN, bukan teks
+   * (Fase 18C). Sejak unggahan media ada, template seperti ini bisa
+   * dikirim: pengguna memilih berkas, dan poller mengunggahnya ke Meta
+   * saat mengirim.
    */
   const templateHasMediaHeader =
     selectedTemplate !== null &&
     selectedTemplate.params.header.format !== null &&
     selectedTemplate.params.header.format !== "TEXT";
 
+  /**
+   * Unggah lampiran header template. Format header menentukan jenis
+   * berkas yang sah (IMAGE → gambar, VIDEO → video, DOCUMENT → apa pun
+   * kecuali audio); pemeriksaan sebenarnya tetap di server, ini hanya
+   * mempercepat umpan balik dan menyaring berkas yang jelas salah.
+   */
+  const handleTemplateHeaderFile = async (
+    e: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file || !tenantId) return;
+    setTemplatesError(null);
+    setTemplateHeaderUploading(true);
+    try {
+      const uploaded = await api.media.upload(tenantId, file);
+      setTemplateHeaderMedia(uploaded);
+    } catch (err) {
+      setTemplatesError(translateApiError(t, err));
+    } finally {
+      setTemplateHeaderUploading(false);
+    }
+  };
+
   const selectTemplate = (tpl: WhatsAppTemplateResponse) => {
     setTemplateId(tpl.id);
+    // Lampiran header terikat ke template yang dipilih: template lain
+    // bisa menuntut format berbeda, dan membawa berkas lama akan
+    // menghasilkan penolakan yang membingungkan.
+    setTemplateHeaderMedia(null);
     // Variabel pertama diisi nama kontak — konvensi yang sama dengan
     // broadcast (sumber default posisi 1 = "name"). Sisanya dibiarkan
     // kosong: inbox adalah kiriman satu penerima, jadi manusia yang
@@ -965,6 +1000,10 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     setTemplateHeaderParams([]);
     setTemplateBodyParams([]);
     setTemplateButtonParams([]);
+    // Lampiran header ikut dibuang: setelah terkirim ia sudah tidak
+    // berlaku, dan menyisakannya membuat panel berikutnya membawa berkas
+    // lama yang formatnya belum tentu cocok dengan template baru.
+    setTemplateHeaderMedia(null);
     setTemplatesError(null);
   };
 
@@ -984,6 +1023,9 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
             index: button.index,
             text: button.text.trim(),
           })),
+          ...(templateHeaderMedia
+            ? { headerMediaId: templateHeaderMedia.mediaId }
+            : {}),
         },
       );
       stickToBottomRef.current = true;
@@ -1910,9 +1952,60 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                                 </p>
                               ) : null}
                               {templateHasMediaHeader ? (
-                                <p className="rounded bg-warning/10 px-2 py-1 text-[11px] text-ink">
-                                  {t("inbox.window.templateMediaHeader")}
-                                </p>
+                                <div className="rounded bg-elevated px-2 py-1.5 text-[11px] text-ink">
+                                  <p className="mb-1">
+                                    {t("inbox.window.templateMediaHeader", {
+                                      format:
+                                        selectedTemplate.params.header.format ??
+                                        "",
+                                    })}
+                                  </p>
+                                  <input
+                                    ref={templateFileInputRef}
+                                    type="file"
+                                    className="hidden"
+                                    // Penyaring bawaan browser: tanpa ini
+                                    // pengguna bisa memilih PDF untuk
+                                    // header IMAGE dan baru tahu setelah
+                                    // unggahan ditolak.
+                                    accept={
+                                      selectedTemplate.params.header.format ===
+                                      "IMAGE"
+                                        ? "image/*"
+                                        : selectedTemplate.params.header
+                                              .format === "VIDEO"
+                                          ? "video/*"
+                                          : undefined
+                                    }
+                                    onChange={(e) =>
+                                      void handleTemplateHeaderFile(e)
+                                    }
+                                  />
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={templateHeaderUploading}
+                                      onClick={() =>
+                                        templateFileInputRef.current?.click()
+                                      }
+                                      className="rounded bg-accent px-2 py-1 text-[11px] font-semibold text-white disabled:opacity-60"
+                                    >
+                                      {templateHeaderUploading
+                                        ? t("inbox.attaching")
+                                        : t("inbox.window.templatePickMedia")}
+                                    </button>
+                                    {templateHeaderMedia ? (
+                                      <span className="truncate text-muted">
+                                        {templateHeaderMedia.fileName ??
+                                          t("inbox.attachmentFallbackName")}{" "}
+                                        ·{" "}
+                                        {formatFileSize(
+                                          templateHeaderMedia.sizeBytes,
+                                        )}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
                               ) : (
                                 <>
                                   {templateHeaderParams.map((value, i) => (
@@ -1976,7 +2069,10 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                                 type="button"
                                 disabled={
                                   templateSending ||
-                                  templateHasMediaHeader ||
+                                  templateHeaderUploading ||
+                                  // Header media: wajib ada lampiran.
+                                  (templateHasMediaHeader &&
+                                    templateHeaderMedia === null) ||
                                   templateHeaderParams.length !==
                                     selectedTemplate.params.header.variableCount ||
                                   templateBodyParams.length !==

@@ -40,7 +40,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Parameter template per komponen (header teks + tombol URL) | ✅ | `deriveTemplateParamSpec`, `sendTemplateMessage`, panel inbox |
 | Media masuk (foto/audio/video/dokumen dari pelanggan) | ✅ | `whatsAppMediaRef` → `provider_media_id` → `ingestMessageMedia` (worker) → `GET /tenants/:id/media/:mediaId` |
 | Kirim media keluar (lampiran dari inbox) | ✅ | `storeUploadedMedia` → `queueMediaMessage` → `sendMediaMessage` (unggah ke Meta lalu kirim) |
-| Header media (gambar/video/dokumen) pada template | ❌ | ditolak dengan `MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` — primitif unggah sudah ada (Fase 18B), tinggal menyambungkannya ke `sendTemplateMessage` |
+| Header media (gambar/video/dokumen) pada template | ✅ | `headerMediaId` → `queueTemplateMessage` (validasi format vs MIME) → `uploadMedia` + komponen `header` di `sendTemplateMessage`; pemilih berkas di panel inbox |
 | Paginasi pesan lama (`before` + `hasMore`) | ✅ | `listMessagesPage` |
 
 ## Otomasi

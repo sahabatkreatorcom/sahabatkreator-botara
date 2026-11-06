@@ -115,7 +115,11 @@ export const ErrorCodeSchema = z.enum([
   "MESSAGE_TEMPLATE_NOT_FOUND",
   "MESSAGE_TEMPLATE_NOT_APPROVED",
   "MESSAGE_TEMPLATE_PARAMS_INVALID",
-  "MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED",
+  // Fase 18C: header media kini BISA dikirim. Dua penolakan yang
+  // tersisa keduanya bisa ditindaklanjuti pengguna: lampiran belum
+  // dipilih, atau jenisnya tidak cocok dengan format header template.
+  "MESSAGE_TEMPLATE_MEDIA_HEADER_REQUIRED",
+  "MESSAGE_TEMPLATE_MEDIA_HEADER_MISMATCH",
   // Fase 18B: lampiran dari inbox. Media tidak ada di workspace ini →
   // 404; jenis berkas tidak diizinkan → 415; melebihi batas → 413.
   "MEDIA_NOT_FOUND",

@@ -310,6 +310,12 @@ export const messages = pgTable(
        * `buttons` template (0-based), persis yang dibaca Meta.
        */
       buttonParams?: Array<{ index: number; text: string }>;
+      /**
+       * Lampiran header media (Fase 18C) — id baris `media` milik tenant.
+       * Poller mengunggahnya ke Meta saat mengirim, karena Cloud API
+       * menuntut media id milik Meta, bukan id kita.
+       */
+      headerMediaId?: string;
     }>(),
     /**
      * Id komentar Meta yang menjadi alamat kirim pesan ini (Fase 10B):

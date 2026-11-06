@@ -51,8 +51,8 @@ export interface WhatsAppTemplateParamSpec {
   /**
    * HEADER template. `format` menentukan jenis parameternya: `TEXT`
    * memakai satu variabel teks, sedangkan `IMAGE`/`VIDEO`/`DOCUMENT`
-   * memerlukan unggahan media — belum didukung, dan UI harus
-   * mengatakannya alih-alih mengirim lalu gagal.
+   * memerlukan unggahan media (Fase 18C) — karena itu `variableCount`
+   * selalu 0 untuk header media: parameternya berkas, bukan string.
    */
   header: { format: string | null; text: string | null; variableCount: number };
   body: { text: string | null; variableCount: number };

@@ -996,6 +996,12 @@ export interface MetaQueuedDelivery {
     headerParams?: string[];
     /** Variabel tombol URL (Fase 17); `index` = posisi tombol 0-based. */
     buttonParams?: Array<{ index: number; text: string }>;
+    /**
+     * Lampiran header media (Fase 18C) — id baris `media` milik tenant.
+     * Poller mengunggahnya ke Meta saat mengirim: Cloud API menuntut
+     * media id milik Meta, bukan id penyimpanan kita.
+     */
+    headerMediaId?: string;
   } | null;
   /**
    * Id baris pesan yang dikutip pesan ini (Fase 7B.5), atau null —

@@ -303,11 +303,32 @@ export class WhatsAppCloudClient extends GraphHttpClient {
     bodyParams: string[];
     headerParams?: string[];
     buttonParams?: Array<{ index: number; text: string }>;
+    /**
+     * Header MEDIA (Fase 18C). `mediaId` di sini adalah id media META
+     * (hasil unggahan), bukan id penyimpanan kita — komponen header
+     * menuntut media id milik Meta.
+     */
+    headerMedia?: {
+      kind: "image" | "video" | "document";
+      mediaId: string;
+    };
   }): Promise<{ providerMessageId: string }> {
     const headerParams = input.headerParams ?? [];
     const buttonParams = input.buttonParams ?? [];
     const components: Array<Record<string, unknown>> = [];
-    if (headerParams.length > 0) {
+    // Header media MENGGANTIKAN header teks: template hanya punya satu
+    // header, dan mengirim keduanya membuat Meta menolak pesannya.
+    if (input.headerMedia) {
+      components.push({
+        type: "header",
+        parameters: [
+          {
+            type: input.headerMedia.kind,
+            [input.headerMedia.kind]: { id: input.headerMedia.mediaId },
+          },
+        ],
+      });
+    } else if (headerParams.length > 0) {
       components.push({
         type: "header",
         parameters: headerParams.map((text) => ({ type: "text", text })),

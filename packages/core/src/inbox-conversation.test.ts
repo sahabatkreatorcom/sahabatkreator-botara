@@ -43,6 +43,10 @@ const TEMPLATE_OTHER_ACCOUNT_ID = "99999999-9999-4999-8999-999999999993";
 const TEMPLATE_HEADER_ID = "99999999-9999-4999-8999-999999999994";
 const TEMPLATE_BUTTON_ID = "99999999-9999-4999-8999-999999999995";
 const TEMPLATE_MEDIA_ID = "99999999-9999-4999-8999-999999999996";
+const TEMPLATE_DOC_ID = "99999999-9999-4999-8999-999999999997";
+const MEDIA_IMAGE_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+const MEDIA_PDF_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+const MEDIA_AUDIO_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa3";
 
 const HOUR = 60 * 60 * 1000;
 
@@ -189,7 +193,10 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
             {"type":"BUTTONS","buttons":[{"type":"QUICK_REPLY","text":"Batal"},{"type":"URL","text":"Lacak","url":"https://toko.id/lacak/{{1}}"}]}]'::jsonb),
          ($9, $2, $3, 'promo_bergambar', 'id', 'MARKETING', 'APPROVED',
           'Lihat promo bulan ini.', 0,
-          '[{"type":"HEADER","format":"IMAGE"},{"type":"BODY","text":"Lihat promo bulan ini."}]'::jsonb)`,
+          '[{"type":"HEADER","format":"IMAGE"},{"type":"BODY","text":"Lihat promo bulan ini."}]'::jsonb),
+         ($10, $2, $3, 'katalog_pdf', 'id', 'UTILITY', 'APPROVED',
+          'Katalog terbaru kami.', 0,
+          '[{"type":"HEADER","format":"DOCUMENT"},{"type":"BODY","text":"Katalog terbaru kami."}]'::jsonb)`,
       [
         TEMPLATE_APPROVED_ID,
         TEST_TENANT_ID,
@@ -200,7 +207,19 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
         TEMPLATE_HEADER_ID,
         TEMPLATE_BUTTON_ID,
         TEMPLATE_MEDIA_ID,
+        TEMPLATE_DOC_ID,
       ],
+    );
+    // Lampiran untuk header media (Fase 18C). Ketiganya disemai dengan
+    // MIME berbeda supaya aturan "format header menentukan jenis berkas"
+    // diuji pada data nyata, bukan pada cabang yang tidak pernah tercapai.
+    await pglite.query(
+      `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
+       VALUES
+         ($1, $4, 'tenants/t/media/2026-11/a.jpg', 'promo.jpg', 'image/jpeg', 1024),
+         ($2, $4, 'tenants/t/media/2026-11/b.pdf', 'katalog.pdf', 'application/pdf', 2048),
+         ($3, $4, 'tenants/t/media/2026-11/c.mp3', 'nada.mp3', 'audio/mpeg', 512)`,
+      [MEDIA_IMAGE_ID, MEDIA_PDF_ID, MEDIA_AUDIO_ID, TEST_TENANT_ID],
     );
   }, 120_000);
 
@@ -510,10 +529,10 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
     ]);
   });
 
-  it("menolak template ber-header media SEBELUM masuk antrean", async () => {
-    // Header IMAGE butuh unggahan media, bukan teks. Membiarkannya lolos
-    // berarti pesan masuk antrean lalu gagal di poller sebagai `failed` —
-    // pengguna melihat kegagalan tanpa cara memperbaikinya.
+  it("menolak template ber-header media TANPA lampiran, sebelum masuk antrean", async () => {
+    // Header IMAGE butuh berkas, bukan teks. Membiarkannya lolos berarti
+    // pesan masuk antrean lalu gagal di poller sebagai `failed` — pengguna
+    // melihat kegagalan tanpa cara memperbaikinya.
     const before = await pglite.query<{ n: number }>(
       `SELECT count(*)::int AS n FROM messages WHERE type = 'template'`,
     );
@@ -524,7 +543,7 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
       { templateId: TEMPLATE_MEDIA_ID, bodyParams: [] },
     );
     expect(result).toMatchObject({
-      kind: "template_media_header_unsupported",
+      kind: "template_media_header_required",
       format: "IMAGE",
     });
     const after = await pglite.query<{ n: number }>(
@@ -533,6 +552,89 @@ describe("mutasi percakapan & jendela pesan (Postgres sungguhan)", () => {
     // Tidak ada baris yang ditulis: penolakan terjadi sebelum insert,
     // jadi tidak ada `failed` yang menunggu dibersihkan siapa pun.
     expect(after.rows[0]?.n).toBe(before.rows[0]?.n);
+  });
+
+  it("menolak lampiran yang formatnya tidak cocok dengan header template", async () => {
+    // PDF untuk header IMAGE. Meta menolaknya dengan kode yang tidak
+    // menjelaskan apa pun ke pengguna, jadi pasangan yang salah harus
+    // berhenti di sini — bukan setelah pesan menjadi `failed`.
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_MEDIA_ID,
+        bodyParams: [],
+        headerMediaId: MEDIA_PDF_ID,
+      },
+    );
+    expect(result).toMatchObject({
+      kind: "template_media_header_mismatch",
+      format: "IMAGE",
+    });
+  });
+
+  it("menolak audio untuk header DOCUMENT", async () => {
+    // Cloud API tidak punya header AUDIO sama sekali. Tanpa aturan ini,
+    // berkas audio lolos sebagai DOCUMENT lalu ditolak Meta.
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_DOC_ID,
+        bodyParams: [],
+        headerMediaId: MEDIA_AUDIO_ID,
+      },
+    );
+    expect(result).toMatchObject({
+      kind: "template_media_header_mismatch",
+      format: "DOCUMENT",
+    });
+  });
+
+  it("menolak lampiran yang bukan milik tenant ini", async () => {
+    // RLS menyembunyikan baris tenant lain, tetapi pemeriksaan eksplisit
+    // tetap perlu: tanpa itu id sembarang akan lolos sampai ke poller dan
+    // gagal di sana sebagai "media_object_missing".
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_MEDIA_ID,
+        bodyParams: [],
+        headerMediaId: "aaaaaaaa-aaaa-4aaa-8aaa-999999999999",
+      },
+    );
+    expect(result.kind).toBe("media_not_found");
+  });
+
+  it("mengirim template ber-header media dengan lampiran yang cocok", async () => {
+    const result = await queueTemplateMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      {
+        templateId: TEMPLATE_MEDIA_ID,
+        bodyParams: [],
+        headerMediaId: MEDIA_IMAGE_ID,
+      },
+    );
+    expect(result.kind).toBe("queued");
+    if (result.kind !== "queued") return;
+
+    const rows = await pglite.query<{
+      template_payload: { headerMediaId?: string; headerParams?: string[] };
+    }>(`SELECT template_payload FROM messages WHERE id = $1`, [
+      result.message.id,
+    ]);
+    // Poller butuh id lampiran untuk mengunggahnya ke Meta lebih dulu;
+    // tanpa ini header media tidak punya isi dan pesannya gagal.
+    expect(rows.rows[0]?.template_payload.headerMediaId).toBe(MEDIA_IMAGE_ID);
+    // Header media tidak punya variabel teks — mengirim headerParams
+    // kosong akan membuat poller menambah komponen header kedua.
+    expect(rows.rows[0]?.template_payload.headerParams ?? []).toEqual([]);
   });
 
   it("menolak template yang belum disetujui Meta", async () => {
