@@ -224,6 +224,19 @@ S3-nya belum ditulis karena tidak bisa diuji terhadap bucket sungguhan di
 lingkungan build. `MediaObjectStore` adalah slotnya — mengganti disk
 dengan R2 tidak menyentuh domain, route, maupun UI.
 
+**Arah keluar.** Lampiran dari dashboard diunggah dulu ke direktori yang
+sama (`POST /tenants/:tenantId/media`), baru dirujuk saat dikirim. Worker
+membaca byte dari direktori itu lalu mengunggahnya ke Meta — Cloud API
+tidak bisa mengambil berkas dari penyimpanan privat, jadi unggah ke Meta
+adalah langkah wajib, bukan pilihan. Artinya: worker dan API WAJIB
+berbagi volume, dan media keluar tetap bisa dikirim ulang selama berkasnya
+masih ada.
+
+Batas unggah juga 25 MB, dengan daftar putih tipe berkas (gambar, audio,
+video, PDF, Office, ZIP, teks). `text/html` dan `image/svg+xml` sengaja
+TIDAK diizinkan: keduanya bisa membawa skrip yang berjalan di origin
+dashboard.
+
 Batas unduhan 25 MB (plafon Meta: 16 MB media, 100 MB dokumen). Berkas
 di atas batas TIDAK dibuang diam-diam: alasannya dicatat di
 `messages.media_ingest_error`, dan setelah 5 percobaan barisnya berhenti

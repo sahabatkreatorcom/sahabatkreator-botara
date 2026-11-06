@@ -39,7 +39,9 @@ export type AppContext = Context<{ Variables: AppVariables }>;
 /** Balasan error sesuai kontrak: { error: { code, message } } (RANCANGAN §11.1). */
 export function apiError(
   c: Context,
-  status: 400 | 401 | 403 | 404 | 409 | 422 | 429 | 500 | 502 | 503,
+  // 413/415 (Fase 18B): unggahan lampiran — ukuran dan tipe ditolak
+  // dengan kode yang bisa ditindaklanjuti pengguna, bukan 400 generik.
+  status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 429 | 500 | 502 | 503,
   code: ErrorCode,
   message: string,
   details?: unknown,

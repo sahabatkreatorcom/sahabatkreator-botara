@@ -39,8 +39,8 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Kirim template WhatsApp dari inbox (jalan keluar jendela tertutup) | ✅ | `queueTemplateMessage`, `POST …/template` |
 | Parameter template per komponen (header teks + tombol URL) | ✅ | `deriveTemplateParamSpec`, `sendTemplateMessage`, panel inbox |
 | Media masuk (foto/audio/video/dokumen dari pelanggan) | ✅ | `whatsAppMediaRef` → `provider_media_id` → `ingestMessageMedia` (worker) → `GET /tenants/:id/media/:mediaId` |
-| Kirim media keluar (lampiran dari inbox) | ❌ | belum ada unggahan dari klien; kanal baru punya `sendTextMessage`/`sendTemplateMessage` |
-| Header media (gambar/video/dokumen) pada template | ❌ | ditolak dengan `MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` — menunggu kirim media keluar |
+| Kirim media keluar (lampiran dari inbox) | ✅ | `storeUploadedMedia` → `queueMediaMessage` → `sendMediaMessage` (unggah ke Meta lalu kirim) |
+| Header media (gambar/video/dokumen) pada template | ❌ | ditolak dengan `MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` — primitif unggah sudah ada (Fase 18B), tinggal menyambungkannya ke `sendTemplateMessage` |
 | Paginasi pesan lama (`before` + `hasMore`) | ✅ | `listMessagesPage` |
 
 ## Otomasi

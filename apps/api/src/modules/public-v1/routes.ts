@@ -421,6 +421,12 @@ export function createPublicV1Routes(
         },
       );
     }
+    // Varian media tidak mungkin di jalur ini (API publik belum punya
+    // unggahan lampiran). Dinyatakan eksplisit supaya perubahan kelak
+    // memunculkan error, bukan lampiran yang hilang diam-diam.
+    if (result.kind !== "queued") {
+      return apiError(c, 500, "INTERNAL_ERROR", "Unexpected queue result");
+    }
     const queued = result.message;
 
     // Jalur pengiriman sama persis dengan balasan dashboard: Fase 6G

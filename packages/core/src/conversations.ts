@@ -4,6 +4,7 @@ import {
   channelAccounts,
   contacts,
   conversations,
+  media,
   messages,
   tenantMembers,
   users,
@@ -888,13 +889,40 @@ export type QueueOutboundMessageResult =
   | { kind: "queued"; message: MessageWithReplyTo }
   | { kind: "conversation_not_found" }
   | { kind: "reply_target_invalid" }
-  | { kind: "messaging_window_closed"; window: MessagingWindowState };
+  | { kind: "messaging_window_closed"; window: MessagingWindowState }
+  /** Lampiran yang ditunjuk tidak ada di workspace ini (atau milik tenant lain). */
+  | { kind: "media_not_found" }
+  /** Jenis berkas tidak bisa dikirim sebagai media (mis. text/csv). */
+  | { kind: "media_type_unsupported"; mimeType: string | null };
+
+/**
+ * Jenis pesan media dari MIME berkas (Fase 18B).
+ *
+ * Dipetakan ke empat tipe yang dikenal Cloud API — image, audio, video,
+ * document. Selain itu jatuh ke `document`, yang memang menerima berkas
+ * apa pun; jadi tidak ada unggahan yang "hilang" hanya karena MIME-nya
+ * tidak masuk daftar pendek.
+ */
+export function messageTypeForMime(
+  mimeType: string | null,
+): "image" | "audio" | "video" | "document" {
+  const mime = (mimeType ?? "").toLowerCase();
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("audio/")) return "audio";
+  if (mime.startsWith("video/")) return "video";
+  return "document";
+}
 
 async function queueOutboundMessageWithActor(
   db: Database,
   tenantId: string,
   conversationId: string,
-  input: { contentText: string; replyToMessageId?: string },
+  input: {
+    contentText: string | null;
+    replyToMessageId?: string;
+    /** Lampiran (Fase 18B). Bila ada, `contentText` menjadi caption. */
+    media?: { id: string; mimeType: string | null };
+  },
   actor: OutboundMessageActor,
 ): Promise<QueueOutboundMessageResult> {
   return withTenantDb(db, tenantId, async (tx) => {
@@ -944,6 +972,21 @@ async function queueOutboundMessageWithActor(
       return { kind: "messaging_window_closed", window: messagingWindow } as const;
     }
 
+    // Lampiran harus benar-benar ada di workspace ini. Diperiksa di
+    // dalam transaksi yang sama dengan insert: tanpa ini, id media
+    // sembarang menghasilkan pesan `queued` yang gagal di poller —
+    // kegagalan yang baru terlihat sebagai `failed` tanpa sebab.
+    let messageType: Message["type"] = "text";
+    if (input.media) {
+      const [owned] = await tx
+        .select({ id: media.id })
+        .from(media)
+        .where(and(eq(media.tenantId, tenantId), eq(media.id, input.media.id)))
+        .limit(1);
+      if (!owned) return { kind: "media_not_found" } as const;
+      messageType = messageTypeForMime(input.media.mimeType);
+    }
+
     const [message] = await tx
       .insert(messages)
       .values({
@@ -951,8 +994,9 @@ async function queueOutboundMessageWithActor(
         conversationId,
         direction: "outbound",
         senderType: "user",
-        type: "text",
+        type: messageType,
         contentText: input.contentText,
+        mediaId: input.media?.id ?? null,
         status: "queued",
         sentByUserId: actor.sentByUserId,
         replyToMessageId: input.replyToMessageId ?? null,
@@ -974,6 +1018,7 @@ async function queueOutboundMessageWithActor(
         conversationId,
         messageId: message.id,
         stub: true,
+        ...(input.media ? { mediaId: input.media.id } : {}),
         ...(input.replyToMessageId
           ? { replyToMessageId: input.replyToMessageId }
           : {}),
@@ -1005,6 +1050,59 @@ export async function queueOutboundMessage(
     auditActorId: ctx.userId,
     sentByUserId: ctx.userId,
   });
+}
+
+/**
+ * Mengantrekan pesan BERLAMPIRAN dari inbox (Fase 18B).
+ *
+ * Jalur ini menutup sisi lain dari Fase 18A: pelanggan bisa mengirim
+ * foto, tetapi agen tidak bisa membalas dengan foto, PDF, atau voice
+ * note sama sekali — `sendMessage` di kanal WhatsApp hanya punya
+ * `sendTextMessage`.
+ *
+ * `contentText` menjadi CAPTION, bukan teks terpisah: Cloud API
+ * menempelkan caption pada objek media, dan mengirim keduanya sebagai
+ * dua pesan akan terlihat sebagai dua gelembung.
+ *
+ * Jendela 24 jam tetap ditegakkan lewat jalur yang sama dengan teks
+ * biasa — media bebas juga pesan bebas, jadi aturan Meta berlaku sama.
+ */
+export async function queueMediaMessage(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId"> & { userId: string },
+  conversationId: string,
+  input: { mediaId: string; caption?: string; replyToMessageId?: string },
+): Promise<QueueOutboundMessageResult> {
+  // MIME dibaca dari baris media (bukan dari klien) supaya jenis pesan
+  // ditentukan oleh berkas yang benar-benar tersimpan. Transaksi ini
+  // DITUTUP sebelum mengantrekan: `queueOutboundMessageWithActor`
+  // membuka transaksinya sendiri, dan menyarangkannya di dalam
+  // transaksi lain akan memakai koneksi kedua dari pool — mahal dan,
+  // pada pool kecil, bisa saling menunggu.
+  const mimeType = await withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [row] = await tx
+      .select({ mimeType: media.mimeType })
+      .from(media)
+      .where(and(eq(media.tenantId, ctx.tenantId), eq(media.id, input.mediaId)))
+      .limit(1);
+    return row?.mimeType ?? null;
+  });
+
+  return queueOutboundMessageWithActor(
+    db,
+    ctx.tenantId,
+    conversationId,
+    {
+      contentText: input.caption?.trim() ? input.caption.trim() : null,
+      replyToMessageId: input.replyToMessageId,
+      media: { id: input.mediaId, mimeType },
+    },
+    {
+      auditActorType: "user",
+      auditActorId: ctx.userId,
+      sentByUserId: ctx.userId,
+    },
+  );
 }
 
 /**

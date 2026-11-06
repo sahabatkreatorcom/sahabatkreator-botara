@@ -1,6 +1,15 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { getMediaForServing, type MediaObjectStore } from "@sahabat-kreator/core";
+import {
+  MEDIA_UPLOAD_ALLOWED_MIME,
+  MEDIA_UPLOAD_MAX_BYTES,
+  MediaUploadResponseSchema,
+} from "@sahabat-kreator/contracts";
+import {
+  getMediaForServing,
+  storeUploadedMedia,
+  type MediaObjectStore,
+} from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 import { resolveTenantForUser } from "../tenants/guard";
@@ -103,5 +112,86 @@ export function createMediaRoutes(
 
   app.get(`${base}/:mediaId`, (c) => serve(c, c.req.param("mediaId")));
 
+  /**
+   * Unggah lampiran (Fase 18B): `POST /tenants/:tenantId/media`
+   * multipart, bagian `file`.
+   *
+   * Yang diperiksa sebelum satu byte pun disimpan: ukuran, tipe, dan
+   * nama. Semuanya ditolak dengan kode spesifik — bukan 500 — karena
+   * pengguna bisa memperbaiki semuanya (kecilkan berkas, pilih format
+   * lain), dan pesan "gagal mengunggah" tidak memberi tahu apa yang
+   * harus diubah.
+   */
+  app.post(base, async (c) => {
+    const tenant = await resolveTenantForUser(
+      bundle,
+      c.req.param("tenantId") ?? "",
+      c.get("appUser").id,
+    );
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+
+    let body: Record<string, unknown>;
+    try {
+      body = (await c.req.parseBody()) as Record<string, unknown>;
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Body must be multipart/form-data");
+    }
+    const file = body.file;
+    if (!(file instanceof File)) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Missing file part");
+    }
+    if (file.size === 0) {
+      return apiError(c, 400, "MEDIA_EMPTY", "File is empty");
+    }
+    if (file.size > MEDIA_UPLOAD_MAX_BYTES) {
+      return apiError(c, 413, "MEDIA_TOO_LARGE", "File exceeds 25 MB");
+    }
+    // Tipe dari klien bisa dikarang; yang menentukan tetap daftar putih
+    // di sini. Berkas tanpa tipe ditolak, bukan ditebak.
+    const declared = (file.type || "").split(";")[0]?.trim().toLowerCase() ?? "";
+    if (!(MEDIA_UPLOAD_ALLOWED_MIME as readonly string[]).includes(declared)) {
+      return apiError(
+        c,
+        415,
+        "MEDIA_TYPE_UNSUPPORTED",
+        `Unsupported file type: ${declared || "unknown"}`,
+      );
+    }
+
+    const data = Buffer.from(await file.arrayBuffer());
+    const fileName = sanitizeFileName(file.name);
+    const stored = await storeUploadedMedia(
+      bundle.db,
+      { tenantId: tenant.id },
+      { data, fileName, mimeType: declared, store },
+    );
+    return c.json(
+      MediaUploadResponseSchema.parse({
+        mediaId: stored.mediaId,
+        fileName,
+        mimeType: declared,
+        sizeBytes: stored.sizeBytes,
+      }),
+      201,
+    );
+  });
+
   return app;
+}
+
+/**
+ * Nama berkas aman untuk disimpan dan ditampilkan.
+ *
+ * Hanya untuk label: object key memakai uuid, jadi ini bukan pertahanan
+ * path traversal. Yang dibuang adalah karakter yang merusak header
+ * `Content-Disposition` dan nama yang tidak bisa ditampilkan.
+ */
+export function sanitizeFileName(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const cleaned = raw
+    .replace(/["\\\r\n\t]/g, "_")
+    .replace(/^.*[/\\]/, "")
+    .trim()
+    .slice(0, 255);
+  return cleaned || null;
 }

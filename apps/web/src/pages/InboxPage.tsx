@@ -3,6 +3,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ChangeEvent,
   type FormEvent,
 } from "react";
 import type {
@@ -10,6 +11,7 @@ import type {
   ConversationResponse,
   ConversationStatus,
   MessageReplyTo,
+  MediaUploadResponse,
   MessageResponse,
   SavedReplyResponse,
   TeamMemberResponse,
@@ -27,7 +29,12 @@ import {
 } from "../hooks/usePolling";
 import { useNudgeSubscription } from "../hooks/useRealtime";
 import { useUnreadBadge } from "../inbox/UnreadBadgeProvider";
-import { formatListTime, formatRelativeTime, formatTime } from "../utils/format";
+import {
+  formatFileSize,
+  formatListTime,
+  formatRelativeTime,
+  formatTime,
+} from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
 type Translate = (
@@ -94,6 +101,18 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const [messagesError, setMessagesError] = useState<string | null>(null);
 
   const [draft, setDraft] = useState("");
+  /**
+   * Lampiran yang sudah diunggah tetapi belum dikirim (Fase 18B).
+   *
+   * Diunggah SEGERA saat dipilih, bukan saat menekan kirim: unggahan
+   * berkas 20 MB butuh waktu, dan menunggunya di dalam `handleSend`
+   * membuat tombol kirim tampak menggantung tanpa penjelasan. Setelah
+   * terunggah, `mediaId`-nya tinggal dirujuk.
+   */
+  const [pendingAttachment, setPendingAttachment] =
+    useState<MediaUploadResponse | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -753,22 +772,59 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     );
   };
 
+  /**
+   * Pilih lampiran → unggah segera (Fase 18B).
+   *
+   * Ditolak di klien dengan pesan yang jelas bila tipe tidak diizinkan
+   * atau berkas terlalu besar: server tetap memeriksa ulang (klien tidak
+   * boleh jadi satu-satunya penjaga), tetapi menunggu unggahan 25 MB
+   * hanya untuk ditolak di ujung sana adalah pengalaman yang buruk.
+   */
+  const handlePickAttachment = async (
+    e: ChangeEvent<HTMLInputElement>,
+  ) => {
+    const file = e.target.files?.[0];
+    // Input dikosongkan supaya memilih berkas yang SAMA dua kali tetap
+    // memicu onChange.
+    e.target.value = "";
+    if (!file || !tenantId) return;
+    setSendError(null);
+    setUploading(true);
+    try {
+      const uploaded = await api.media.upload(tenantId, file);
+      setPendingAttachment(uploaded);
+    } catch (err) {
+      setSendError(translateApiError(t, err));
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     const content = draft.trim();
-    if (!tenantId || !selectedId || !content || sending) return;
+    if (!tenantId || !selectedId || sending) return;
+    // Dengan lampiran, teks boleh kosong: caption opsional.
+    if (!content && !pendingAttachment) return;
     setSendError(null);
     setSending(true);
     try {
-      const created = await api.conversations.sendMessage(
-        tenantId,
-        selectedId,
-        content,
-        quoteTarget?.id,
-      );
+      const created = pendingAttachment
+        ? await api.conversations.sendMedia(tenantId, selectedId, {
+            mediaId: pendingAttachment.mediaId,
+            caption: content || undefined,
+          })
+        : await api.conversations.sendMessage(
+            tenantId,
+            selectedId,
+            content,
+            quoteTarget?.id,
+          );
       // Agen yang baru mengirim balasan selalu dibawa ke pesan terbaru.
       stickToBottomRef.current = true;
       setDraft("");
+      // Lampiran terkirim → chip dibersihkan, sama seperti kutipan.
+      setPendingAttachment(null);
       // Kutipan terkirim → chip dibersihkan (hanya pada sukses; kirim
       // yang gagal mempertahankan chip agar agen bisa mencoba lagi).
       setQuoteTarget(null);
@@ -1992,7 +2048,40 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                         </button>
                       </div>
                     ) : null}
+                  {pendingAttachment ? (
+                    <div className="mb-1 flex items-center gap-2 rounded-lg bg-elevated px-2 py-1 text-xs text-ink">
+                      <span className="truncate">
+                        {pendingAttachment.fileName ?? t("inbox.attachmentFallbackName")}
+                      </span>
+                      <span className="shrink-0 text-muted">
+                        {formatFileSize(pendingAttachment.sizeBytes)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingAttachment(null)}
+                        className="shrink-0 rounded px-1 text-muted hover:text-ink"
+                        aria-label={t("inbox.attachmentRemove")}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ) : null}
                   <div className="flex items-end gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      className="hidden"
+                      onChange={(e) => void handlePickAttachment(e)}
+                    />
+                    <button
+                      type="button"
+                      disabled={uploading || windowClosed}
+                      onClick={() => fileInputRef.current?.click()}
+                      title={t("inbox.attachButton")}
+                      className="shrink-0 rounded-lg bg-elevated px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
+                    >
+                      {uploading ? t("inbox.attaching") : t("inbox.attachButton")}
+                    </button>
                     <textarea
                       value={draft}
                       disabled={windowClosed}
@@ -2055,7 +2144,12 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                     />
                     <button
                       type="submit"
-                      disabled={sending || !draft.trim() || windowClosed}
+                      disabled={
+                        sending ||
+                        uploading ||
+                        windowClosed ||
+                        (!draft.trim() && !pendingAttachment)
+                      }
                       className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                     >
                       {sending

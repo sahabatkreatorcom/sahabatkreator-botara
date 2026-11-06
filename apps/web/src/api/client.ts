@@ -93,6 +93,7 @@ import type {
   KbFileDocumentListResponse,
   KbFileDocumentResponse,
   KbStatsResponse,
+  MediaUploadResponse,
   MessageListResponse,
   MessageResponse,
   MetaOAuthCompleteResponse,
@@ -298,6 +299,29 @@ async function requestFormData<T>(
 }
 
 export const api = {
+  media: {
+    /**
+     * POST /api/tenants/:tenantId/media (multipart, bagian `file`).
+     *
+     * Unggah dipisah dari pengiriman (Fase 18B): berkas bisa diunggah
+     * sekali lalu dipakai untuk beberapa percakapan, dan kegagalan
+     * unggah tidak boleh terlihat sebagai kegagalan kirim. Memakai
+     * `requestFormData` supaya Content-Type multipart diisi browser.
+     */
+    async upload(
+      tenantId: string,
+      file: File,
+      signal?: AbortSignal,
+    ): Promise<MediaUploadResponse> {
+      const form = new FormData();
+      form.append("file", file);
+      return requestFormData<MediaUploadResponse>(
+        `/api/tenants/${tenantId}/media`,
+        form,
+        signal ? { signal } : undefined,
+      );
+    },
+  },
   auth: {
     /** GET /api/auth/get-session → user bila sesi valid, null bila belum login. */
     async getSessionUser(): Promise<SessionUser | null> {
@@ -726,6 +750,26 @@ export const api = {
             bodyParams: params.bodyParams,
             headerParams: params.headerParams ?? [],
             buttonParams: params.buttonParams ?? [],
+          }),
+        },
+      );
+    },
+    /**
+     * POST .../conversations/:id/media → kirim lampiran (Fase 18B).
+     * Berkas harus sudah diunggah lewat `api.media.upload`.
+     */
+    async sendMedia(
+      tenantId: string,
+      conversationId: string,
+      input: { mediaId: string; caption?: string },
+    ): Promise<MessageResponse> {
+      return request<MessageResponse>(
+        `/api/tenants/${tenantId}/conversations/${conversationId}/media`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            mediaId: input.mediaId,
+            ...(input.caption?.trim() ? { caption: input.caption.trim() } : {}),
           }),
         },
       );

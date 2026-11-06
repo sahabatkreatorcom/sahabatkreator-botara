@@ -137,6 +137,14 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED");
     case "MESSAGE_TEMPLATE_PARAMS_INVALID":
       return t("errors.MESSAGE_TEMPLATE_PARAMS_INVALID");
+    case "MEDIA_NOT_FOUND":
+      return t("errors.MEDIA_NOT_FOUND");
+    case "MEDIA_TYPE_UNSUPPORTED":
+      return t("errors.MEDIA_TYPE_UNSUPPORTED");
+    case "MEDIA_TOO_LARGE":
+      return t("errors.MEDIA_TOO_LARGE");
+    case "MEDIA_EMPTY":
+      return t("errors.MEDIA_EMPTY");
     case "INVITATION_EXPIRED":
       return t("errors.INVITATION_EXPIRED");
     case "INVITATION_REVOKED":

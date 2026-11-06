@@ -15,6 +15,7 @@ import {
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
   INTEGRATION_LOG_RETENTION_DAYS,
   INVITATION_EMAIL_OUTBOX_TYPE,
+  createDiskMediaStore,
   deliverInvitationEmail,
   dispatchBroadcast,
   embedKbDocumentChunks,
@@ -1108,6 +1109,14 @@ void tokenLifecycleTick();
 //
 // Interval 2 detik dipertahankan persis seperti sebelumnya: latensi
 // balasan dashboard tidak boleh berubah hanya karena prosesnya pindah.
+// Fase 18B: SATU penyimpanan untuk pembacaan lampiran (poller) dan
+// penulisan/penyajian (API memakai akar yang sama lewat
+// resolveMediaStorageRoot). Dibuat sekali agar tidak ada dua instance
+// yang bisa menunjuk direktori berbeda.
+const mediaStore = createDiskMediaStore(
+  resolveMediaStorageRoot(env.MEDIA_STORAGE_ROOT),
+);
+
 const DELIVERY_POLL_INTERVAL_MS = 2_000;
 /** Interval ingest media masuk — tidak ada SLA, 5 dtk cukup. */
 const MEDIA_INGEST_INTERVAL_MS = 5_000;
@@ -1128,6 +1137,8 @@ const deliveryPollers: DeliveryPoller[] = [
       metaApiBase: env.META_API_BASE,
       graphApiVersion: META_GRAPH_API_VERSION,
       publisher: realtimePublisher,
+      // Fase 18B: sumber byte untuk pesan berlampiran.
+      mediaStore: mediaStore,
     },
     DELIVERY_POLL_INTERVAL_MS,
   ),

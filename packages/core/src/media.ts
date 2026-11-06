@@ -356,8 +356,66 @@ export async function runMediaIngestCycle(
   return result;
 }
 
-/** Metadata media untuk disajikan API (`GET /media/:id`). */
-export async function getMediaForServing(
+/**
+ * Simpan lampiran yang diunggah dari dashboard (Fase 18B).
+ *
+ * Urutan tulis: objek dulu, baris DB kemudian. Kalau urutannya dibalik,
+ * baris `media` bisa ada tanpa objek — dan pesan yang menunjuknya akan
+ * tampil sebagai lampiran rusak. Dengan urutan ini, kegagalan tulis DB
+ * hanya menyisakan objek yatim yang tidak dirujuk siapa pun (dan tidak
+ * pernah disajikan), yang jauh lebih ringan akibatnya.
+ *
+ * Nama berkas dari pengguna hanya DISIMPAN, tidak dipakai menyusun key:
+ * `buildMediaObjectKey` memakai uuid. Yang tersimpan di `file_name`
+ * dipakai UI untuk label unduhan dan dikirim ke Meta sebagai `filename`.
+ */
+export async function storeUploadedMedia(
+  db: Database,
+  ctx: { tenantId: string },
+  input: {
+    data: Buffer;
+    fileName: string | null;
+    mimeType: string;
+    store: MediaObjectStore;
+    now?: Date;
+  },
+): Promise<{ mediaId: string; sizeBytes: number }> {
+  const objectKey = buildMediaObjectKey({
+    tenantId: ctx.tenantId,
+    fileName: input.fileName,
+    mimeType: input.mimeType,
+    now: input.now,
+  });
+  await input.store.put(objectKey, input.data, input.mimeType);
+
+  try {
+    return await withTenantDb(db, ctx.tenantId, async (tx) => {
+      const [row] = await tx
+        .insert(media)
+        .values({
+          tenantId: ctx.tenantId,
+          r2Key: objectKey,
+          fileName: input.fileName,
+          mimeType: input.mimeType,
+          sizeBytes: input.data.length,
+        })
+        .returning({ id: media.id });
+      if (!row) throw new Error("media_insert_failed");
+      return { mediaId: row.id, sizeBytes: input.data.length };
+    });
+  } catch (err) {
+    // Baris gagal ditulis → objeknya tidak akan pernah dirujuk. Hapus
+    // supaya penyimpanan tidak menumpuk berkas tanpa pemilik.
+    try {
+      await input.store.delete(objectKey);
+    } catch {
+      /* kegagalan hapus tidak boleh menutupi kegagalan utamanya */
+    }
+    throw err;
+  }
+}
+
+/** Metadata media untuk disajikan API (`GET /media/:id`). */export async function getMediaForServing(
   db: Database,
   ctx: { tenantId: string },
   mediaId: string,

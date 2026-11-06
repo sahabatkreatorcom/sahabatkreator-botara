@@ -1,9 +1,12 @@
 import type { Database } from "@sahabat-kreator/db";
 import {
   extractRawProviderMessageId,
+  getMediaForServing,
   getMessageProviderMessageId,
   listQueuedMetaDeliveries,
+  messageTypeForMime,
   setChannelAccountTokenType,
+  type MediaObjectStore,
   type MetaQueuedDelivery,
 } from "@sahabat-kreator/core";
 import {
@@ -55,6 +58,13 @@ export interface MetaPollerOptions {
   graphApiVersion: string;
   /** Penerbit nudge realtime (Fase 6G). */
   publisher?: RealtimePublisher | null;
+  /**
+   * Penyimpanan objek media (Fase 18B). Diperlukan untuk mengirim
+   * lampiran: byte-nya dibaca dari sini lalu diunggah ke Meta.
+   * Tanpa store, pesan berlampiran gagal dengan kode yang jelas —
+   * bukan terkirim sebagai teks kosong.
+   */
+  mediaStore?: MediaObjectStore | null;
 }
 
 export type MetaDeliveryPoller = DeliveryPoller;
@@ -207,6 +217,41 @@ export function startMetaDeliveryPoller(
             apiVersion: opts.graphApiVersion,
             accessToken: token,
           });
+          // Fase 18B: pesan berlampiran. Byte dibaca di konteks tenant
+          // (bukan dari hasil pindai lintas tenant — `media` tidak
+          // terbuka untuk pindai), lalu diunggah ke Meta. Caption
+          // diambil dari contentText.
+          if (delivery.mediaId) {
+            if (!opts.mediaStore) {
+              throw new Error("media_store_not_configured");
+            }
+            const attachment = await getMediaForServing(
+              conn,
+              { tenantId: delivery.tenantId },
+              delivery.mediaId,
+            );
+            if (!attachment) throw new Error("media_row_missing");
+            const object = await opts.mediaStore.get(attachment.r2Key);
+            // Baris ada, objek tidak: volume penyimpanan diganti atau
+            // berkas terhapus. Dibiarkan melempar supaya pesan berakhir
+            // `failed` dengan kode yang bisa ditelusuri, bukan terkirim
+            // sebagai pesan kosong.
+            if (!object) throw new Error("media_object_missing");
+            const mimeType =
+              attachment.mimeType ?? object.contentType ?? "application/octet-stream";
+            return (
+              await waClient.sendMediaMessage({
+                phoneNumberId: delivery.accountExternalId,
+                to: delivery.recipientExternalId,
+                kind: messageTypeForMime(mimeType),
+                data: object.data,
+                mimeType,
+                fileName: attachment.fileName,
+                caption: delivery.contentText,
+                ...(quotedRawId ? { contextMessageId: quotedRawId } : {}),
+              })
+            ).providerMessageId;
+          }
           // Fase 10A: pesan bertemplatePayload dikirim sebagai pesan
           // TEMPLATE resmi (satu-satunya bentuk proaktif di luar jendela
           // 24 jam); kutipan tidak berlaku untuk template.

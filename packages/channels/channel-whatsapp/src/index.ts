@@ -493,6 +493,112 @@ export class WhatsAppCloudClient extends GraphHttpClient {
   }
 
   /**
+   * Unggah media ke Meta (Fase 18B): `POST /{phone_number_id}/media`
+   * multipart dengan `messaging_product=whatsapp`, `file`, dan `type`.
+   *
+   * Kenapa unggah, bukan `link`: Cloud API memang menerima media lewat
+   * URL publik, tetapi berkas pelanggan kita berada di penyimpanan
+   * privat di balik sesi dashboard. Membuatnya publik agar bisa
+   * dikirim berarti membocorkan seluruh lampiran workspace ke internet.
+   *
+   * Media id hasil unggahan berlaku ±30 hari di sisi Meta — cukup untuk
+   * satu kali kirim; tidak disimpan.
+   */
+  async uploadMedia(input: {
+    phoneNumberId: string;
+    data: Buffer;
+    mimeType: string;
+    fileName: string | null;
+  }): Promise<{ mediaId: string }> {
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", input.mimeType);
+    // Blob memaksa filename; tanpa itu Meta menolak "file" sebagai
+    // bagian yang tidak bernama.
+    const blob = new Blob([new Uint8Array(input.data)], {
+      type: input.mimeType,
+    });
+    form.append("file", blob, input.fileName ?? "berkas");
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/${this.apiVersion}/${encodeURIComponent(
+          input.phoneNumberId,
+        )}/media`,
+        {
+          method: "POST",
+          // JANGAN set content-type: boundary multipart dibuat runtime.
+          headers: this.headers(),
+          body: form,
+          signal: AbortSignal.timeout(this.timeoutMs),
+        },
+      );
+    } catch {
+      throw new WhatsAppGraphError(0, null, "media_upload_network_error");
+    }
+    if (!response.ok) {
+      throw await this.parseError(response);
+    }
+    const body = (await response.json()) as { id?: string };
+    if (typeof body.id !== "string" || !body.id) {
+      throw new WhatsAppGraphError(200, null, "missing_media_id");
+    }
+    return { mediaId: body.id };
+  }
+
+  /**
+   * Kirim pesan bermedia (Fase 18B): unggah dulu, lalu
+   * `POST /{phone_number_id}/messages` dengan `type` sesuai jenis dan
+   * `{ <kind>: { id, caption?, filename? } }`.
+   *
+   * Caption hanya sah untuk image/video/document — audio TIDAK punya
+   * caption di Cloud API. Mengirimkannya tetap membuat Meta menolak
+   * seluruh pesan, jadi caption dibuang untuk audio, bukan diteruskan
+   * dan berharap diterima.
+   */
+  async sendMediaMessage(input: {
+    phoneNumberId: string;
+    to: string;
+    kind: "image" | "audio" | "video" | "document";
+    data: Buffer;
+    mimeType: string;
+    fileName?: string | null;
+    caption?: string | null;
+    contextMessageId?: string;
+  }): Promise<{ providerMessageId: string }> {
+    const uploaded = await this.uploadMedia({
+      phoneNumberId: input.phoneNumberId,
+      data: input.data,
+      mimeType: input.mimeType,
+      fileName: input.fileName ?? null,
+    });
+    const caption =
+      input.kind === "audio" ? null : (input.caption?.trim() || null);
+    const mediaObject: Record<string, unknown> = { id: uploaded.mediaId };
+    if (caption) mediaObject.caption = caption;
+    if (input.kind === "document" && input.fileName) {
+      mediaObject.filename = input.fileName;
+    }
+    const body = await this.postJson<{
+      messages?: Array<{ id?: string }>;
+    }>(`${encodeURIComponent(input.phoneNumberId)}/messages`, {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: input.to,
+      type: input.kind,
+      [input.kind]: mediaObject,
+      ...(input.contextMessageId
+        ? { context: { message_id: input.contextMessageId } }
+        : {}),
+    });
+    const wamid = body.messages?.[0]?.id;
+    if (typeof wamid !== "string" || !wamid) {
+      throw new WhatsAppGraphError(200, null, "missing_message_id");
+    }
+    return { providerMessageId: wamid };
+  }
+
+  /**
    * Kirim pesan teks (Cloud API): `POST /{phone_number_id}/messages`.
    * Mengembalikan wamid (`messages[0].id`) — id yang nantinya
    * dicocokkan webhook statuses untuk delivered/read/failed.

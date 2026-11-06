@@ -7,6 +7,7 @@ import {
   ConversationStatusSchema,
   MessageListResponseSchema,
   SendMessageRequestSchema,
+  SendMediaMessageRequestSchema,
   SendTemplateMessageRequestSchema,
   SetAgentEnabledRequestSchema,
   UpdateConversationStatusRequestSchema,
@@ -19,6 +20,7 @@ import {
   listMessagesPage,
   listProfilePhotoOwnerIds,
   markConversationRead,
+  queueMediaMessage,
   queueOutboundMessage,
   queueTemplateMessage,
   setConversationAgentEnabled,
@@ -117,6 +119,7 @@ export function createInboxRoutes(
     app.post(`${base}/:id/messages`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/assign`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/template`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:id/media`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.patch(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/agent`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
@@ -295,6 +298,13 @@ export function createInboxRoutes(
         },
       );
     }
+    // Jalur ini tidak pernah mengirim lampiran, jadi dua varian media di
+    // bawah tidak mungkin terjadi. Dinyatakan eksplisit alih-alih
+    // di-cast: kalau suatu saat jalur ini berubah, yang muncul adalah
+    // error yang jelas, bukan lampiran yang hilang diam-diam.
+    if (result.kind !== "queued") {
+      return apiError(c, 500, "INTERNAL_ERROR", "Unexpected queue result");
+    }
     const queued = result.message;
 
     // Fase 6G: nudge setelah commit — apps/realtime mem-flush pesan ini
@@ -396,6 +406,93 @@ export function createInboxRoutes(
           received: result.received,
         },
       );
+    }
+    if (publisher) {
+      await publisher.publishNudge({
+        kind: "message.queued",
+        tenantId: tenant.id,
+        conversationId: id,
+      });
+    }
+    return c.json(serializeMessage(result.message), 201);
+  });
+
+  /**
+   * Kirim lampiran (Fase 18B) — `POST /tenants/:tenantId/conversations/:id/media`.
+   *
+   * Sisi lain dari Fase 18A: pelanggan bisa mengirim foto, tetapi agen
+   * tidak punya jalan membalas dengan foto, PDF, atau voice note sama
+   * sekali. Berkasnya sudah diunggah lebih dulu lewat
+   * `POST /tenants/:tenantId/media`; di sini hanya id-nya yang dirujuk.
+   *
+   * Penolakan dibuat spesifik: media milik tenant lain → 404, jendela
+   * 24 jam tertutup → 422 dengan waktu (sama seperti teks), target
+   * kutipan salah → 422. Semuanya SEBELUM pesan masuk antrean, supaya
+   * tidak ada `queued` yang pasti gagal di provider.
+   */
+  app.post(`${base}/:id/media`, async (c) => {
+    const appUser = c.get("appUser");
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), appUser.id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = SendMediaMessageRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid media payload");
+    }
+    const result = await queueMediaMessage(
+      bundle.db,
+      { tenantId: tenant.id, userId: appUser.id },
+      id,
+      parsed.data,
+    );
+    if (result.kind === "conversation_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    if (result.kind === "media_not_found") {
+      // Termasuk media milik workspace lain: bagi tenant ini memang
+      // tidak ada, dan menyebutkannya akan membocorkan keberadaannya.
+      return apiError(c, 404, "MEDIA_NOT_FOUND", "Attachment not found");
+    }
+    if (result.kind === "media_type_unsupported") {
+      return apiError(
+        c,
+        415,
+        "MEDIA_TYPE_UNSUPPORTED",
+        "This file type cannot be sent as an attachment",
+        { mimeType: result.mimeType },
+      );
+    }
+    if (result.kind === "reply_target_invalid") {
+      return apiError(
+        c,
+        422,
+        "MESSAGE_REPLY_TARGET_INVALID",
+        "Reply target must be a message in this conversation",
+      );
+    }
+    if (result.kind === "messaging_window_closed") {
+      return apiError(
+        c,
+        422,
+        "MESSAGING_WINDOW_CLOSED",
+        "The messaging window is closed; send an approved template instead",
+        {
+          lastInboundAt: result.window.lastInboundAt?.toISOString() ?? null,
+          expiresAt: result.window.expiresAt?.toISOString() ?? null,
+        },
+      );
+    }
+    if (result.kind !== "queued") {
+      return apiError(c, 500, "INTERNAL_ERROR", "Unexpected queue result");
     }
     if (publisher) {
       await publisher.publishNudge({

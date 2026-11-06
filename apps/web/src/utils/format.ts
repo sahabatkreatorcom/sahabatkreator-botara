@@ -67,6 +67,21 @@ export function formatRelativeTime(iso: string, locale: Locale): string {
 }
 
 /** Format harga Rupiah lewat Intl sesuai locale UI aktif (Fase 4A). */
+/**
+ * Ukuran berkas untuk chip lampiran (Fase 18B).
+ *
+ * Memakai 1000, bukan 1024: angka ini ditampilkan di samping batas
+ * unggah 25 MB yang juga dinyatakan desimal, dan selisih 2,4% antara
+ * keduanya cukup untuk membuat berkas 24,9 MB terlihat "di bawah batas"
+ * padahal server menolaknya.
+ */
+export function formatFileSize(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1000) return `${bytes} B`;
+  if (bytes < 1_000_000) return `${(bytes / 1000).toFixed(0)} KB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
 export function formatIdr(amount: number, locale: Locale): string {
   return new Intl.NumberFormat(intlLocale(locale), {
     style: "currency",

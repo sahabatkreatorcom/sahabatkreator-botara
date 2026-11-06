@@ -9,7 +9,12 @@ import {
   type MediaIngestDeps,
 } from "./media";
 import { createMemoryMediaStore } from "./media-storage";
-import { createTestDb, TEST_TENANT_ID, type TestDb } from "./testing/pglite";
+import {
+  createTestDb,
+  TEST_TENANT_B_ID,
+  TEST_TENANT_ID,
+  type TestDb,
+} from "./testing/pglite";
 
 /**
  * Ingest media masuk (Fase 18), diuji pada Postgres sungguhan (PGlite).
@@ -354,6 +359,89 @@ describe("recordWhatsAppInboundMessage — referensi media", () => {
       )
     ).rows;
     expect(row?.provider_media_id).toBeNull();
+  });
+});
+
+describe("queueMediaMessage — kirim lampiran", () => {
+  const PDF_ID = "44444444-5555-4666-8777-888888888888";
+  const PNG_ID = "55555555-6666-4777-8888-999999999999";
+  const USER_ID = "66666666-7777-4888-8999-aaaaaaaaaaaa";
+
+  beforeAll(async () => {
+    // `messages.sent_by_user_id` ber-FK ke users — pengirim manual
+    // memang harus user nyata.
+    await pglite.query(`INSERT INTO users (id, email) VALUES ($1, $2)`, [
+      USER_ID,
+      "lampiran@example.com",
+    ]);
+    await pglite.query(
+      `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
+       VALUES ($1, $2, 'tenants/t/media/2026-11/a.pdf', 'invoice.pdf', 'application/pdf', 10),
+              ($3, $2, 'tenants/t/media/2026-11/b.png', 'foto.png', 'image/png', 20)`,
+      [PDF_ID, TEST_TENANT_ID, PNG_ID],
+    );
+  });
+
+  it("mengantrekan lampiran dengan jenis pesan dari MIME, bukan dari klien", async () => {
+    const { queueMediaMessage } = await import("./conversations");
+    const result = await queueMediaMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      { mediaId: PDF_ID, caption: "  nota pembelian  " },
+    );
+    expect(result.kind).toBe("queued");
+    if (result.kind !== "queued") return;
+    // PDF → document; klien tidak bisa memaksa "image" untuk berkas ini.
+    expect(result.message.type).toBe("document");
+    expect(result.message.mediaId).toBe(PDF_ID);
+    // Caption dipangkas, dan menjadi contentText (satu gelembung, bukan dua).
+    expect(result.message.contentText).toBe("nota pembelian");
+    expect(result.message.status).toBe("queued");
+  });
+
+  it("menerima lampiran tanpa caption", async () => {
+    const { queueMediaMessage } = await import("./conversations");
+    const result = await queueMediaMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      { mediaId: PNG_ID, caption: "   " },
+    );
+    expect(result.kind).toBe("queued");
+    if (result.kind !== "queued") return;
+    expect(result.message.type).toBe("image");
+    expect(result.message.contentText).toBeNull();
+  });
+
+  it("menolak lampiran yang tidak ada di workspace ini", async () => {
+    const { queueMediaMessage } = await import("./conversations");
+    const result = await queueMediaMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      { mediaId: "99999999-9999-4999-8999-999999999998" },
+    );
+    // Ditolak SEBELUM insert: tanpa ini, pesan `queued` pasti gagal di
+    // poller dan baru terlihat sebagai `failed` tanpa sebab.
+    expect(result).toEqual({ kind: "media_not_found" });
+  });
+
+  it("menolak lampiran milik tenant lain", async () => {
+    const otherMedia = "77777777-8888-4999-8aaa-bbbbbbbbbbbb";
+    await pglite.query(
+      `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
+       VALUES ($1, $2, 'tenants/b/media/2026-11/c.png', 'rahasia.png', 'image/png', 5)`,
+      [otherMedia, TEST_TENANT_B_ID],
+    );
+    const { queueMediaMessage } = await import("./conversations");
+    const result = await queueMediaMessage(
+      test.db,
+      { tenantId: TEST_TENANT_ID, userId: USER_ID },
+      CONVERSATION_ID,
+      { mediaId: otherMedia },
+    );
+    expect(result).toEqual({ kind: "media_not_found" });
   });
 });
 

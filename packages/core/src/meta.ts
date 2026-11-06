@@ -1024,6 +1024,17 @@ export interface MetaQueuedDelivery {
   encryptedAccessToken: string | null;
   /** PSID/IGSID tujuan: provider_chat_id percakapan, jatuh kembali ke identitas kontak. */
   recipientExternalId: string;
+  /**
+   * Lampiran pesan ini (Fase 18B), null untuk pesan teks/template.
+   *
+   * Sengaja HANYA id, bukan object key hasil join ke `media`: pindai
+   * ini berjalan lintas tenant di bawah `app.system_delivery`, sedangkan
+   * `media` hanya punya policy isolasi tenant. Join ke sana akan
+   * mengembalikan nol baris dan pesan berlampiran lenyap dari antrean
+   * tanpa satu pun error — persis pola kegagalan senyap Fase 16G.
+   * Byte-nya dibaca pengirim di konteks tenant masing-masing.
+   */
+  mediaId: string | null;
 }
 
 /**
@@ -1084,6 +1095,7 @@ export async function listQueuedMetaDeliveries(
         templatePayload: messages.templatePayload,
         providerCommentId: messages.providerCommentId,
         replyToMessageId: messages.replyToMessageId,
+        mediaId: messages.mediaId,
         channelAccountId: channelAccounts.id,
         provider: channelAccounts.provider,
         accountExternalId: channelAccounts.externalId,

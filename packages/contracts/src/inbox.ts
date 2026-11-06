@@ -457,3 +457,66 @@ export const SendTemplateMessageRequestSchema = z.object({
 export type SendTemplateMessageRequest = z.infer<
   typeof SendTemplateMessageRequestSchema
 >;
+
+/**
+ * Kirim pesan berlampiran dari inbox (Fase 18B).
+ *
+ * `mediaId` menunjuk baris `media` yang SUDAH diunggah lewat
+ * `POST /tenants/:tenantId/media` — bukan URL, dan bukan byte inline.
+ * Jenis pesan (image/audio/video/document) diturunkan server dari MIME
+ * baris itu, bukan dari klien: klien yang menentukan jenis bisa
+ * mengirim `image` untuk PDF dan membuat Meta menolak pesannya.
+ */
+export const SendMediaMessageRequestSchema = z.object({
+  mediaId: z.string().uuid(),
+  /** Caption; diabaikan untuk audio (Cloud API tidak punya caption audio). */
+  caption: z.string().trim().max(1024).optional(),
+  replyToMessageId: z.string().uuid().optional(),
+});
+export type SendMediaMessageRequest = z.infer<
+  typeof SendMediaMessageRequestSchema
+>;
+
+/**
+ * Unggah lampiran (Fase 18B).
+ *
+ * Batas 25 MB sama dengan batas unduhan media masuk: satu angka untuk
+ * satu arah perjalanan berkas, supaya tidak ada berkas yang bisa masuk
+ * tetapi tidak bisa dikirim (atau sebaliknya).
+ */
+export const MEDIA_UPLOAD_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Tipe yang boleh diunggah. Daftar putih, bukan daftar hitam: berkas
+ * ini nantinya dirender atau diunduh dari origin dashboard, jadi
+ * `text/html` dan `image/svg+xml` sengaja TIDAK termasuk — keduanya
+ * bisa membawa skrip yang berjalan di sesi pengguna.
+ */
+export const MEDIA_UPLOAD_ALLOWED_MIME = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "video/mp4",
+  "video/3gpp",
+  "audio/ogg",
+  "audio/mpeg",
+  "audio/mp4",
+  "audio/aac",
+  "audio/amr",
+  "application/pdf",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  "application/zip",
+  "text/plain",
+  "text/csv",
+] as const;
+
+export const MediaUploadResponseSchema = z.object({
+  mediaId: z.string().uuid(),
+  fileName: z.string().nullable(),
+  mimeType: z.string().nullable(),
+  sizeBytes: z.number().int().nonnegative(),
+});
+export type MediaUploadResponse = z.infer<typeof MediaUploadResponseSchema>;
