@@ -105,6 +105,33 @@ describe("createDiskMediaStore", () => {
       "media_key_outside_root",
     );
   });
+
+  it("menyebutkan objek tanpa menyertakan berkas sampingan", async () => {
+    // `put` menulis `<key>.meta`. Kalau sampingan itu ikut terdaftar
+    // sebagai objek, GC akan menganggapnya yatim, menghapusnya, dan
+    // content-type hilang — sambil melaporkan angka yang salah.
+    const store = createDiskMediaStore(root);
+    await store.put("tenants/lists/1.png", Buffer.from("a"), "image/png");
+    await store.put("tenants/lists/2.mp4", Buffer.from("b"), "video/mp4");
+    const entries = await store.list("tenants/lists/");
+    expect(entries.map((e) => e.key)).toEqual([
+      "tenants/lists/1.png",
+      "tenants/lists/2.mp4",
+    ]);
+    expect(entries[0]?.lastModified).toBeInstanceOf(Date);
+  });
+
+  it("tidak melempar saat prefix belum ada", async () => {
+    const store = createDiskMediaStore(root);
+    expect(await store.list("tenants/belum-ada/")).toEqual([]);
+  });
+
+  it("menolak prefix yang keluar dari root", async () => {
+    // Prefix bisa datang dari env atau konfigurasi; menjelajah `..`
+    // berarti menyebutkan isi mesin ini ke pemanggil.
+    const store = createDiskMediaStore(root);
+    await expect(store.list("../../")).rejects.toThrow("media_key_outside_root");
+  });
 });
 
 describe("createMemoryMediaStore", () => {
@@ -115,6 +142,15 @@ describe("createMemoryMediaStore", () => {
     expect(store.objects.size).toBe(1);
     await store.delete("k");
     expect(await store.get("k")).toBeNull();
+  });
+
+  it("menyaring list menurut prefix", async () => {
+    const store = createMemoryMediaStore();
+    await store.put("tenants/a/1.png", Buffer.from("a"), "image/png");
+    await store.put("tenants/b/2.png", Buffer.from("b"), "image/png");
+    expect((await store.list("tenants/a/")).map((e) => e.key)).toEqual([
+      "tenants/a/1.png",
+    ]);
   });
 });
 

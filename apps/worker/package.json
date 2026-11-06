@@ -39,6 +39,7 @@
     "verify:meta-token-lifecycle": "tsx scripts/verify-meta-token-lifecycle.ts",
     "purge:channels": "tsx scripts/purge-trashed-channels.ts",
     "prune:logs": "tsx scripts/prune-integration-logs.ts",
+    "prune:media": "tsx scripts/prune-media.ts",
     "meta:token-lifecycle": "tsx scripts/meta-token-lifecycle.ts"
   },
   "type": "module",

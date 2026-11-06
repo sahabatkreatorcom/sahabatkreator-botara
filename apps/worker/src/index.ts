@@ -39,6 +39,7 @@ import {
 } from "@sahabat-kreator/core";
 import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
 import { startMediaIngestLoop } from "./media-ingest";
+import { MEDIA_GC_INTERVAL_MS, startMediaGcLoop } from "./media-gc";
 import {
   startMetaDeliveryPoller,
   startTelegramDeliveryPoller,
@@ -1159,8 +1160,22 @@ const mediaIngestLoop = startMediaIngestLoop(
   MEDIA_INGEST_INTERVAL_MS,
 );
 
+// Pembersihan media (Fase 19). Memakai `mediaStore` yang SAMA dengan
+// poller: dua instance dengan akar berbeda akan membuat GC memeriksa
+// direktori yang salah dan menyimpulkan semua berkas hilang. Retensi
+// default 0 (simpan selamanya) — lihat catatan di packages/config.
+const mediaGcLoop = startMediaGcLoop(
+  db,
+  { store: mediaStore, retentionDays: env.MEDIA_RETENTION_DAYS },
+  MEDIA_GC_INTERVAL_MS,
+);
+
 console.log(
   `[worker] Sahabat Kreator worker aktif — antrean "${MAIN_QUEUE_NAME}", relay outbox tiap ${RELAY_INTERVAL_MS}ms`,
+);
+console.log(
+  `[worker] media: akar penyimpanan ${resolveMediaStorageRoot(env.MEDIA_STORAGE_ROOT)}, ` +
+    `retensi ${env.MEDIA_RETENTION_DAYS > 0 ? `${env.MEDIA_RETENTION_DAYS} hari` : "nonaktif (simpan selamanya)"}`,
 );
 
 let shuttingDown = false;
@@ -1185,6 +1200,10 @@ async function shutdown(signal: string): Promise<void> {
   // terunduh tidak hilang — barisnya tetap menunggu dan diambil lagi
   // saat worker hidup kembali.
   mediaIngestLoop.stop();
+  // Siklus GC juga memakai `db`; dihentikan sebelum pool ditutup. Satu
+  // putaran yang terlewat tidak berakibat apa-apa — pekerjaan ini
+  // berulang tiap jam dan tidak menyimpan state di antara putaran.
+  mediaGcLoop.stop();
   await bullWorker.close();
   await queue.close();
   realtimePublisher.close();

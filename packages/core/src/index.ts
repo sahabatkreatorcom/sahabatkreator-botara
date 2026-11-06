@@ -36,8 +36,26 @@ export {
   createMemoryMediaStore,
   extensionFor,
   mediaChecksum,
+  type MediaObjectEntry,
   type MediaObjectStore,
 } from "./media-storage";
+export {
+  MEDIA_GC_BATCH_SIZE,
+  MEDIA_MISSING_ABORT_MIN,
+  MEDIA_MISSING_ABORT_RATIO,
+  MEDIA_ORPHAN_GRACE_MS,
+  MEDIA_UNREFERENCED_GRACE_DAYS,
+  pruneExpiredMedia,
+  pruneMediaWithMissingObjects,
+  pruneUnreferencedMedia,
+  runMediaGcCycle,
+  sweepOrphanMediaObjects,
+  type MediaGcSummary,
+  type MissingPruneResult,
+  type OrphanSweepResult,
+  type RetentionPruneResult,
+  type UnreferencedPruneResult,
+} from "./media-gc";
 export {
   MEDIA_INGEST_MAX_ATTEMPTS,
   getMediaForServing,

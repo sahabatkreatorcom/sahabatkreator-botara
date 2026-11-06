@@ -230,6 +230,7 @@ export const en = {
     mediaMessage: "Media message",
     mediaImageAlt: "Image sent in this conversation",
     mediaDownload: "Download attachment",
+    attachmentUnavailable: "Attachment no longer available",
     attachButton: "Attach",
     attaching: "Uploading…",
     attachmentFallbackName: "Attachment",

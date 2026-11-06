@@ -229,6 +229,7 @@ export const id: Resources = {
     mediaMessage: "Pesan media",
     mediaImageAlt: "Gambar yang dikirim di percakapan ini",
     mediaDownload: "Unduh lampiran",
+    attachmentUnavailable: "Lampiran tidak lagi tersedia",
     attachButton: "Lampiran",
     attaching: "Mengunggah…",
     attachmentFallbackName: "Lampiran",

@@ -219,7 +219,11 @@ const policies = await db.query<{ count: string }>(
 // 2026-11-06: + lengan `whatsapp_waba_lookup` pada channel_accounts
 // (migrasi 0004) untuk event webhook tingkat WABA yang tidak membawa
 // phone_number_id = 77.
-assert.equal(Number(policies.rows[0].count), 77);
+//
+// 2026-11-07: + lengan `system_media_gc_scan` pada media (migrasi 0007)
+// untuk pembersihan media lintas tenant = 78. SELECT saja — hak hapus
+// lintas tenant sengaja TIDAK diberikan (diuji di [46]).
+assert.equal(Number(policies.rows[0].count), 78);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2340,6 +2344,7 @@ function oneHotVector(index: number): string {
   // policy menjadi 76 (lihat catatan di bagian 4). Angka tabel tetap 59.
   // 2026-11-06: migrasi 0004 menambah lengan `whatsapp_waba_lookup` → 77
   // (kolom baru `whatsapp_templates.status_reason` tidak menambah policy).
+  // 2026-11-07: migrasi 0007 menambah lengan `system_media_gc_scan` → 78.
   const counts = await db.query<{ tables: string; policies: string }>(
     `SELECT
        (SELECT count(*)::text FROM information_schema.tables
@@ -2348,7 +2353,7 @@ function oneHotVector(index: number): string {
          WHERE schemaname = 'public') AS policies`,
   );
   assert.equal(counts.rows[0].tables, "59");
-  assert.equal(counts.rows[0].policies, "77");
+  assert.equal(counts.rows[0].policies, "78");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
@@ -3387,6 +3392,61 @@ assert.equal(mediaScan.owner.rows[0].n, "1");
 assert.equal(mediaScan.relay.rows[0].n, "1");
 console.log(
   "[45] Fase 18: kolom media masuk (provider_media_id/mime/file_name + media_ingest_attempts default 0) ada, index parsial messages_pending_media_idx terpasang; isolasi tenant utuh dan lengan pindai ingest membuka tepat baris yang menunggu: OK",
+);
+
+// ---------------------------------------------------------------------------
+// [46] Fase 19: lengan pindai GC media — MEMBACA lintas tenant, TIDAK
+// menghapus lintas tenant.
+//
+// Dua sifat yang harus terbukti bersamaan. Tanpa lengan ini worker tidak
+// bisa menemukan baris media tenant lain (media tanpa berkas, media tak
+// dirujuk, retensi) — semuanya mustahil dideteksi. Tetapi kalau lengannya
+// ikut memberi hak hapus, satu bug di jalur GC bisa menghapus media
+// seluruh tenant sekaligus. Karena itu policy-nya SELECT saja dan
+// penghapusan tetap terjadi di konteks tenant masing-masing.
+// ---------------------------------------------------------------------------
+const GC_MEDIA_A = "7c000000-0000-4000-8000-000000000046";
+await db.query(
+  `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
+   VALUES ($1, $2, 'tenants/uji/media/2026-11/gc.jpg', 'gc.jpg', 'image/jpeg', 10)`,
+  [GC_MEDIA_A, TENANT_A],
+);
+
+const gcScan = await db.transaction(async (tx) => {
+  await tx.query(`SET LOCAL ROLE app_user`);
+  // Tanpa konteks: tertutup.
+  const noCtx = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM media WHERE id = $1`,
+    [GC_MEDIA_A],
+  );
+  // Konteks tenant B: baris milik A tidak terlihat.
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_B]);
+  const otherTenant = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM media WHERE id = $1`,
+    [GC_MEDIA_A],
+  );
+  // Lengan GC: terlihat lintas tenant.
+  await tx.query(`SELECT set_config('app.tenant_id', '', true)`);
+  await tx.query(`SELECT set_config('app.system_media_gc', 'on', true)`);
+  const arm = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM media WHERE id = $1`,
+    [GC_MEDIA_A],
+  );
+  // Lengan yang sama TIDAK boleh memberi hak hapus lintas tenant.
+  await tx.query(`DELETE FROM media WHERE id = $1`, [GC_MEDIA_A]);
+  return { noCtx, otherTenant, arm };
+});
+assert.equal(gcScan.noCtx.rows[0].n, "0");
+assert.equal(gcScan.otherTenant.rows[0].n, "0");
+assert.equal(gcScan.arm.rows[0].n, "1");
+const gcSurvived = await db.query<{ n: string }>(
+  `SELECT count(*)::text AS n FROM media WHERE id = $1`,
+  [GC_MEDIA_A],
+);
+assert.equal(gcSurvived.rows[0].n, "1");
+await db.query(`DELETE FROM media WHERE id = $1`, [GC_MEDIA_A]);
+console.log(
+  "[46] Fase 19: lengan system_media_gc_scan membuka media lintas tenant untuk GC, tetapi TIDAK memberi hak hapus lintas tenant (penghapusan tetap di konteks tenant): OK",
 );
 
 await db.close();

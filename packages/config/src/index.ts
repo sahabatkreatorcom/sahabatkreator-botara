@@ -191,6 +191,18 @@ const EnvSchema = z.object({
    */
   MEDIA_STORAGE_ROOT: z.string().min(1).optional(),
   /**
+   * Retensi media (Fase 19). `0` atau kosong = SIMPAN SELAMANYA (default).
+   *
+   * Menyalakannya berarti berkas media yang lebih tua dari N hari
+   * dihapus, termasuk foto yang dikirim pelanggan — pesannya tetap ada
+   * dan caption-nya tetap terbaca, tetapi lampirannya hilang. Itu
+   * keputusan produk, bukan efek samping: karena itu default-nya mati,
+   * dan nilainya dibaca dari env supaya bisa diubah tanpa deploy kode.
+   *
+   * Lampiran milik pesan yang masih `queued` TIDAK ikut dihapus.
+   */
+  MEDIA_RETENTION_DAYS: z.coerce.number().int().min(0).default(0),
+  /**
    * Email transaksional via Resend (keputusan user 2026-11-02; Fase 11B)
    * — FALLBACK env saja; sumber utama adalah Panel Admin (kunci
    * `resend_api_key` / `resend_from_email` / `resend_from_name` di

@@ -261,6 +261,42 @@ hasil unggahan itu di komponen `header`. Konsekuensi operasionalnya:
   `VIDEO` → video, `DOCUMENT` → selain audio). Pasangan yang salah
   ditolak saat mengantre, bukan setelah Meta menolaknya.
 
+### Pembersihan media (Fase 19)
+
+Tanpa pembersihan, direktori media hanya bertambah: berkas yatim (objek
+tanpa baris), baris tanpa berkas, dan lampiran yang tak pernah dikirim.
+Worker menjalankan satu putaran **tiap jam** (dan sekali saat boot);
+untuk operasi manual:
+
+```bash
+pnpm --filter @sahabat-kreator/worker prune:media
+```
+
+Yang dilakukan satu putaran, berurutan:
+
+1. **Baris tanpa berkas** dihapus. Baris seperti ini tidak bisa
+   diperbaiki (URL Meta sudah kedaluwarsa) dan hanya menghasilkan 404
+   saat agen menekan lampiran. **Penjaga:** kalau lebih dari 20% baris
+   kehilangan berkas (minimal 10 baris), GC MENOLAK menghapus apa pun
+   dan menulis error — itu ciri volume tidak ter-mount, bukan kerusakan
+   normal.
+2. **Baris tak dirujuk pesan** dihapus bersama berkasnya setelah 7 hari.
+3. **Retensi** — hanya bila `MEDIA_RETENTION_DAYS > 0`.
+4. **Berkas yatim** (objek tanpa baris) dihapus setelah 24 jam. Berkas
+   yang lebih baru dibiarkan: objek ditulis SEBELUM barisnya, jadi
+   berkas berumur detik belum tentu yatim.
+
+`MEDIA_RETENTION_DAYS` **default 0 = simpan selamanya**. Menyalakannya
+menghapus berkas lebih tua dari N hari, termasuk foto kiriman pelanggan;
+pesan dan caption-nya tetap ada (`messages.media_id` menjadi NULL lewat
+FK) dan inbox menampilkan "lampiran tidak lagi tersedia". Lampiran milik
+pesan berstatus `queued` tidak pernah dihapus — menghapusnya mengubah
+pesan yang akan terkirim menjadi gagal permanen.
+
+Semua penghapusan baris terjadi **di konteks tenant masing-masing**;
+lengan RLS `system_media_gc_scan` hanya memberi hak BACA lintas tenant
+(diuji di `db verify` [46]).
+
 Retensi default: 7 dump harian + 28 hari cadangan mingguan di VPS, 30 hari
 di R2. Retensi lokal dijalankan **sesudah** backup baru sukses, sehingga
 kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.

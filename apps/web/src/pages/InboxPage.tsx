@@ -1636,7 +1636,22 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                             {msg.contentText || !msg.mediaId ? (
                               <p className="whitespace-pre-wrap break-words">
                                 {msg.contentText ?? (
-                                  <span className="italic">{t("inbox.mediaMessage")}</span>
+                                  /**
+                                   * Fase 19: pesan bertipe media bisa
+                                   * kehilangan lampirannya — retensi
+                                   * menghapus berkasnya, atau ingest
+                                   * menyerah setelah batas percobaan.
+                                   * Sebelum ini yang tampil hanya kata
+                                   * "Media", yang terbaca seperti
+                                   * lampiran yang belum termuat. Sebutkan
+                                   * keadaannya; pesan teks tetap memakai
+                                   * label lama.
+                                   */
+                                  <span className="italic">
+                                    {msg.type === "text"
+                                      ? t("inbox.mediaMessage")
+                                      : t("inbox.attachmentUnavailable")}
+                                  </span>
                                 )}
                               </p>
                             ) : null}

@@ -41,6 +41,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Media masuk (foto/audio/video/dokumen dari pelanggan) | ✅ | `whatsAppMediaRef` → `provider_media_id` → `ingestMessageMedia` (worker) → `GET /tenants/:id/media/:mediaId` |
 | Kirim media keluar (lampiran dari inbox) | ✅ | `storeUploadedMedia` → `queueMediaMessage` → `sendMediaMessage` (unggah ke Meta lalu kirim) |
 | Header media (gambar/video/dokumen) pada template | ✅ | `headerMediaId` → `queueTemplateMessage` (validasi format vs MIME) → `uploadMedia` + komponen `header` di `sendTemplateMessage`; pemilih berkas di panel inbox |
+| Retensi & pembersihan media (berkas yatim, objek hilang, tak dirujuk) | ✅ | `runMediaGcCycle` (worker tiap jam + `pnpm prune:media`): `sweepOrphanMediaObjects`, `pruneMediaWithMissingObjects` (penjaga rasio), `pruneUnreferencedMedia`, `pruneExpiredMedia` (opt-in `MEDIA_RETENTION_DAYS`) |
 | Paginasi pesan lama (`before` + `hasMore`) | ✅ | `listMessagesPage` |
 
 ## Otomasi

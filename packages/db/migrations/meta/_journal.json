@@ -50,6 +50,13 @@
       "when": 1793870118802,
       "tag": "0006_message_media_ingest",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793870118803,
+      "tag": "0007_media_gc_scan_arm",
+      "breakpoints": true
     }
   ]
 }

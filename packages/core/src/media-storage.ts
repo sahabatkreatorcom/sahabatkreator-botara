@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -8,10 +8,14 @@ import path from "node:path";
  * Antarmuka sekecil mungkin — `put`/`get`/`delete` — supaya dua
  * implementasi yang benar-benar berbeda bisa bertukar tempat tanpa
  * menyentuh domain: disk (default, jalan tanpa layanan luar) dan R2
- * (produksi). Yang TIDAK ada di sini sengaja: presigned URL, listing,
+ * (produksi). Yang TIDAK ada di sini sengaja: presigned URL,
  * multipart. Inbox menyajikan byte lewat endpoint API sendiri
  * (`GET /media/:id`) yang memeriksa sesi + tenant, jadi bucket boleh
  * tetap privat dan tidak ada URL yang perlu ditandatangani.
+ *
+ * Fase 19 menambahkan `list`: tanpa kemampuan menyebutkan isi
+ * penyimpanan, berkas yang tidak dirujuk baris mana pun tidak akan
+ * pernah bisa ditemukan — dan itulah satu-satunya cara membersihkannya.
  *
  * Kenapa disk lebih dulu, bukan R2: R2 memakai protokol S3 dengan tanda
  * tangan SigV4, dan tidak ada SDK S3 di repo ini (instalasi paket tidak
@@ -21,6 +25,17 @@ import path from "node:path";
  * R2 menjadi slot yang tinggal diisi (`MediaObjectStore` yang sama)
  * ketika kredensialnya bisa diuji.
  */
+export interface MediaObjectEntry {
+  /** Key relatif terhadap akar penyimpanan, selalu berpemisah `/`. */
+  key: string;
+  /**
+   * Kapan objek terakhir ditulis. Dipakai masa tenggang GC: berkas
+   * yang baru saja ditulis belum tentu yatim — barisnya bisa sedang
+   * dalam perjalanan ke database.
+   */
+  lastModified: Date;
+}
+
 export interface MediaObjectStore {
   /** Simpan byte; menimpa bila key sudah ada. */
   put(key: string, data: Buffer, contentType: string | null): Promise<void>;
@@ -28,6 +43,20 @@ export interface MediaObjectStore {
   get(key: string): Promise<{ data: Buffer; contentType: string | null } | null>;
   /** Hapus; tidak melempar bila key sudah tidak ada. */
   delete(key: string): Promise<void>;
+  /**
+   * Apakah objek ada — TANPA membaca isinya.
+   *
+   * Dipakai GC untuk memeriksa baris yang berkasnya hilang. Memakai
+   * `get` untuk itu berarti mengunduh setiap video 16 MB hanya untuk
+   * mengetahui ketiadaannya.
+   */
+  exists(key: string): Promise<boolean>;
+  /**
+   * Semua objek di bawah `prefix` (rekursif), terurut naik menurut key.
+   * Prefix dicocokkan sebagai awalan string, bukan sebagai direktori —
+   * pemanggil yang menambahkan `/` sendiri bila itu yang dimaksud.
+   */
+  list(prefix: string): Promise<MediaObjectEntry[]>;
 }
 
 /**
@@ -149,6 +178,57 @@ export function createDiskMediaStore(root: string): MediaObjectStore {
       await rm(target, { force: true });
       await rm(`${target}.meta`, { force: true });
     },
+    async exists(key) {
+      try {
+        const info = await stat(resolveKey(key));
+        return info.isFile();
+      } catch {
+        return false;
+      }
+    },
+    async list(prefix) {
+      // Prefix juga harus di dalam root: `list` bisa dipanggil dengan
+      // nilai dari luar (mis. dari env), dan menjelajah `..` berarti
+      // menyebutkan isi mesin ini ke pemanggil.
+      const start = resolveKey(prefix);
+      const entries: MediaObjectEntry[] = [];
+
+      const walk = async (dir: string): Promise<void> => {
+        let items;
+        try {
+          items = await readdir(dir, { withFileTypes: true });
+        } catch {
+          // Direktori belum ada = tidak ada objek. Bukan kegagalan.
+          return;
+        }
+        for (const item of items) {
+          const full = path.join(dir, item.name);
+          if (item.isDirectory()) {
+            await walk(full);
+            continue;
+          }
+          // Sampingan `put` bukan objek media: `.meta` menyimpan
+          // content-type, `.part` adalah berkas sementara yang mungkin
+          // tertinggal bila proses mati di tengah rename. Keduanya
+          // dilaporkan sebagai objek akan membuat GC menghapusnya
+          // berulang kali dan melaporkan angka yang salah.
+          if (item.name.endsWith(".meta") || item.name.endsWith(".part")) continue;
+          let info;
+          try {
+            info = await stat(full);
+          } catch {
+            continue; // hilang di antara readdir dan stat
+          }
+          entries.push({
+            key: path.relative(absoluteRoot, full).split(path.sep).join("/"),
+            lastModified: info.mtime,
+          });
+        }
+      };
+
+      await walk(start);
+      return entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+    },
   };
 }
 
@@ -160,19 +240,34 @@ export function createDiskMediaStore(root: string): MediaObjectStore {
  * menulis ke disk sama sekali.
  */
 export function createMemoryMediaStore(): MediaObjectStore & {
-  readonly objects: Map<string, { data: Buffer; contentType: string | null }>;
+  readonly objects: Map<
+    string,
+    { data: Buffer; contentType: string | null; lastModified: Date }
+  >;
 } {
-  const objects = new Map<string, { data: Buffer; contentType: string | null }>();
+  const objects = new Map<
+    string,
+    { data: Buffer; contentType: string | null; lastModified: Date }
+  >();
   return {
     objects,
     async put(key, data, contentType) {
-      objects.set(key, { data, contentType });
+      objects.set(key, { data, contentType, lastModified: new Date() });
     },
     async get(key) {
       return objects.get(key) ?? null;
     },
     async delete(key) {
       objects.delete(key);
+    },
+    async exists(key) {
+      return objects.has(key);
+    },
+    async list(prefix) {
+      return [...objects.entries()]
+        .filter(([key]) => key.startsWith(prefix))
+        .map(([key, value]) => ({ key, lastModified: value.lastModified }))
+        .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
     },
   };
 }
