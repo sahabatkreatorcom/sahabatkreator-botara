@@ -62,7 +62,7 @@ import {
   listBookings,
   listAppointmentServices,
   listKbDocuments,
-  listMessages,
+  listMessagesPage,
   listProducts,
   listProfilePhotoOwnerIds,
   listWhatsAppTemplates,
@@ -114,6 +114,8 @@ const ListConversationsQuerySchema = z.object({
 
 const ListMessagesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
+  /** Kursor halaman lebih lama (Fase 16C) — paritas dengan endpoint dashboard. */
+  before: z.string().uuid().optional(),
 });
 
 /** Mengambil kunci mentah dari `Authorization: Bearer ...` atau header `X-API-Key`. */
@@ -345,14 +347,29 @@ export function createPublicV1Routes(
     const auth = c.get("apiKeyAuth");
     // Jalur mesin: membaca riwayat TIDAK menandai percakapan terbaca —
     // itu semantik khusus inbox manusia (perbaikan QA-1).
-    const rows = await listMessages(bundle.db, { tenantId: auth.tenantId }, id, query.data);
-    if (!rows) return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    const page = await listMessagesPage(
+      bundle.db,
+      { tenantId: auth.tenantId },
+      id,
+      query.data,
+    );
+    if (page.kind === "conversation_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    if (page.kind === "invalid_cursor") {
+      return apiError(
+        c,
+        400,
+        "VALIDATION_ERROR",
+        "`before` must be a message id from this conversation",
+      );
+    }
     const body = MessageListResponseSchema.parse({
-      messages: rows.map(serializeMessage),
+      messages: page.messages.map(serializeMessage),
+      hasMore: page.hasMore,
     });
     return c.json(body);
   });
-
   app.post("/v1/conversations/:id/messages", async (c) => {
     const denied = requireScope(c, "messages:write");
     if (denied) return denied;
@@ -388,6 +405,20 @@ export function createPublicV1Routes(
         422,
         "MESSAGE_REPLY_TARGET_INVALID",
         "Reply target must be a message in this conversation",
+      );
+    }
+    if (result.kind === "messaging_window_closed") {
+      // Fase 16C: aturannya milik provider, bukan milik UI — jalur API
+      // mendapat penolakan yang sama dengan jalur dashboard.
+      return apiError(
+        c,
+        422,
+        "MESSAGING_WINDOW_CLOSED",
+        "The messaging window is closed; send an approved template instead",
+        {
+          lastInboundAt: result.window.lastInboundAt?.toISOString() ?? null,
+          expiresAt: result.window.expiresAt?.toISOString() ?? null,
+        },
       );
     }
     const queued = result.message;

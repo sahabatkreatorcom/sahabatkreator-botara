@@ -154,6 +154,9 @@ export const id: Resources = {
   inbox: {
     title: "Inbox",
     subtitle: "Percakapan dari workspace aktif.",
+    searchPlaceholder: "Cari nama, nomor, atau judul…",
+    searchEmpty: "Tidak ada percakapan yang cocok dengan pencarian.",
+    filterEmpty: "Tidak ada percakapan pada filter ini.",
     emptyTitle: "Belum ada percakapan",
     emptyBody: "Percakapan akan muncul di sini begitu ada channel yang terhubung dan seseorang mengirim pesan kepada Anda.",
     loadError: "Tidak dapat memuat percakapan.",
@@ -174,6 +177,35 @@ export const id: Resources = {
       unassigned: "Belum ditugaskan",
       assignLabel: "Penerima tugas",
       assignError: "Penugasan tidak bisa diperbarui.",
+    },
+    statusLabel: "Status",
+    agent: {
+      on: "AI aktif",
+      off: "AI nonaktif",
+      onHint: "AI menjawab otomatis. Klik untuk mematikannya bagi kontak ini.",
+      offHint: "AI tidak menjawab kontak ini (biasanya setelah serah-terima ke manusia). Klik untuk menyalakannya lagi.",
+    },
+    loadOlder: "Muat pesan lama",
+    loadOlderLoading: "Memuat…",
+    window: {
+      closedTitle: "Jendela 24 jam WhatsApp sudah tertutup",
+      closedBody:
+        "Kontak terakhir menulis {time}. WhatsApp hanya mengizinkan pesan bebas dalam 24 jam sejak pesan masuk terakhir — sekarang hanya template yang disetujui yang bisa dikirim.",
+      noInboundBody:
+        "Kontak ini belum pernah mengirim pesan, jadi jendela 24 jam belum terbuka. WhatsApp hanya mengizinkan pesan bebas setelah kontak menulis lebih dulu; gunakan template yang disetujui.",
+      placeholder: "Jendela 24 jam tertutup — gunakan template",
+      templateButton: "Kirim template",
+      templateHint:
+        "Template yang sudah disetujui adalah satu-satunya pesan yang boleh dikirim di luar jendela 24 jam.",
+      templateLabel: "Template",
+      templatePlaceholder: "Pilih template yang sudah disetujui…",
+      templateNone:
+        "Belum ada template yang disetujui untuk nomor WhatsApp ini. Buat di Broadcast → Template, lalu sinkronkan.",
+      templateParamLabel: "Variabel {index}",
+      templateSend: "Kirim template",
+      templateSending: "Mengirim…",
+      templateCancel: "Batal",
+      templateLoadError: "Tidak dapat memuat template.",
     },
     notes: {
       tabMessages: "Pesan",
@@ -2135,6 +2167,11 @@ export const id: Resources = {
     LOG_PAYLOAD_TRUNCATED: "Payload tersimpan untuk event ini tidak lengkap, jadi tidak dapat diproses ulang.",
     MESSAGE_NOT_FAILED: "Pesan ini sudah tidak berstatus gagal, jadi tidak dapat dikirim ulang.",
     MESSAGE_REPLY_TARGET_INVALID: "Pesan yang Anda kutip sudah tidak tersedia di percakapan ini. Balasan tidak terkirim — pilih pesan lain untuk dikutip, atau kirim tanpa kutipan.",
+    MESSAGE_TEMPLATE_UNSUPPORTED: "Channel ini tidak memakai template pesan. Kirim balasan biasa sebagai gantinya.",
+    MESSAGE_TEMPLATE_NOT_FOUND: "Template itu sudah tidak tersedia untuk nomor WhatsApp ini. Sinkronkan template lalu pilih yang lain.",
+    MESSAGE_TEMPLATE_NOT_APPROVED: "Meta belum menyetujui template ini, jadi tidak bisa dikirim. Periksa statusnya di Broadcast → Template.",
+    MESSAGE_TEMPLATE_PARAMS_INVALID: "Jumlah variabel template tidak cocok dengan template-nya. Isi semua variabel lalu coba lagi.",
+    MESSAGING_WINDOW_CLOSED: "Jendela 24 jam WhatsApp sudah tertutup: kontak ini belum menulis dalam 24 jam terakhir. WhatsApp hanya mengizinkan pesan bebas di dalam jendela itu — kirim template yang sudah disetujui sebagai gantinya.",
     MESSAGE_RETRY_UNSUPPORTED: "Provider ini tidak mendukung pengiriman ulang pesan gagal.",
     TELEGRAM_TOKEN_INVALID: "Telegram menolak token bot itu. Periksa token dari BotFather dan coba lagi.",
     TELEGRAM_BOT_ALREADY_CONNECTED: "Bot ini sudah terhubung ke workspace lain. Satu bot Telegram hanya dapat terhubung ke satu workspace — putuskan dulu koneksinya di sana, lalu coba lagi.",

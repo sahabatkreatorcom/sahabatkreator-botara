@@ -51,6 +51,29 @@ export const MessageStatusSchema = z.enum([
 ]);
 export type MessageStatus = z.infer<typeof MessageStatusSchema>;
 
+/**
+ * Jendela pesan bebas (Fase 16C) — keadaan yang menentukan apakah kita
+ * boleh mengirim teks biasa ke kontak, atau harus memakai template
+ * yang disetujui.
+ *
+ * `enforced` = provider ini punya aturan jendela (WhatsApp: 24 jam sejak
+ * pesan masuk TERAKHIR dari kontak). `open` = boleh kirim teks bebas
+ * SEKARANG. Untuk provider tanpa aturan jendela (Telegram, webchat)
+ * `enforced` false dan `open` selalu true — UI tidak menampilkan apa pun.
+ *
+ * Dihitung server dari `messages` (pesan masuk terakhir), bukan dari
+ * `conversations.last_message_at` yang bisa berisi pesan keluar.
+ */
+export const MessagingWindowSchema = z.object({
+  enforced: z.boolean(),
+  open: z.boolean(),
+  /** Waktu pesan MASUK terakhir dari kontak; null bila belum pernah ada. */
+  lastInboundAt: z.string().datetime().nullable(),
+  /** Saat jendela menutup (`lastInboundAt + 24 jam`); null bila tak ada. */
+  expiresAt: z.string().datetime().nullable(),
+});
+export type MessagingWindow = z.infer<typeof MessagingWindowSchema>;
+
 export const ConversationResponseSchema = z.object({
   id: z.string().uuid(),
   channelAccountId: z.string().uuid(),
@@ -89,6 +112,12 @@ export const ConversationResponseSchema = z.object({
    */
   assigneeName: z.string().nullable(),
   agentEnabled: z.boolean(),
+  /**
+   * Jendela pesan bebas (Fase 16C). UI memakainya untuk mematikan kotak
+   * balasan lebih awal + menjelaskan sebabnya, alih-alih membiarkan
+   * pengguna mengetik lalu ditolak server/provider.
+   */
+  messagingWindow: MessagingWindowSchema,
   unreadCount: z.number().int().nonnegative(),
   lastMessageAt: z.string().datetime().nullable(),
   /** Cuplikan teks pesan terakhir (null bila belum ada pesan). */
@@ -117,6 +146,34 @@ export const AssignConversationRequestSchema = z.object({
 });
 export type AssignConversationRequest = z.infer<
   typeof AssignConversationRequestSchema
+>;
+
+/**
+ * Ubah status percakapan (Fase 16C). Status hanya label kerja tim —
+ * tidak mengubah jalur pengiriman maupun agent. Menutup percakapan
+ * TIDAK mematikan AI; sumbu itu milik `agentEnabled` di bawah.
+ */
+export const UpdateConversationStatusRequestSchema = z.object({
+  status: ConversationStatusSchema,
+});
+export type UpdateConversationStatusRequest = z.infer<
+  typeof UpdateConversationStatusRequestSchema
+>;
+
+/**
+ * Nyalakan/matikan AI untuk satu percakapan (Fase 16C).
+ *
+ * Sebelum ini `agent_enabled` hanya pernah ditulis `false` (handoff node
+ * flow & tool `handoff_to_human` agent) — tidak ada jalan kembali, jadi
+ * satu handoff mematikan AI untuk kontak itu selamanya. Endpoint ini
+ * menutup lubang tersebut; nilainya idempoten (menyalakan yang sudah
+ * menyala tidak berefek).
+ */
+export const SetAgentEnabledRequestSchema = z.object({
+  agentEnabled: z.boolean(),
+});
+export type SetAgentEnabledRequest = z.infer<
+  typeof SetAgentEnabledRequestSchema
 >;
 
 /**
@@ -341,6 +398,12 @@ export type MessageResponse = z.infer<typeof MessageResponseSchema>;
 
 export const MessageListResponseSchema = z.object({
   messages: z.array(MessageResponseSchema),
+  /**
+   * Masih ada pesan yang LEBIH TUA dari yang dikembalikan (Fase 16C).
+   * Diminta lewat `?before=<messageId>`; UI menampilkan tombol "muat
+   * pesan lama" selama ini true.
+   */
+  hasMore: z.boolean(),
 });
 export type MessageListResponse = z.infer<typeof MessageListResponseSchema>;
 
@@ -354,3 +417,24 @@ export const SendMessageRequestSchema = z.object({
   replyToMessageId: z.string().uuid().optional(),
 });
 export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>;
+
+/**
+ * Kirim template WhatsApp dari inbox (Fase 16C).
+ *
+ * Template adalah satu-satunya pesan yang boleh keluar setelah jendela
+ * 24 jam tertutup, jadi endpoint ini adalah pasangan dari
+ * `MESSAGING_WINDOW_CLOSED` — tanpa ia, kotak balasan yang dimatikan
+ * meninggalkan pengguna tanpa jalan keluar.
+ *
+ * `templateId` menunjuk baris cermin di akun WhatsApp percakapan itu
+ * (bukan nama+bahasa: nama bisa sama pada bahasa berbeda). `bodyParams`
+ * diisi manusia untuk satu penerima ini — panjangnya harus sama dengan
+ * `variableCount` template, dan tidak boleh ada nilai kosong.
+ */
+export const SendTemplateMessageRequestSchema = z.object({
+  templateId: z.string().uuid(),
+  bodyParams: z.array(z.string().trim().max(1024)).max(20).default([]),
+});
+export type SendTemplateMessageRequest = z.infer<
+  typeof SendTemplateMessageRequestSchema
+>;

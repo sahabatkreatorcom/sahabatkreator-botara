@@ -1,6 +1,6 @@
 # Matriks cakupan fitur
 
-Status per 2026-11-05. Kolom **Bukti** menunjuk ke tempat perilakunya
+Status per 2026-11-06. Kolom **Bukti** menunjuk ke tempat perilakunya
 dapat diverifikasi — bukan sekadar "ada file".
 
 Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
@@ -31,6 +31,12 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Saved replies (macro) | ✅ | `saved_replies` |
 | Avatar kontak & bot | ✅ | `profile_photos`, `modules/avatars` |
 | Realtime (socket dashboard) | ✅ | `apps/realtime` |
+| Pencarian percakapan (nama/nomor/judul) | ✅ | `listConversations({ search })`, `escapeLikePattern` |
+| Status kerja open/pending/closed | ✅ | `setConversationStatus`, audit `conversation.status_changed` |
+| Nyalakan/matikan AI per percakapan | ✅ | `setConversationAgentEnabled`, `POST …/agent` |
+| Jendela 24 jam WhatsApp (tolak teks bebas di luar jendela) | ✅ | `computeMessagingWindow`, `MESSAGING_WINDOW_CLOSED` |
+| Kirim template WhatsApp dari inbox (jalan keluar jendela tertutup) | ✅ | `queueTemplateMessage`, `POST …/template` |
+| Paginasi pesan lama (`before` + `hasMore`) | ✅ | `listMessagesPage` |
 
 ## Otomasi
 

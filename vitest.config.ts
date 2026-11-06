@@ -53,7 +53,7 @@ export default defineConfig({
      *
      * Setiap suite yang menyentuh database menjalankan PGlite (Postgres
      * dalam WASM) dan memutar ULANG seluruh rantai migrasi — 59 tabel,
-     * 215 index, 76 policy. Itu kerja CPU yang berat dan tidak paralel
+     * 215 index, 77 policy. Itu kerja CPU yang berat dan tidak paralel
      * di dalam satu instance.
      *
      * Terukur: `packages/db/src/rls.test.ts` selesai 3,2 detik saat
@@ -67,10 +67,21 @@ export default defineConfig({
      */
     maxWorkers: 2,
     minWorkers: 1,
-    // PGlite memuat Postgres WASM + menjalankan seluruh rantai migrasi;
-    // 30 detik memberi ruang di mesin CI yang lambat.
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
+    /**
+     * Batas waktu ini pengaman, bukan alat kendali — kendalinya
+     * `maxWorkers` di atas.
+     *
+     * Dinaikkan 30 dtk → 120 dtk setelah suite PGlite bertambah menjadi
+     * empat (rls, commerce, payments-webhook, inbox-conversation): pada
+     * mesin Windows yang sedang berbeban, dua instance yang berjalan
+     * bersamaan sempat melewati 30 dtk untuk memutar ulang migrasi saja,
+     * sehingga suite yang isinya lulus dilaporkan gagal sebagai
+     * "Hook timed out". Sendirian, keempatnya selesai di bawah 6 detik.
+     * Menaikkan batas lebih baik daripada membiarkan kegagalan palsu
+     * yang membuat orang berhenti memercayai hasil test.
+     */
+    testTimeout: 60_000,
+    hookTimeout: 120_000,
     coverage: {
       provider: "v8",
       reporter: ["text-summary"],

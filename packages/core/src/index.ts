@@ -25,6 +25,12 @@ export {
   outboundClaimStale,
 } from "./outbound-claim";
 export {
+  MESSAGING_WINDOW_MS,
+  WINDOW_ENFORCED_PROVIDERS,
+  computeMessagingWindow,
+  type MessagingWindowState,
+} from "./messaging-window";
+export {
   createContact,
   listContacts,
   getContact,
@@ -84,9 +90,16 @@ export {
   getConversation,
   assignConversation,
   type AssignConversationResult,
+  setConversationStatus,
+  setConversationAgentEnabled,
+  type UpdateConversationResult,
   listMessages,
+  listMessagesPage,
+  type MessagePageResult,
   queueOutboundMessage,
   queueOutboundMessageForApiKey,
+  queueTemplateMessage,
+  type QueueTemplateMessageResult,
   listQueuedOutboundMessages,
   getConversationDeliveryTarget,
   markConversationRead,

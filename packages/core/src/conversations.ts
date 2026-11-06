@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import {
   auditLogs,
   channelAccounts,
@@ -7,6 +7,7 @@ import {
   messages,
   tenantMembers,
   users,
+  whatsappTemplates,
   type Conversation,
   type Database,
   type Message,
@@ -14,6 +15,10 @@ import {
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
 import { outboundClaimStale } from "./outbound-claim";
+import {
+  computeMessagingWindow,
+  type MessagingWindowState,
+} from "./messaging-window";
 
 /**
  * Service domain percakapan & pesan inbox (Fase 1D, RANCANGAN §5.1 & §6).
@@ -254,6 +259,17 @@ export function extractRawProviderMessageId(
   return raw.length > 0 ? raw : null;
 }
 
+/**
+ * Escape metakarakter LIKE (`\`, `%`, `_`) pada masukan pengguna.
+ *
+ * Tanpa ini, mencari "%" akan mencocokkan SEMUA percakapan dan mencari
+ * "a_b" akan mencocokkan "axb" — hasil yang salah tanpa pesan apa pun.
+ * `ESCAPE '\'` adalah default Postgres, jadi cukup awali dengan backslash.
+ */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
 export interface ConversationWithSummary extends Conversation {
   contactName: string;
   /**
@@ -278,6 +294,54 @@ export interface ConversationWithSummary extends Conversation {
   isChannel: boolean;
   lastMessagePreview: string | null;
   lastMessageDirection: Message["direction"] | null;
+  /**
+   * Waktu pesan MASUK terakhir dari kontak (Fase 16C) — dasar jendela
+   * 24 jam WhatsApp. Sengaja terpisah dari `lastMessageAt` yang bisa
+   * berisi pesan KELUAR: balasan kita sendiri tidak membuka jendela.
+   * null bila kontak belum pernah menulis.
+   */
+  lastInboundAt: Date | null;
+}
+
+/**
+ * `max(created_at)` dikembalikan driver sebagai Date, tetapi PGlite
+ * (dipakai `db verify`) dan sebagian build pg mengembalikan string.
+ * Normalisasi di satu tempat agar perbandingan jendela tidak pernah
+ * diam-diam salah karena tipe.
+ */
+function toDate(value: unknown): Date | null {
+  if (value instanceof Date) return value;
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  return null;
+}
+
+/**
+ * Waktu pesan MASUK terakhir di satu percakapan, di dalam transaksi yang
+ * sudah berjalan. Dipakai jalur antre (Fase 16C) supaya pemeriksaan
+ * jendela dan insert pesan berada di transaksi yang sama — tidak ada
+ * jendela balapan di antaranya.
+ */
+async function lastInboundAtInTx(
+  tx: DbTx,
+  tenantId: string,
+  conversationId: string,
+): Promise<Date | null> {
+  const [row] = await tx
+    .select({
+      lastInboundAt: sql<Date | string | null>`max(${messages.createdAt})`,
+    })
+    .from(messages)
+    .where(
+      and(
+        eq(messages.tenantId, tenantId),
+        eq(messages.conversationId, conversationId),
+        eq(messages.direction, "inbound"),
+      ),
+    );
+  return toDate(row?.lastInboundAt ?? null);
 }
 
 export async function listConversations(
@@ -293,6 +357,17 @@ export async function listConversations(
      */
     assignment?: "mine" | "unassigned";
     assignmentUserId?: string;
+    /**
+     * Pencarian teks (Fase 16C): nama kontak, nomor telepon, atau judul
+     * percakapan (grup/channel). Sebelum ini inbox hanya bisa DIGULIR —
+     * tidak ada cara menemukan satu kontak di antara ratusan.
+     *
+     * Dicocokkan dengan `ILIKE '%q%'` sehingga metakarakter LIKE pada
+     * masukan pengguna (`%`, `_`, `\`) di-escape lebih dulu; tanpa itu
+     * satu karakter `%` akan mencocokkan semua baris dan hasilnya
+     * menyesatkan, bukan sekadar kosong.
+     */
+    search?: string;
   },
 ): Promise<ConversationWithSummary[]> {
   return withTenantDb(db, ctx.tenantId, async (tx) => {
@@ -302,6 +377,16 @@ export async function listConversations(
       conditions.push(eq(conversations.assigneeUserId, input.assignmentUserId));
     } else if (input.assignment === "unassigned") {
       conditions.push(isNull(conversations.assigneeUserId));
+    }
+    const needle = input.search?.trim();
+    if (needle) {
+      const pattern = `%${escapeLikePattern(needle)}%`;
+      const match = or(
+        ilike(contacts.name, pattern),
+        ilike(contacts.phone, pattern),
+        ilike(conversations.title, pattern),
+      );
+      if (match) conditions.push(match);
     }
     const rows = await tx
       .select({
@@ -327,8 +412,23 @@ export async function listConversations(
 
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.conversation.id);
-    const recent = await tx
-      .select()
+
+    // Pesan TERAKHIR per percakapan (Fase 16C). Sebelumnya query ini
+    // mengambil SELURUH pesan tenant lalu menyaringnya di memori — biaya
+    // yang tumbuh seumur workspace pada setiap muat/poll inbox. Window
+    // function memindahkan penyaringan ke database: satu baris per
+    // percakapan, bukan satu baris per pesan. `id` ikut jadi kunci urut
+    // agar pesan bertimestamp sama tidak membuat urutan tak deterministik.
+    const ranked = tx
+      .select({
+        conversationId: messages.conversationId,
+        contentText: messages.contentText,
+        direction: messages.direction,
+        rowNumber:
+          sql<number>`row_number() over (partition by ${messages.conversationId} order by ${messages.createdAt} desc, ${messages.id} desc)`.as(
+            "row_number",
+          ),
+      })
       .from(messages)
       .where(
         and(
@@ -336,13 +436,36 @@ export async function listConversations(
           inArray(messages.conversationId, ids),
         ),
       )
-      .orderBy(desc(messages.createdAt));
-    const lastByConversation = new Map<string, Message>();
-    for (const m of recent) {
-      if (!lastByConversation.has(m.conversationId)) {
-        lastByConversation.set(m.conversationId, m);
-      }
-    }
+      .as("ranked_messages");
+
+    const lastRows = await tx
+      .select()
+      .from(ranked)
+      .where(eq(ranked.rowNumber, 1));
+    const lastByConversation = new Map(
+      lastRows.map((row) => [row.conversationId, row]),
+    );
+
+    // Pesan MASUK terakhir per percakapan (Fase 16C) — dasar jendela 24
+    // jam. Satu agregat untuk seluruh halaman, bukan satu query per baris.
+    const inboundRows = await tx
+      .select({
+        conversationId: messages.conversationId,
+        lastInboundAt: sql<Date | string | null>`max(${messages.createdAt})`,
+      })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.tenantId, ctx.tenantId),
+          inArray(messages.conversationId, ids),
+          eq(messages.direction, "inbound"),
+        ),
+      )
+      .groupBy(messages.conversationId);
+    const lastInboundByConversation = new Map(
+      inboundRows.map((row) => [row.conversationId, toDate(row.lastInboundAt)]),
+    );
+
     return rows.map((r) => {
       const last = lastByConversation.get(r.conversation.id);
       const isChannel = r.conversation.kind === "channel";
@@ -361,6 +484,7 @@ export async function listConversations(
         unreadCount: isChannel ? 0 : r.conversation.unreadCount,
         lastMessagePreview: last?.contentText ?? null,
         lastMessageDirection: last?.direction ?? null,
+        lastInboundAt: lastInboundByConversation.get(r.conversation.id) ?? null,
       };
     });
   });
@@ -450,6 +574,133 @@ export async function assignConversation(
   });
 }
 
+export type UpdateConversationResult =
+  | { kind: "updated"; conversation: Conversation }
+  | { kind: "conversation_not_found" };
+
+/**
+ * Mengubah status kerja percakapan (Fase 16C).
+ *
+ * Sebelum ini `status` hanya bisa DIBACA: daftar bisa difilter
+ * `open|pending|closed`, tetapi tidak ada jalan menutup percakapan —
+ * sehingga filter "closed" selalu kosong dan alur "selesai" tidak ada.
+ *
+ * Status TIDAK menyentuh `agent_enabled`: menutup percakapan bukan
+ * mematikan AI, dan membuka kembali bukan menyalakannya. Dua sumbu
+ * terpisah, sama seperti penugasan (Fase 9C).
+ *
+ * Idempoten: menulis status yang sama tidak menghasilkan baris audit
+ * palsu — audit hanya ditulis saat nilainya benar-benar berubah.
+ */
+export async function setConversationStatus(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId" | "userId"> & { userId: string },
+  conversationId: string,
+  status: Conversation["status"],
+): Promise<UpdateConversationResult> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [conv] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.id, conversationId),
+        ),
+      )
+      .limit(1);
+    if (!conv) return { kind: "conversation_not_found" } as const;
+    if (conv.status === status) {
+      return { kind: "updated", conversation: conv } as const;
+    }
+
+    const [updated] = await tx
+      .update(conversations)
+      .set({ status, updatedAt: new Date() })
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.id, conversationId),
+        ),
+      )
+      .returning();
+    if (!updated) return { kind: "conversation_not_found" } as const;
+
+    await tx.insert(auditLogs).values({
+      tenantId: ctx.tenantId,
+      actorType: "user",
+      actorId: ctx.userId,
+      action: "conversation.status_changed",
+      meta: { conversationId, from: conv.status, to: status },
+    });
+    return { kind: "updated", conversation: updated } as const;
+  });
+}
+
+/**
+ * Menyalakan/mematikan AI untuk satu percakapan (Fase 16C).
+ *
+ * MASALAH YANG DITUTUP: `agent_enabled` sebelumnya hanya pernah ditulis
+ * `false` — oleh node `handoff` flow dan tool `handoff_to_human` agent.
+ * Tidak ada satu pun jalur yang mengembalikannya ke `true`, jadi satu
+ * handoff mematikan AI untuk kontak itu PERMANEN; satu-satunya jalan
+ * adalah mengubah baris DB langsung. Endpoint ini menutup lubang itu.
+ *
+ * Audit mencatat arah perubahan (`conversation.agent_enabled` /
+ * `conversation.agent_disabled`) beserta nilai sebelumnya, sehingga
+ * "kenapa AI diam?" bisa dijawab dari riwayat — pertanyaan yang sekarang
+ * tidak bisa dijawab siapa pun.
+ */
+export async function setConversationAgentEnabled(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId" | "userId"> & { userId: string },
+  conversationId: string,
+  agentEnabled: boolean,
+): Promise<UpdateConversationResult> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [conv] = await tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.id, conversationId),
+        ),
+      )
+      .limit(1);
+    if (!conv) return { kind: "conversation_not_found" } as const;
+    if (conv.agentEnabled === agentEnabled) {
+      return { kind: "updated", conversation: conv } as const;
+    }
+
+    const [updated] = await tx
+      .update(conversations)
+      .set({ agentEnabled, updatedAt: new Date() })
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.id, conversationId),
+        ),
+      )
+      .returning();
+    if (!updated) return { kind: "conversation_not_found" } as const;
+
+    await tx.insert(auditLogs).values({
+      tenantId: ctx.tenantId,
+      actorType: "user",
+      actorId: ctx.userId,
+      action: agentEnabled
+        ? "conversation.agent_enabled"
+        : "conversation.agent_disabled",
+      meta: {
+        conversationId,
+        previousAgentEnabled: conv.agentEnabled,
+      },
+    });
+    return { kind: "updated", conversation: updated } as const;
+  });
+}
+
 /** Null bila percakapan tidak ada DI tenant ini (API menerjemahkan ke 404). */
 export async function getConversation(
   db: Database,
@@ -477,12 +728,31 @@ export async function getConversation(
  * membawa ringkasan kutipannya yang sudah teresolusi (Fase 7B.5).
  * Null bila percakapan bukan milik tenant ini.
  */
-export async function listMessages(
+export type MessagePageResult =
+  | { kind: "ok"; messages: MessageWithReplyTo[]; hasMore: boolean }
+  | { kind: "conversation_not_found" }
+  /**
+   * `before` diberikan tetapi bukan pesan di percakapan ini. Dibedakan
+   * dari "tidak ada pesan lama" supaya UI tidak diam-diam menampilkan
+   * "sudah sampai awal" padahal kursornya salah.
+   */
+  | { kind: "invalid_cursor" };
+
+/**
+ * Satu halaman pesan (Fase 16C) — N pesan TERAKHIR, atau N pesan tepat
+ * SEBELUM `before`, kronologis menaik.
+ *
+ * `hasMore` dihitung dengan mengambil `limit + 1` baris lalu memotongnya:
+ * satu query, dan nilainya pasti (bukan tebakan "penuh berarti masih
+ * ada" yang memberi positif palsu saat jumlah pesan tepat sama dengan
+ * limit).
+ */
+export async function listMessagesPage(
   db: Database,
   ctx: Pick<TenantContext, "tenantId">,
   conversationId: string,
-  input: { limit: number },
-): Promise<MessageWithReplyTo[] | null> {
+  input: { limit: number; before?: string },
+): Promise<MessagePageResult> {
   return withTenantDb(db, ctx.tenantId, async (tx) => {
     const [conv] = await tx
       .select({ id: conversations.id })
@@ -494,20 +764,68 @@ export async function listMessages(
         ),
       )
       .limit(1);
-    if (!conv) return null;
+    if (!conv) return { kind: "conversation_not_found" } as const;
+
+    const conditions = [
+      eq(messages.tenantId, ctx.tenantId),
+      eq(messages.conversationId, conversationId),
+    ];
+
+    if (input.before) {
+      // Kursor komposit (created_at, id): Postgres membandingkan baris
+      // secara leksikografis. Memakai created_at saja MELEWATKAN pesan
+      // yang bertimestamp sama dengan kursor (webhook beruntun & ingest
+      // massal memang berbagi timestamp); memakai id saja salah urutan.
+      const [cursor] = await tx
+        .select({ createdAt: messages.createdAt, id: messages.id })
+        .from(messages)
+        .where(
+          and(
+            eq(messages.tenantId, ctx.tenantId),
+            eq(messages.conversationId, conversationId),
+            eq(messages.id, input.before),
+          ),
+        )
+        .limit(1);
+      if (!cursor) return { kind: "invalid_cursor" } as const;
+      conditions.push(
+        sql`(${messages.createdAt}, ${messages.id}) < (${cursor.createdAt}, ${cursor.id})`,
+      );
+    }
+
     const rows = await tx
       .select()
       .from(messages)
-      .where(
-        and(
-          eq(messages.tenantId, ctx.tenantId),
-          eq(messages.conversationId, conversationId),
-        ),
-      )
-      .orderBy(desc(messages.createdAt))
-      .limit(input.limit);
-    return attachReplyToSummaries(tx, ctx.tenantId, rows.reverse());
+      .where(and(...conditions))
+      .orderBy(desc(messages.createdAt), desc(messages.id))
+      .limit(input.limit + 1);
+    const hasMore = rows.length > input.limit;
+    const page = hasMore ? rows.slice(0, input.limit) : rows;
+    return {
+      kind: "ok",
+      messages: await attachReplyToSummaries(tx, ctx.tenantId, page.reverse()),
+      hasMore,
+    } as const;
   });
+}
+
+/**
+ * Pesan-pesan satu percakapan, kronologis menaik. `limit` mengambil N pesan
+ * TERAKHIR lalu mengembalikannya dalam urutan kronologis. Setiap baris
+ * membawa ringkasan kutipannya yang sudah teresolusi (Fase 7B.5).
+ * Null bila percakapan bukan milik tenant ini.
+ *
+ * Pembungkus tipis `listMessagesPage` untuk pemanggil yang hanya butuh
+ * larik (agent runtime, webchat, SDK) — perilakunya tidak berubah.
+ */
+export async function listMessages(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  conversationId: string,
+  input: { limit: number },
+): Promise<MessageWithReplyTo[] | null> {
+  const page = await listMessagesPage(db, ctx, conversationId, input);
+  return page.kind === "ok" ? page.messages : null;
 }
 
 /**
@@ -557,11 +875,16 @@ interface OutboundMessageActor {
  * - `reply_target_invalid`: `replyToMessageId` diberikan tetapi targetnya
  *   tidak ada / milik tenant lain / berada di percakapan LAIN → 422
  *   MESSAGE_REPLY_TARGET_INVALID. TIDAK ada tulisan apa pun.
+ * - `messaging_window_closed` (Fase 16C): provider berjendela (WhatsApp)
+ *   dan pesan masuk terakhir dari kontak lebih dari 24 jam lalu. Provider
+ *   akan menolaknya, jadi kita menolak LEBIH DULU dengan alasan yang bisa
+ *   dibaca pengguna. TIDAK ada tulisan apa pun.
  */
 export type QueueOutboundMessageResult =
   | { kind: "queued"; message: MessageWithReplyTo }
   | { kind: "conversation_not_found" }
-  | { kind: "reply_target_invalid" };
+  | { kind: "reply_target_invalid" }
+  | { kind: "messaging_window_closed"; window: MessagingWindowState };
 
 async function queueOutboundMessageWithActor(
   db: Database,
@@ -572,7 +895,7 @@ async function queueOutboundMessageWithActor(
 ): Promise<QueueOutboundMessageResult> {
   return withTenantDb(db, tenantId, async (tx) => {
     const [conv] = await tx
-      .select({ id: conversations.id })
+      .select({ id: conversations.id, provider: conversations.provider })
       .from(conversations)
       .where(
         and(
@@ -604,6 +927,17 @@ async function queueOutboundMessageWithActor(
       if (!target || target.conversationId !== conversationId) {
         return { kind: "reply_target_invalid" } as const;
       }
+    }
+
+    // Jendela pesan bebas (Fase 16C). Ditegakkan SEBELUM insert supaya
+    // tidak ada pesan `queued` yang pasti gagal di provider. Berlaku juga
+    // untuk jalur API publik: aturannya milik Meta, bukan milik UI.
+    const messagingWindow = computeMessagingWindow(
+      conv.provider,
+      await lastInboundAtInTx(tx, tenantId, conversationId),
+    );
+    if (!messagingWindow.open) {
+      return { kind: "messaging_window_closed", window: messagingWindow } as const;
     }
 
     const [message] = await tx
@@ -689,6 +1023,165 @@ export async function queueOutboundMessageForApiKey(
     auditActorId: apiKeyId,
     sentByUserId: null,
     auditMetaExtra: { source: "public_api", apiKeyId },
+  });
+}
+
+/**
+ * Hasil pengantrean pesan template (Fase 16C).
+ *
+ * Template adalah SATU-SATUNYA cara menghubungi kontak WhatsApp di luar
+ * jendela 24 jam. Karena itu penolakan di sini harus spesifik: "template
+ * belum disetujui" adalah tindakan yang berbeda dari "jumlah variabel
+ * salah", dan pengguna hanya bisa memperbaiki yang disebutkan.
+ */
+export type QueueTemplateMessageResult =
+  | { kind: "queued"; message: MessageWithReplyTo }
+  | { kind: "conversation_not_found" }
+  /** Provider percakapan ini tidak memakai template (Telegram/webchat). */
+  | { kind: "provider_unsupported" }
+  /** Id template tidak ada di akun WhatsApp percakapan ini. */
+  | { kind: "template_not_found" }
+  | { kind: "template_not_approved"; status: string }
+  | { kind: "template_params_invalid"; expected: number; received: number };
+
+const TEMPLATE_PLACEHOLDER_RE = /\{\{(\d+)\}\}/g;
+
+/**
+ * Isi pesan yang disimpan untuk pesan template: teks BODY dengan
+ * parameter terisi. Inbox menampilkan kolom ini apa adanya, jadi tanpa
+ * render ia akan menampilkan `{{1}}` — teks yang tidak pernah dikirim
+ * ke siapa pun.
+ */
+function renderTemplatePreview(bodyText: string, params: string[]): string {
+  return bodyText.replace(TEMPLATE_PLACEHOLDER_RE, (_whole, raw: string) => {
+    const idx = Number(raw) - 1;
+    return idx >= 0 && idx < params.length ? params[idx]! : "";
+  });
+}
+
+/**
+ * Mengantrekan pesan template WhatsApp ke satu percakapan (Fase 16C).
+ *
+ * MASALAH YANG DITUTUP: `MESSAGING_WINDOW_CLOSED` menonaktifkan kotak
+ * balasan dan menyuruh pengguna "pakai template", tetapi TIDAK ADA satu
+ * pun jalur di inbox yang bisa mengirim template — banner itu berujung
+ * jalan buntu. Broadcast bisa mengirim template, tetapi hanya ke audiens,
+ * bukan ke satu orang yang sedang dibalas.
+ *
+ * Jendela 24 jam SENGAJA tidak diperiksa di sini: template justru
+ * dikecualikan dari aturan itu. Yang diperiksa adalah hal-hal yang
+ * membuat Meta menolak kiriman: provider bukan WhatsApp, template bukan
+ * milik akun ini, status belum APPROVED, dan jumlah parameter tidak sama
+ * dengan `variableCount`.
+ *
+ * `bodyParams` diterima sudah terisi (bukan sumber seperti broadcast):
+ * inbox adalah pengiriman satu penerima, jadi nilainya diketik/dikonfirmasi
+ * manusia untuk kontak itu — bukan dipetakan dari custom_fields.
+ */
+export async function queueTemplateMessage(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId" | "userId"> & { userId: string },
+  conversationId: string,
+  input: { templateId: string; bodyParams: string[] },
+): Promise<QueueTemplateMessageResult> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [conv] = await tx
+      .select({
+        id: conversations.id,
+        provider: conversations.provider,
+        channelAccountId: conversations.channelAccountId,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.id, conversationId),
+        ),
+      )
+      .limit(1);
+    if (!conv) return { kind: "conversation_not_found" } as const;
+    if (conv.provider !== "whatsapp") {
+      return { kind: "provider_unsupported" } as const;
+    }
+
+    // Template dicari DI AKUN yang sama dengan percakapan: template milik
+    // WABA lain tidak bisa dikirim lewat nomor ini, dan RLS saja tidak
+    // menangkapnya (keduanya milik tenant yang sama).
+    const [template] = await tx
+      .select({
+        name: whatsappTemplates.name,
+        language: whatsappTemplates.language,
+        status: whatsappTemplates.status,
+        bodyText: whatsappTemplates.bodyText,
+        variableCount: whatsappTemplates.variableCount,
+      })
+      .from(whatsappTemplates)
+      .where(
+        and(
+          eq(whatsappTemplates.tenantId, ctx.tenantId),
+          eq(whatsappTemplates.channelAccountId, conv.channelAccountId),
+          eq(whatsappTemplates.id, input.templateId),
+        ),
+      )
+      .limit(1);
+    if (!template) return { kind: "template_not_found" } as const;
+    if (template.status !== "APPROVED") {
+      return { kind: "template_not_approved", status: template.status } as const;
+    }
+
+    const params = input.bodyParams.map((value) => value.trim());
+    if (
+      params.length !== template.variableCount ||
+      params.some((value) => value === "")
+    ) {
+      return {
+        kind: "template_params_invalid",
+        expected: template.variableCount,
+        received: params.length,
+      } as const;
+    }
+
+    const [message] = await tx
+      .insert(messages)
+      .values({
+        tenantId: ctx.tenantId,
+        conversationId,
+        direction: "outbound",
+        senderType: "user",
+        type: "template",
+        contentText: renderTemplatePreview(template.bodyText ?? "", params),
+        templatePayload: {
+          name: template.name,
+          languageCode: template.language,
+          bodyParams: params,
+        },
+        status: "queued",
+        sentByUserId: ctx.userId,
+      })
+      .returning();
+
+    const now = new Date();
+    await tx
+      .update(conversations)
+      .set({ lastMessageAt: now, updatedAt: now })
+      .where(eq(conversations.id, conversationId));
+
+    await tx.insert(auditLogs).values({
+      tenantId: ctx.tenantId,
+      actorType: "user",
+      actorId: ctx.userId,
+      action: "message.queued",
+      meta: {
+        conversationId,
+        messageId: message.id,
+        template: template.name,
+        languageCode: template.language,
+        stub: true,
+      },
+    });
+
+    const [withReply] = await attachReplyToSummaries(tx, ctx.tenantId, [message]);
+    return { kind: "queued", message: withReply } as const;
   });
 }
 

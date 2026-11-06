@@ -125,6 +125,16 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.GROWTH_LINK_TARGET_UNAVAILABLE");
     case "ASSIGNEE_NOT_MEMBER":
       return t("errors.ASSIGNEE_NOT_MEMBER");
+    case "MESSAGING_WINDOW_CLOSED":
+      return t("errors.MESSAGING_WINDOW_CLOSED");
+    case "MESSAGE_TEMPLATE_UNSUPPORTED":
+      return t("errors.MESSAGE_TEMPLATE_UNSUPPORTED");
+    case "MESSAGE_TEMPLATE_NOT_FOUND":
+      return t("errors.MESSAGE_TEMPLATE_NOT_FOUND");
+    case "MESSAGE_TEMPLATE_NOT_APPROVED":
+      return t("errors.MESSAGE_TEMPLATE_NOT_APPROVED");
+    case "MESSAGE_TEMPLATE_PARAMS_INVALID":
+      return t("errors.MESSAGE_TEMPLATE_PARAMS_INVALID");
     case "INVITATION_EXPIRED":
       return t("errors.INVITATION_EXPIRED");
     case "INVITATION_REVOKED":

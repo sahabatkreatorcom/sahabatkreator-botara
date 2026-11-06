@@ -8,10 +8,12 @@ import {
 import type {
   ConversationNoteResponse,
   ConversationResponse,
+  ConversationStatus,
   MessageReplyTo,
   MessageResponse,
   SavedReplyResponse,
   TeamMemberResponse,
+  WhatsAppTemplateResponse,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api, ApiClientError } from "../api/client";
@@ -148,6 +150,29 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const [notesError, setNotesError] = useState<string | null>(null);
   const [noteDraft, setNoteDraft] = useState("");
   const [noteSaving, setNoteSaving] = useState(false);
+  // Fase 16C — halaman pesan lebih lama: `hasMore` dari server, dan status
+  // muat supaya tombolnya tidak bisa ditekan dua kali.
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  // Fase 16C — ubah status kerja & nyalakan/matikan AI per percakapan.
+  const [statusSaving, setStatusSaving] = useState(false);
+  const [agentSaving, setAgentSaving] = useState(false);
+  const [metaError, setMetaError] = useState<string | null>(null);
+  // Fase 16C: pengiriman template WhatsApp. Ini pasangan dari banner
+  // "jendela tertutup" — tanpanya banner itu hanya memberi tahu masalah
+  // tanpa memberi jalan keluar, karena tidak ada tempat lain di inbox
+  // untuk mengirim template ke SATU kontak.
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [templates, setTemplates] = useState<WhatsAppTemplateResponse[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [templateId, setTemplateId] = useState("");
+  const [templateParams, setTemplateParams] = useState<string[]>([]);
+  const [templateSending, setTemplateSending] = useState(false);
+  // Fase 16C: pencarian percakapan (nama kontak / nomor / judul).
+  const [searchInput, setSearchInput] = useState("");
+  const searchRef = useRef("");
+  const searchTimerRef = useRef<number | null>(null);
   const myMember = members.find((m) => m.isSelf) ?? null;
   const canModerateNotes =
     myMember?.role === "owner" || myMember?.role === "admin";
@@ -158,14 +183,16 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     setError(null);
     try {
       const filter = assignmentFilterRef.current;
-      const list = await api.conversations.list(
-        tenantId,
-        filter === "all" ? undefined : { assignment: filter },
-      );
+      const search = searchRef.current.trim();
+      const list = await api.conversations.list(tenantId, {
+        ...(filter === "all" ? {} : { assignment: filter }),
+        ...(search ? { q: search } : {}),
+      });
       setConversations(list);
-      // Badge navigasi menghitung unread SELURUH workspace — hanya
-      // daftar tak-terfilter yang boleh menyinkronkannya.
-      if (filter === "all") setFromConversations(list);
+      // Badge navigasi menghitung unread SELURUH workspace — hanya daftar
+      // TANPA filter dan TANPA pencarian yang boleh menyinkronkannya.
+      // Daftar hasil pencarian adalah potongan, bukan keseluruhan.
+      if (filter === "all" && !search) setFromConversations(list);
     } catch (err) {
       setError(translateApiError(t, err));
       setConversations([]);
@@ -173,6 +200,37 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
       setLoading(false);
     }
   }, [tenantId, t, setFromConversations]);
+
+  /**
+   * Fase 16C: pencarian dengan jeda 300 ms.
+   *
+   * Nilainya ditulis ke ref SEBELUM jeda supaya penyegaran latar (polling
+   * & nudge realtime) memakai kata kunci yang sama — tanpa itu, siklus
+   * polling berikutnya akan mengembalikan daftar tanpa filter dan kotak
+   * pencarian tampak "tidak berfungsi" sesaat kemudian.
+   */
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearchInput(value);
+      searchRef.current = value;
+      if (searchTimerRef.current !== null) {
+        window.clearTimeout(searchTimerRef.current);
+      }
+      searchTimerRef.current = window.setTimeout(() => {
+        searchTimerRef.current = null;
+        void loadConversations();
+      }, 300);
+    },
+    [loadConversations],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (searchTimerRef.current !== null) {
+        window.clearTimeout(searchTimerRef.current);
+      }
+    };
+  }, []);
 
   // Ganti workspace → daftar direset, data workspace baru dimuat. Pilihan
   // di URL dibersihkan (replace) HANYA pada perpindahan workspace
@@ -191,7 +249,15 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
       onConversationChangeRef.current(null, { replace: true });
     }
     setMessages([]);
+    setHasOlderMessages(false);
     setDraft("");
+    // Panel template menempel pada SATU percakapan; membiarkannya
+    // terbuka saat pindah utas akan menampilkan template milik nomor
+    // lain (dan parameter yang sudah terisi untuk orang lain).
+    setTemplateOpen(false);
+    setTemplateId("");
+    setTemplateParams([]);
+    setTemplatesError(null);
     void loadConversations();
   }, [loadConversations, tenantId]);
 
@@ -201,13 +267,14 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
       setMessagesLoading(true);
       setMessagesError(null);
       try {
-        const list = await api.conversations.listMessages(
+        const page = await api.conversations.listMessages(
           tenantId,
           conversationId,
           { limit: MESSAGE_LIMIT },
         );
         if (selectedRef.current !== conversationId) return;
-        setMessages(list);
+        setMessages(page.messages);
+        setHasOlderMessages(page.hasMore);
         // Server menandai percakapan terbaca saat utas dibuka (API GET
         // messages) — sinkronkan daftar lokal & badge navigasi sekarang
         // juga, tanpa menunggu muat ulang daftar (bug QA-1: chip unread
@@ -313,6 +380,87 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     [tenantId, t, members],
   );
 
+  // Fase 16C: muat halaman pesan yang lebih tua. Kursor = id pesan TERTUA
+  // yang sedang tampil; hasilnya DITEMPAHKAN di depan (bukan digabung di
+  // akhir) karena server mengembalikan urutan kronologis menaik.
+  const handleLoadOlder = useCallback(async () => {
+    const conversationId = selectedRef.current;
+    if (!tenantId || !conversationId || loadingOlder) return;
+    const oldest = messages[0];
+    if (!oldest) return;
+    setLoadingOlder(true);
+    setMessagesError(null);
+    try {
+      const page = await api.conversations.listMessages(
+        tenantId,
+        conversationId,
+        { limit: MESSAGE_LIMIT, before: oldest.id },
+      );
+      if (selectedRef.current !== conversationId) return;
+      setMessages((prev) => {
+        // Jaga-jaga terhadap tumpang tindih (pesan yang tiba di antara
+        // dua permintaan): saring id yang sudah ada.
+        const seen = new Set(prev.map((m) => m.id));
+        return [...page.messages.filter((m) => !seen.has(m.id)), ...prev];
+      });
+      setHasOlderMessages(page.hasMore);
+    } catch (err) {
+      setMessagesError(translateApiError(t, err));
+    } finally {
+      setLoadingOlder(false);
+    }
+  }, [tenantId, t, loadingOlder, messages]);
+
+  // Fase 16C: ubah status kerja percakapan (open/pending/closed).
+  const handleStatusChange = useCallback(
+    async (conversationId: string, status: ConversationStatus) => {
+      if (!tenantId) return;
+      setMetaError(null);
+      setStatusSaving(true);
+      try {
+        const updated = await api.conversations.setStatus(
+          tenantId,
+          conversationId,
+          status,
+        );
+        setConversations((prev) =>
+          prev.map((c) => (c.id === updated.id ? updated : c)),
+        );
+      } catch (err) {
+        setMetaError(translateApiError(t, err));
+      } finally {
+        setStatusSaving(false);
+      }
+    },
+    [tenantId, t],
+  );
+
+  // Fase 16C: nyalakan/matikan AI untuk percakapan ini. Tanpa tombol ini
+  // satu handoff mematikan AI selamanya (tidak ada jalur balik di server
+  // sebelum endpoint POST .../agent ada).
+  const handleAgentToggle = useCallback(
+    async (conversationId: string, agentEnabled: boolean) => {
+      if (!tenantId) return;
+      setMetaError(null);
+      setAgentSaving(true);
+      try {
+        const updated = await api.conversations.setAgentEnabled(
+          tenantId,
+          conversationId,
+          agentEnabled,
+        );
+        setConversations((prev) =>
+          prev.map((c) => (c.id === updated.id ? updated : c)),
+        );
+      } catch (err) {
+        setMetaError(translateApiError(t, err));
+      } finally {
+        setAgentSaving(false);
+      }
+    },
+    [tenantId, t],
+  );
+
   // Fase 9C: catatan internal — dimuat saat percakapan berganti (tab
   // Catatan langsung siap) dan direset bersama pilihan.
   const loadNotes = useCallback(
@@ -385,10 +533,11 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     if (!tenantId) return;
     try {
       const filter = assignmentFilterRef.current;
-      const list = await api.conversations.list(
-        tenantId,
-        filter === "all" ? undefined : { assignment: filter },
-      );
+      const search = searchRef.current.trim();
+      const list = await api.conversations.list(tenantId, {
+        ...(filter === "all" ? {} : { assignment: filter }),
+        ...(search ? { q: search } : {}),
+      });
       const openId = selectedRef.current;
       // Percakapan yang sedang dibuka sudah ditandai terbaca di server
       // oleh GET messages — paksa unread lokalnya 0 agar chip daftar &
@@ -399,7 +548,9 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
           ? list
           : list.map((c) => (c.id === openId ? { ...c, unreadCount: 0 } : c));
       setConversations(next);
-      if (assignmentFilterRef.current === "all") setFromConversations(next);
+      // Sama seperti muat awal: daftar hasil pencarian bukan keseluruhan,
+      // jadi tidak boleh menyetel badge unread workspace.
+      if (filter === "all" && !search) setFromConversations(next);
     } catch {
       /* senyap — kegagalan latar bukan urusan agen */
     }
@@ -409,7 +560,7 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     const conversationId = selectedRef.current;
     if (!tenantId || !conversationId) return;
     try {
-      const list = await api.conversations.listMessages(
+      const page = await api.conversations.listMessages(
         tenantId,
         conversationId,
         { limit: MESSAGE_LIMIT },
@@ -419,11 +570,14 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
       // queued→sent ikut segar), pesan baru menempel di akhir mengikuti
       // urutan kronologis server — tanpa duplikat, tanpa mengganti
       // seluruh daftar (tidak ada kedip), draf ketikan tidak disentuh.
+      // `hasMore` sengaja TIDAK ditimpa di sini: penyegaran latar selalu
+      // memuat halaman terbaru, sedangkan halaman lama yang sudah dimuat
+      // pengguna tidak boleh "hilang" dari penanda.
       setMessages((prev) => {
-        const byId = new Map(list.map((m) => [m.id, m]));
+        const byId = new Map(page.messages.map((m) => [m.id, m]));
         const merged = prev.map((m) => byId.get(m.id) ?? m);
         const seen = new Set(prev.map((m) => m.id));
-        for (const m of list) {
+        for (const m of page.messages) {
           if (!seen.has(m.id)) merged.push(m);
         }
         return merged;
@@ -668,6 +822,94 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   const selected =
     conversations.find((c) => c.id === selectedId) ?? null;
 
+  /**
+   * Fase 16C: jendela pesan bebas tertutup (WhatsApp > 24 jam sejak pesan
+   * masuk terakhir). Server MENOLAK balasan seperti ini (422
+   * MESSAGING_WINDOW_CLOSED) — jadi kotak balasan dimatikan lebih dulu
+   * beserta alasannya, bukan dibiarkan diketik lalu gagal.
+   */
+  const windowClosed =
+    selected !== null &&
+    selected.messagingWindow.enforced &&
+    !selected.messagingWindow.open;
+
+  /**
+   * Fase 16C: hanya template APPROVED yang boleh dipakai — PENDING dan
+   * REJECTED akan ditolak Meta, dan menampilkannya hanya membuat
+   * pengguna memilih sesuatu yang pasti gagal.
+   */
+  const approvedTemplates = templates.filter((tpl) => tpl.status === "APPROVED");
+  const selectedTemplate =
+    approvedTemplates.find((tpl) => tpl.id === templateId) ?? null;
+
+  const selectTemplate = (tpl: WhatsAppTemplateResponse) => {
+    setTemplateId(tpl.id);
+    // Variabel pertama diisi nama kontak — konvensi yang sama dengan
+    // broadcast (sumber default posisi 1 = "name"). Sisanya dibiarkan
+    // kosong: inbox adalah kiriman satu penerima, jadi manusia yang
+    // memutuskan isi variabelnya, bukan pemetaan otomatis.
+    setTemplateParams(
+      Array.from({ length: tpl.variableCount }, (_, i) =>
+        i === 0 ? (selected?.contactName ?? "") : "",
+      ),
+    );
+  };
+
+  const openTemplatePanel = async () => {
+    if (!tenantId || !selected) return;
+    setTemplateOpen(true);
+    setTemplatesError(null);
+    setTemplatesLoading(true);
+    try {
+      const res = await api.whatsappTemplates.list(
+        tenantId,
+        selected.channelAccountId,
+      );
+      setTemplates(res.templates);
+      const approved = res.templates.filter((tpl) => tpl.status === "APPROVED");
+      // Satu template = tidak ada yang perlu dipilih; langsung siapkan
+      // parameter agar pengguna hanya mengisi nilainya.
+      if (approved.length === 1) selectTemplate(approved[0]!);
+    } catch (err) {
+      setTemplatesError(translateApiError(t, err));
+      setTemplates([]);
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
+
+  const closeTemplatePanel = () => {
+    setTemplateOpen(false);
+    setTemplateId("");
+    setTemplateParams([]);
+    setTemplatesError(null);
+  };
+
+  const handleSendTemplate = async () => {
+    if (!tenantId || !selected || !selectedTemplate || templateSending) return;
+    setTemplateSending(true);
+    setTemplatesError(null);
+    try {
+      const created = await api.conversations.sendTemplate(
+        tenantId,
+        selected.id,
+        selectedTemplate.id,
+        templateParams.map((value) => value.trim()),
+      );
+      stickToBottomRef.current = true;
+      setMessages((prev) => [...prev, created]);
+      closeTemplatePanel();
+      await Promise.all([loadMessages(selected.id), loadConversations()]);
+    } catch (err) {
+      // Pesan server spesifik (belum APPROVED / variabel tidak cocok)
+      // ditampilkan apa adanya — pengguna hanya bisa memperbaiki yang
+      // disebutkan.
+      setTemplatesError(translateApiError(t, err));
+    } finally {
+      setTemplateSending(false);
+    }
+  };
+
   // Fase 7B.5: label penulis & cuplikan blok kutipan (dari ringkasan
   // server `replyTo`) dan chip composer (dari pesan lokal yang dipilih).
   // Penulis masuk tanpa nama eksplisit = kontak/judul percakapan ini;
@@ -735,6 +977,18 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
               selected ? "hidden md:flex" : "flex"
             }`}
           >
+            {/* Fase 16C: pencarian percakapan — nama kontak, nomor, atau
+                judul grup/channel. Tanpa ini inbox hanya bisa digulir. */}
+            <div className="border-b border-line px-3 py-2">
+              <input
+                type="search"
+                value={searchInput}
+                onChange={(e) => handleSearchChange(e.target.value)}
+                placeholder={t("inbox.searchPlaceholder")}
+                aria-label={t("inbox.searchPlaceholder")}
+                className="w-full rounded-lg border border-line bg-bg px-2.5 py-1.5 text-xs text-ink placeholder:text-muted focus:border-accent focus:outline-none"
+              />
+            </div>
             {/* Fase 9C: filter penugasan — Semua | Milik saya | Belum ditugaskan */}
             <div className="flex gap-1 border-b border-line px-3 py-2">
               {(
@@ -759,6 +1013,17 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
               ))}
             </div>
             <ul className="flex-1 divide-y divide-line overflow-y-auto">
+              {/* Daftar kosong di sini berarti FILTER atau PENCARIAN tidak
+                  menemukan apa pun — bukan workspace yang kosong (kasus itu
+                  ditangani blok di atas). Tanpa baris ini kolomnya hanya
+                  kosong tanpa penjelasan. */}
+              {conversations.length === 0 ? (
+                <li className="px-3 py-6 text-center text-xs text-muted">
+                  {searchInput.trim()
+                    ? t("inbox.searchEmpty")
+                    : t("inbox.filterEmpty")}
+                </li>
+              ) : null}
               {conversations.map((conv) => {
                 const isActive = conv.id === selectedId;
                 // Percakapan grup (Fase 6A.1) tampil dengan judul grupnya;
@@ -867,37 +1132,93 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                         : ""}
                     </div>
                   </div>
-                  {/* Fase 9C: pemilih penerima tugas */}
-                  <div className="ml-auto flex shrink-0 flex-col items-end gap-1">
-                    <label
-                      htmlFor="inbox-assignee"
-                      className="text-[11px] font-medium text-muted"
-                    >
-                      {t("inbox.assignment.assignLabel")}
-                    </label>
-                    <select
-                      id="inbox-assignee"
-                      value={selected.assigneeUserId ?? ""}
-                      onChange={(e) =>
-                        void handleAssign(
-                          selected.id,
-                          e.target.value === "" ? null : e.target.value,
-                        )
-                      }
-                      className="max-w-44 rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-ink"
-                    >
-                      <option value="">
-                        {t("inbox.assignment.unassigned")}
-                      </option>
-                      {members.map((m) => (
-                        <option key={m.userId} value={m.userId}>
-                          {(m.name ?? m.email) +
-                        (m.isSelf ? ` (${t("settings.team.youLabel")})` : "")}
+                  {/* Fase 9C + 16C: status kerja, penerima tugas, AI */}
+                  <div className="ml-auto flex shrink-0 flex-wrap items-end justify-end gap-2">
+                    <div className="flex flex-col items-end gap-1">
+                      <label
+                        htmlFor="inbox-status"
+                        className="text-[11px] font-medium text-muted"
+                      >
+                        {t("inbox.statusLabel")}
+                      </label>
+                      <select
+                        id="inbox-status"
+                        value={selected.status}
+                        disabled={statusSaving}
+                        onChange={(e) =>
+                          void handleStatusChange(
+                            selected.id,
+                            e.target.value as ConversationStatus,
+                          )
+                        }
+                        className="rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-ink disabled:opacity-60"
+                      >
+                        {(["open", "pending", "closed"] as const).map((s) => (
+                          <option key={s} value={s}>
+                            {t(`inbox.status.${s}` as TranslationKey)}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <label
+                        htmlFor="inbox-assignee"
+                        className="text-[11px] font-medium text-muted"
+                      >
+                        {t("inbox.assignment.assignLabel")}
+                      </label>
+                      <select
+                        id="inbox-assignee"
+                        value={selected.assigneeUserId ?? ""}
+                        onChange={(e) =>
+                          void handleAssign(
+                            selected.id,
+                            e.target.value === "" ? null : e.target.value,
+                          )
+                        }
+                        className="max-w-44 rounded-lg border border-line bg-surface px-2 py-1.5 text-xs text-ink"
+                      >
+                        <option value="">
+                          {t("inbox.assignment.unassigned")}
                         </option>
-                      ))}
-                    </select>
-                    {assignError ? (
-                      <span className="text-[11px] text-danger">{assignError}</span>
+                        {members.map((m) => (
+                          <option key={m.userId} value={m.userId}>
+                            {(m.name ?? m.email) +
+                        (m.isSelf ? ` (${t("settings.team.youLabel")})` : "")}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {/*
+                      Fase 16C: tombol AI. Sebelum ini `agentEnabled` hanya
+                      bisa dibaca — nilainya hanya pernah ditulis false oleh
+                      handoff, jadi sekali mati tidak pernah bisa dinyalakan.
+                    */}
+                    <button
+                      type="button"
+                      disabled={agentSaving}
+                      onClick={() =>
+                        void handleAgentToggle(selected.id, !selected.agentEnabled)
+                      }
+                      title={
+                        selected.agentEnabled
+                          ? t("inbox.agent.onHint")
+                          : t("inbox.agent.offHint")
+                      }
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-60 ${
+                        selected.agentEnabled
+                          ? "border-accent/40 bg-accent/10 text-accent"
+                          : "border-line bg-elevated text-muted"
+                      }`}
+                    >
+                      {selected.agentEnabled
+                        ? t("inbox.agent.on")
+                        : t("inbox.agent.off")}
+                    </button>
+                    {assignError || metaError ? (
+                      <span className="w-full text-right text-[11px] text-danger">
+                        {assignError ?? metaError}
+                      </span>
                     ) : null}
                   </div>
                 </div>
@@ -1023,7 +1344,24 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                       </button>
                     </div>
                   ) : (
-                    messages.map((msg) => {
+                    <>
+                      {/* Fase 16C: halaman lebih lama. Sebelum ini hanya
+                          50 pesan terakhir yang bisa dijangkau sama sekali. */}
+                      {hasOlderMessages ? (
+                        <div className="flex justify-center pb-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleLoadOlder()}
+                            disabled={loadingOlder}
+                            className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-muted hover:text-ink disabled:opacity-60"
+                          >
+                            {loadingOlder
+                              ? t("inbox.loadOlderLoading")
+                              : t("inbox.loadOlder")}
+                          </button>
+                        </div>
+                      ) : null}
+                      {messages.map((msg) => {
                       const outbound = msg.direction === "outbound";
                       const highlighted = highlightedId === msg.id;
                       return (
@@ -1136,7 +1474,8 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                           </button>
                         </div>
                       );
-                    })
+                    })}
+                    </>
                   )}
                 </div>
 
@@ -1313,6 +1652,142 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                       </button>
                     </div>
                   ) : null}
+                  {windowClosed ? (
+                    <div className="mb-2 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-xs text-ink">
+                      <p className="font-semibold">
+                        {t("inbox.window.closedTitle")}
+                      </p>
+                      <p className="mt-0.5 text-muted">
+                        {selected?.messagingWindow.lastInboundAt
+                          ? t("inbox.window.closedBody", {
+                              time: formatTime(
+                                selected.messagingWindow.lastInboundAt,
+                                locale,
+                              ),
+                            })
+                          : t("inbox.window.noInboundBody")}
+                      </p>
+                      {!templateOpen ? (
+                        <button
+                          type="button"
+                          onClick={() => void openTemplatePanel()}
+                          className="mt-2 rounded-lg bg-accent px-2.5 py-1 text-[11px] font-semibold text-white"
+                        >
+                          {t("inbox.window.templateButton")}
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  {/* Fase 16C: panel kirim template — jalan keluar dari
+                      banner di atas. Hanya template APPROVED yang
+                      ditawarkan; jumlah input variabel mengikuti
+                      `variableCount` template yang dipilih. */}
+                  {windowClosed && templateOpen ? (
+                    <div className="mb-2 rounded-lg border border-line bg-surface p-3 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <label
+                          htmlFor="inbox-template"
+                          className="text-[11px] font-medium text-muted"
+                        >
+                          {t("inbox.window.templateLabel")}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={closeTemplatePanel}
+                          className="text-[11px] text-muted hover:text-ink"
+                        >
+                          {t("inbox.window.templateCancel")}
+                        </button>
+                      </div>
+                      {templatesLoading ? (
+                        <p className="mt-1 text-muted">{t("common.loading")}</p>
+                      ) : approvedTemplates.length === 0 ? (
+                        <p className="mt-1 text-muted">
+                          {t("inbox.window.templateNone")}
+                        </p>
+                      ) : (
+                        <>
+                          <select
+                            id="inbox-template"
+                            value={templateId}
+                            onChange={(e) => {
+                              const next = approvedTemplates.find(
+                                (tpl) => tpl.id === e.target.value,
+                              );
+                              if (next) selectTemplate(next);
+                              else {
+                                setTemplateId("");
+                                setTemplateParams([]);
+                              }
+                            }}
+                            className="mt-1 w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
+                          >
+                            <option value="">
+                              {t("inbox.window.templatePlaceholder")}
+                            </option>
+                            {approvedTemplates.map((tpl) => (
+                              <option key={tpl.id} value={tpl.id}>
+                                {tpl.name} · {tpl.language}
+                              </option>
+                            ))}
+                          </select>
+                          {selectedTemplate ? (
+                            <div className="mt-2 space-y-1.5">
+                              <p className="text-[11px] text-muted">
+                                {t("inbox.window.templateHint")}
+                              </p>
+                              {selectedTemplate.bodyText ? (
+                                <p className="whitespace-pre-wrap rounded bg-elevated px-2 py-1 text-[11px] text-ink">
+                                  {selectedTemplate.bodyText}
+                                </p>
+                              ) : null}
+                              {Array.from(
+                                { length: selectedTemplate.variableCount },
+                                (_, i) => (
+                                  <input
+                                    key={i}
+                                    value={templateParams[i] ?? ""}
+                                    onChange={(e) =>
+                                      setTemplateParams((prev) => {
+                                        const next = [...prev];
+                                        next[i] = e.target.value;
+                                        return next;
+                                      })
+                                    }
+                                    placeholder={t(
+                                      "inbox.window.templateParamLabel",
+                                      { index: i + 1 },
+                                    )}
+                                    className="w-full rounded-lg border border-line bg-bg px-2 py-1.5 text-xs text-ink"
+                                  />
+                                ),
+                              )}
+                              <button
+                                type="button"
+                                disabled={
+                                  templateSending ||
+                                  templateParams.length !==
+                                    selectedTemplate.variableCount ||
+                                  templateParams.some(
+                                    (value) => value.trim() === "",
+                                  )
+                                }
+                                onClick={() => void handleSendTemplate()}
+                                className="rounded-lg bg-accent px-3 py-1.5 text-[11px] font-semibold text-white disabled:opacity-60"
+                              >
+                                {templateSending
+                                  ? t("inbox.window.templateSending")
+                                  : t("inbox.window.templateSend")}
+                              </button>
+                            </div>
+                          ) : null}
+                        </>
+                      )}
+                      {templatesError ? (
+                        <p className="mt-1 text-danger">{templatesError}</p>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <div className="relative">
                     {pickerOpen ? (
                       <div className="absolute bottom-full left-0 z-10 mb-2 max-h-64 w-full max-w-md overflow-y-auto rounded-xl border border-line bg-surface shadow-lg">
@@ -1358,6 +1833,7 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                   <div className="flex items-end gap-2">
                     <textarea
                       value={draft}
+                      disabled={windowClosed}
                       onChange={(e) => {
                         setDraft(e.target.value);
                         setPickerIndex(0);
@@ -1405,17 +1881,19 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                         }
                       }}
                       placeholder={
-                        selected.isChannel
-                          ? t("inbox.postPlaceholder")
-                          : t("inbox.replyPlaceholder")
+                        windowClosed
+                          ? t("inbox.window.placeholder")
+                          : selected.isChannel
+                            ? t("inbox.postPlaceholder")
+                            : t("inbox.replyPlaceholder")
                       }
                       rows={2}
                       maxLength={4096}
-                      className={`${inputClassName} resize-none`}
+                      className={`${inputClassName} resize-none disabled:opacity-60`}
                     />
                     <button
                       type="submit"
-                      disabled={sending || !draft.trim()}
+                      disabled={sending || !draft.trim() || windowClosed}
                       className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
                     >
                       {sending

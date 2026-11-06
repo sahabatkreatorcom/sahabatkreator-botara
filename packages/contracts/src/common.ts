@@ -108,6 +108,13 @@ export const ErrorCodeSchema = z.enum([
   "API_KEY_REVOKED",
   "API_KEY_SCOPE_DENIED",
   "MESSAGING_WINDOW_CLOSED",
+  // Fase 16C: kirim template dari inbox — provider bukan WhatsApp → 422;
+  // template tidak ada di akun percakapan ini → 404; status belum
+  // APPROVED → 422; jumlah/nilai parameter tidak cocok → 422.
+  "MESSAGE_TEMPLATE_UNSUPPORTED",
+  "MESSAGE_TEMPLATE_NOT_FOUND",
+  "MESSAGE_TEMPLATE_NOT_APPROVED",
+  "MESSAGE_TEMPLATE_PARAMS_INVALID",
   // Fase 13G: janji temu + Google Calendar.
   "APPOINTMENT_TIMEZONE_INVALID",
   "SLOT_TAKEN",

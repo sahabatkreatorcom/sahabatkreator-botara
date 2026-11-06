@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import {
   AssignConversationRequestSchema,
@@ -7,15 +7,22 @@ import {
   ConversationStatusSchema,
   MessageListResponseSchema,
   SendMessageRequestSchema,
+  SendTemplateMessageRequestSchema,
+  SetAgentEnabledRequestSchema,
+  UpdateConversationStatusRequestSchema,
   type ConversationResponse,
 } from "@sahabat-kreator/contracts";
 import {
   assignConversation,
+  computeMessagingWindow,
   listConversations,
-  listMessages,
+  listMessagesPage,
   listProfilePhotoOwnerIds,
   markConversationRead,
   queueOutboundMessage,
+  queueTemplateMessage,
+  setConversationAgentEnabled,
+  setConversationStatus,
   type ConversationWithSummary,
 } from "@sahabat-kreator/core";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
@@ -29,6 +36,10 @@ export function serializeConversation(
   row: ConversationWithSummary,
   contactAvatarUrlValue: string | null = null,
 ): ConversationResponse {
+  // Fase 16C: keadaan jendela pesan bebas dihitung server — UI memakai
+  // ini untuk mematikan kotak balasan LEBIH DULU, bukan menunggu
+  // penolakan provider.
+  const window = computeMessagingWindow(row.provider, row.lastInboundAt);
   return ConversationResponseSchema.parse({
     id: row.id,
     channelAccountId: row.channelAccountId,
@@ -43,6 +54,12 @@ export function serializeConversation(
     assigneeUserId: row.assigneeUserId,
     assigneeName: row.assigneeName,
     agentEnabled: row.agentEnabled,
+    messagingWindow: {
+      enforced: window.enforced,
+      open: window.open,
+      lastInboundAt: window.lastInboundAt?.toISOString() ?? null,
+      expiresAt: window.expiresAt?.toISOString() ?? null,
+    },
     unreadCount: row.unreadCount,
     lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
     lastMessagePreview: row.lastMessagePreview,
@@ -56,18 +73,29 @@ const ListConversationsQuerySchema = z.object({
   status: ConversationStatusSchema.optional(),
   // Fase 9C: filter penugasan — mine (milik user sesi) | unassigned.
   assignment: z.enum(["mine", "unassigned"]).optional(),
+  // Fase 16C: pencarian nama kontak / nomor / judul percakapan.
+  q: z.string().trim().min(1).max(120).optional(),
 });
 
 const ListMessagesQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).default(50),
+  /**
+   * Kursor "muat pesan lebih lama" (Fase 16C): id pesan TERTUA yang sudah
+   * tampil. Kembalian = pesan yang lebih tua darinya.
+   */
+  before: z.string().uuid().optional(),
 });
 
 /**
  * Modul inbox (Fase 1D) — route bersarang di workspace:
- *   GET  /tenants/:tenantId/conversations                 daftar + nama kontak + cuplikan pesan terakhir (?status=, ?assignment=mine|unassigned)
- *   GET  /tenants/:tenantId/conversations/:id/messages    pesan kronologis (?limit=)
- *   POST /tenants/:tenantId/conversations/:id/messages    balasan manual → pesan outbound status `queued`
- *   POST /tenants/:tenantId/conversations/:id/assign      tetapkan/lepas penerima tugas (Fase 9C)
+ *   GET   /tenants/:tenantId/conversations                 daftar + nama kontak + cuplikan pesan terakhir (?status=, ?assignment=mine|unassigned)
+ *   GET   /tenants/:tenantId/conversations/:id/messages    pesan kronologis (?limit=, ?before=<messageId> untuk halaman lebih lama) + `hasMore`
+ *   POST  /tenants/:tenantId/conversations/:id/messages    balasan manual → pesan outbound status `queued`
+ *   POST  /tenants/:tenantId/conversations/:id/assign      tetapkan/lepas penerima tugas (Fase 9C)
+ *   PATCH /tenants/:tenantId/conversations/:id             ubah status kerja open|pending|closed (Fase 16C)
+ *   POST  /tenants/:tenantId/conversations/:id/agent       nyalakan/matikan AI percakapan (Fase 16C)
+ *   POST  /tenants/:tenantId/conversations/:id/template    kirim template WhatsApp (Fase 16C) — satu-satunya
+ *                                                          jalan setelah jendela 24 jam tertutup
  * POST adalah fondasi inbox manual: pesan diantrekan + diaudit
  * (message.queued). Pengiriman sungguhannya: Telegram lewat poller Bot
  * API; webchat sejak Fase 6G lewat apps/realtime — route ini cukup
@@ -88,8 +116,50 @@ export function createInboxRoutes(
     app.get(`${base}/:id/messages`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/messages`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/assign`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:id/template`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.patch(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:id/agent`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
   }
+
+  /**
+   * Ambil ulang satu percakapan lewat jalur DAFTAR lalu serialisasi —
+   * agar bentuk respons mutasi (assign / status / toggle agent) sama
+   * persis dengan item daftar: nama kontak, nama penerima tugas, foto,
+   * dan keadaan jendela pesan. Satu tempat, tiga pemakai.
+   */
+  const respondWithConversation = async (
+    c: Context<{ Variables: AppVariables }>,
+    tenantId: string,
+    id: string,
+  ) => {
+    const rows = await listConversations(
+      bundle.db,
+      { tenantId },
+      { assignmentUserId: c.get("appUser").id },
+    );
+    const updated = rows.find((row) => row.id === id);
+    if (!updated) {
+      // Hanya terjadi bila channel percakapan ini berada di Sampah —
+      // permukaan inbox memang tidak menampilkannya (pola Fase 6I),
+      // jadi bagi inbox percakapan itu tidak ada.
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    const withPhoto = await listProfilePhotoOwnerIds(
+      bundle.db,
+      { tenantId },
+      "contact",
+      [updated.contactId],
+    );
+    return c.json(
+      serializeConversation(
+        updated,
+        withPhoto.has(updated.contactId)
+          ? contactAvatarUrl(tenantId, updated.contactId)
+          : null,
+      ),
+    );
+  };
 
 
   app.get(base, async (c) => {
@@ -103,7 +173,9 @@ export function createInboxRoutes(
       bundle.db,
       { tenantId: tenant.id },
       {
-        ...query.data,
+        status: query.data.status,
+        assignment: query.data.assignment,
+        search: query.data.q,
         assignmentUserId: c.get("appUser").id,
       },
     );
@@ -139,15 +211,35 @@ export function createInboxRoutes(
     if (!query.success) {
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid query parameters");
     }
-    const rows = await listMessages(bundle.db, { tenantId: tenant.id }, id, query.data);
-    if (!rows) return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    const page = await listMessagesPage(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+      query.data,
+    );
+    if (page.kind === "conversation_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    if (page.kind === "invalid_cursor") {
+      // Kursor menunjuk pesan yang bukan milik percakapan ini (mis. utas
+      // baru dibuka, id lama). Menolak terang-terangan lebih baik daripada
+      // menampilkan "sudah sampai awal" yang keliru.
+      return apiError(
+        c,
+        400,
+        "VALIDATION_ERROR",
+        "`before` must be a message id from this conversation",
+      );
+    }
     // Membuka utas dari inbox = membaca: bersihkan unread_count agar chip
     // daftar & badge navigasi konsisten (bug QA-1 — sebelumnya unread
     // tidak pernah turun). Hanya jalur manusia ini; agent membaca riwayat
-    // lewat core langsung dan tidak menandai terbaca.
+    // lewat core langsung dan tidak menandai terbaca. Pemuatan halaman
+    // lama (`before`) tetap dihitung membaca — utasnya sama.
     await markConversationRead(bundle.db, { tenantId: tenant.id }, id);
     const body = MessageListResponseSchema.parse({
-      messages: rows.map(serializeMessage),
+      messages: page.messages.map(serializeMessage),
+      hasMore: page.hasMore,
     });
     return c.json(body);
   });
@@ -188,6 +280,21 @@ export function createInboxRoutes(
         "Reply target must be a message in this conversation",
       );
     }
+    if (result.kind === "messaging_window_closed") {
+      // Fase 16C: WhatsApp menolak pesan bebas di luar 24 jam sejak pesan
+      // masuk terakhir. Kita menolak lebih dulu, dengan waktu yang bisa
+      // ditampilkan UI — bukan membiarkan pengguna menunggu pesan `failed`.
+      return apiError(
+        c,
+        422,
+        "MESSAGING_WINDOW_CLOSED",
+        "The messaging window is closed; send an approved template instead",
+        {
+          lastInboundAt: result.window.lastInboundAt?.toISOString() ?? null,
+          expiresAt: result.window.expiresAt?.toISOString() ?? null,
+        },
+      );
+    }
     const queued = result.message;
 
     // Fase 6G: nudge setelah commit — apps/realtime mem-flush pesan ini
@@ -203,6 +310,85 @@ export function createInboxRoutes(
       });
     }
     return c.json(serializeMessage(queued), 201);
+  });
+
+  /**
+   * Fase 16C: kirim template WhatsApp. Pasangan dari
+   * `MESSAGING_WINDOW_CLOSED` — setelah jendela 24 jam tertutup ini
+   * satu-satunya pesan yang boleh keluar, jadi tanpa endpoint ini
+   * kotak balasan yang dimatikan meninggalkan pengguna tanpa jalan.
+   */
+  app.post(`${base}/:id/template`, async (c) => {
+    const appUser = c.get("appUser");
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), appUser.id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = SendTemplateMessageRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid template payload");
+    }
+    const result = await queueTemplateMessage(
+      bundle.db,
+      { tenantId: tenant.id, userId: appUser.id },
+      id,
+      parsed.data,
+    );
+    if (result.kind === "conversation_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    if (result.kind === "provider_unsupported") {
+      return apiError(
+        c,
+        422,
+        "MESSAGE_TEMPLATE_UNSUPPORTED",
+        "This channel does not use message templates",
+      );
+    }
+    if (result.kind === "template_not_found") {
+      // Template milik WABA lain juga sampai di sini: bagi nomor ini
+      // template itu memang tidak ada.
+      return apiError(
+        c,
+        404,
+        "MESSAGE_TEMPLATE_NOT_FOUND",
+        "Template not found for this channel",
+      );
+    }
+    if (result.kind === "template_not_approved") {
+      return apiError(
+        c,
+        422,
+        "MESSAGE_TEMPLATE_NOT_APPROVED",
+        "Template is not approved by Meta yet",
+        { status: result.status },
+      );
+    }
+    if (result.kind === "template_params_invalid") {
+      return apiError(
+        c,
+        422,
+        "MESSAGE_TEMPLATE_PARAMS_INVALID",
+        "Template variables do not match the template",
+        { expected: result.expected, received: result.received },
+      );
+    }
+    if (publisher) {
+      await publisher.publishNudge({
+        kind: "message.queued",
+        tenantId: tenant.id,
+        conversationId: id,
+      });
+    }
+    return c.json(serializeMessage(result.message), 201);
   });
 
   // Fase 9C: tetapkan / lepas penerima tugas. Semua member boleh
@@ -246,32 +432,71 @@ export function createInboxRoutes(
         "Assignee must be a member of this workspace",
       );
     }
-    const rows = await listConversations(
-      bundle.db,
-      { tenantId: tenant.id },
-      { assignmentUserId: appUser.id },
-    );
-    const updated = rows.find((row) => row.id === id);
-    if (!updated) {
-      // Hanya terjadi bila channel percakapan ini berada di Sampah —
-      // permukaan inbox memang tidak menampilkannya (pola Fase 6I),
-      // jadi bagi inbox percakapan itu tidak ada.
+    return respondWithConversation(c, tenant.id, id);
+  });
+
+  // Fase 16C: ubah status kerja percakapan. Tanpa ini filter `closed` di
+  // daftar selalu kosong dan tidak ada cara menandai pekerjaan selesai.
+  app.patch(`${base}/:id`, async (c) => {
+    const appUser = c.get("appUser");
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), appUser.id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
       return apiError(c, 404, "NOT_FOUND", "Conversation not found");
     }
-    const withPhoto = await listProfilePhotoOwnerIds(
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = UpdateConversationStatusRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid status payload");
+    }
+    const result = await setConversationStatus(
       bundle.db,
-      { tenantId: tenant.id },
-      "contact",
-      [updated.contactId],
+      { tenantId: tenant.id, userId: appUser.id },
+      id,
+      parsed.data.status,
     );
-    return c.json(
-      serializeConversation(
-        updated,
-        withPhoto.has(updated.contactId)
-          ? contactAvatarUrl(tenant.id, updated.contactId)
-          : null,
-      ),
+    if (result.kind === "conversation_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    return respondWithConversation(c, tenant.id, id);
+  });
+
+  // Fase 16C: nyalakan/matikan AI untuk percakapan ini. Satu-satunya
+  // jalan mengembalikan `agent_enabled` ke true setelah handoff.
+  app.post(`${base}/:id/agent`, async (c) => {
+    const appUser = c.get("appUser");
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), appUser.id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = SetAgentEnabledRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid agent payload");
+    }
+    const result = await setConversationAgentEnabled(
+      bundle.db,
+      { tenantId: tenant.id, userId: appUser.id },
+      id,
+      parsed.data.agentEnabled,
     );
+    if (result.kind === "conversation_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
+    return respondWithConversation(c, tenant.id, id);
   });
 
   return app;

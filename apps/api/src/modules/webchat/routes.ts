@@ -8,7 +8,7 @@ import {
 import {
   attributeContactToGrowthLink,
   getWebchatChannelAccountStatus,
-  listMessages,
+  listMessagesPage,
   openWebchatSession,
   recordWebchatInboundMessage,
   resolveWebchatAccountBySiteKey,
@@ -183,15 +183,20 @@ export function createWebchatRoutes(
     if (accountStatus !== "connected") {
       return apiError(c, 409, "CHANNEL_DISCONNECTED", "Channel is disconnected");
     }
-    const rows = await listMessages(
+    const page = await listMessagesPage(
       bundle.db,
       { tenantId: payload.tid },
       payload.cv,
       { limit: 100 },
     );
-    if (!rows) return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    if (page.kind !== "ok") {
+      return apiError(c, 404, "NOT_FOUND", "Conversation not found");
+    }
     const body = MessageListResponseSchema.parse({
-      messages: rows.map(serializeMessage),
+      messages: page.messages.map(serializeMessage),
+      // Widget webchat belum punya tombol "muat lebih lama"; nilainya tetap
+      // dilaporkan apa adanya (Fase 16C) supaya kontraknya tidak berbohong.
+      hasMore: page.hasMore,
     });
     return c.json(body);
   });

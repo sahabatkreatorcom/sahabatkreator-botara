@@ -38,6 +38,7 @@ import type {
   ContactResponse,
   ConversationListResponse,
   ConversationResponse,
+  ConversationStatus,
   ConversationNoteListResponse,
   ConversationNoteResponse,
   InvitationListResponse,
@@ -619,14 +620,16 @@ export const api = {
     },
   },
   conversations: {
-    /** GET /api/tenants/:tenantId/conversations?status=&assignment=mine|unassigned */
+    /** GET /api/tenants/:tenantId/conversations?status=&assignment=mine|unassigned&q= */
     async list(
       tenantId: string,
-      opts?: { status?: string; assignment?: "mine" | "unassigned" },
+      opts?: { status?: string; assignment?: "mine" | "unassigned"; q?: string },
     ): Promise<ConversationResponse[]> {
       const q = new URLSearchParams();
       if (opts?.status) q.set("status", opts.status);
       if (opts?.assignment) q.set("assignment", opts.assignment);
+      // Fase 16C: pencarian nama kontak / nomor / judul percakapan.
+      if (opts?.q) q.set("q", opts.q);
       const qs = q.toString();
       const body = await request<ConversationListResponse>(
         `/api/tenants/${tenantId}/conversations${qs ? `?${qs}` : ""}`,
@@ -650,6 +653,51 @@ export const api = {
           method: "POST",
           body: JSON.stringify({ assigneeUserId }),
         },
+      );
+    },
+    /**
+     * PATCH .../conversations/:id {status} (Fase 16C) → percakapan
+     * terbarui. Status hanya label kerja tim; tidak menyentuh AI.
+     */
+    setStatus(
+      tenantId: string,
+      conversationId: string,
+      status: ConversationStatus,
+    ): Promise<ConversationResponse> {
+      return request<ConversationResponse>(
+        `/api/tenants/${tenantId}/conversations/${conversationId}`,
+        { method: "PATCH", body: JSON.stringify({ status }) },
+      );
+    },
+    /**
+     * POST .../conversations/:id/agent {agentEnabled} (Fase 16C) →
+     * percakapan terbarui. Satu-satunya jalan menyalakan kembali AI
+     * setelah handoff.
+     */
+    setAgentEnabled(
+      tenantId: string,
+      conversationId: string,
+      agentEnabled: boolean,
+    ): Promise<ConversationResponse> {
+      return request<ConversationResponse>(
+        `/api/tenants/${tenantId}/conversations/${conversationId}/agent`,
+        { method: "POST", body: JSON.stringify({ agentEnabled }) },
+      );
+    },
+    /**
+     * POST .../conversations/:id/template {templateId, bodyParams} →
+     * pesan template terantre (Fase 16C). Satu-satunya pesan yang boleh
+     * keluar setelah jendela 24 jam WhatsApp tertutup.
+     */
+    sendTemplate(
+      tenantId: string,
+      conversationId: string,
+      templateId: string,
+      bodyParams: string[],
+    ): Promise<MessageResponse> {
+      return request<MessageResponse>(
+        `/api/tenants/${tenantId}/conversations/${conversationId}/template`,
+        { method: "POST", body: JSON.stringify({ templateId, bodyParams }) },
       );
     },
     /** GET .../conversations/:id/notes → catatan internal (Fase 9C). */
@@ -685,20 +733,25 @@ export const api = {
         { method: "DELETE" },
       );
     },
-    /** GET .../conversations/:id/messages?limit= → pesan kronologis menaik. */
+    /**
+     * GET .../conversations/:id/messages?limit=&before= → satu halaman
+     * pesan kronologis menaik + `hasMore` (Fase 16C). `before` = id pesan
+     * TERTUA yang sudah tampil; kembalian berisi pesan yang lebih tua.
+     */
     async listMessages(
       tenantId: string,
       conversationId: string,
-      opts?: { limit?: number },
-    ): Promise<MessageResponse[]> {
+      opts?: { limit?: number; before?: string },
+    ): Promise<{ messages: MessageResponse[]; hasMore: boolean }> {
       const q = new URLSearchParams();
       if (opts?.limit !== undefined) q.set("limit", String(opts.limit));
+      if (opts?.before !== undefined) q.set("before", opts.before);
       const qs = q.toString();
       const body = await request<MessageListResponse>(
         `/api/tenants/${tenantId}/conversations/${conversationId}/messages${qs ? `?${qs}` : ""}`,
         { method: "GET" },
       );
-      return body.messages;
+      return { messages: body.messages, hasMore: body.hasMore };
     },
     /**
      * POST .../conversations/:id/messages {contentText, replyToMessageId?}

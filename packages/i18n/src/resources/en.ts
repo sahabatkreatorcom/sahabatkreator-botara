@@ -155,6 +155,9 @@ export const en = {
   inbox: {
     title: "Inbox",
     subtitle: "Conversations from the active workspace.",
+    searchPlaceholder: "Search by name, number, or title…",
+    searchEmpty: "No conversations match your search.",
+    filterEmpty: "No conversations in this filter.",
     emptyTitle: "No conversations yet",
     emptyBody: "Conversations will appear here as soon as a channel is connected and someone messages you.",
     loadError: "Could not load conversations.",
@@ -175,6 +178,35 @@ export const en = {
       unassigned: "Unassigned",
       assignLabel: "Assignee",
       assignError: "Could not update the assignment.",
+    },
+    statusLabel: "Status",
+    agent: {
+      on: "AI on",
+      off: "AI off",
+      onHint: "The AI answers automatically. Click to turn it off for this contact.",
+      offHint: "The AI does not answer this contact (usually after a handoff). Click to turn it back on.",
+    },
+    loadOlder: "Load older messages",
+    loadOlderLoading: "Loading…",
+    window: {
+      closedTitle: "The 24-hour WhatsApp window is closed",
+      closedBody:
+        "The contact last wrote {time}. WhatsApp only allows free-form messages within 24 hours of the last inbound message — only approved templates can be sent now.",
+      noInboundBody:
+        "This contact has never sent a message, so the 24-hour window has not opened. WhatsApp only allows free-form messages after the contact writes first; use an approved template.",
+      placeholder: "24-hour window closed — use a template",
+      templateButton: "Send a template",
+      templateHint:
+        "Approved templates are the only messages allowed outside the 24-hour window.",
+      templateLabel: "Template",
+      templatePlaceholder: "Choose an approved template…",
+      templateNone:
+        "No approved templates for this WhatsApp number yet. Create one in Broadcasts → Templates, then sync.",
+      templateParamLabel: "Variable {index}",
+      templateSend: "Send template",
+      templateSending: "Sending…",
+      templateCancel: "Cancel",
+      templateLoadError: "Could not load templates.",
     },
     notes: {
       tabMessages: "Messages",
@@ -2136,6 +2168,11 @@ export const en = {
     LOG_PAYLOAD_TRUNCATED: "The stored payload for this event is incomplete, so it cannot be replayed.",
     MESSAGE_NOT_FAILED: "This message is no longer marked as failed, so it cannot be resent.",
     MESSAGE_REPLY_TARGET_INVALID: "The message you quoted is no longer available in this conversation. Your reply was not sent — pick another message to quote, or send without a quote.",
+    MESSAGE_TEMPLATE_UNSUPPORTED: "This channel does not use message templates. Send a normal reply instead.",
+    MESSAGE_TEMPLATE_NOT_FOUND: "That template is no longer available for this WhatsApp number. Sync templates and pick another one.",
+    MESSAGE_TEMPLATE_NOT_APPROVED: "Meta has not approved this template yet, so it cannot be sent. Check its status in Broadcasts → Templates.",
+    MESSAGE_TEMPLATE_PARAMS_INVALID: "The number of template variables does not match the template. Fill every variable and try again.",
+    MESSAGING_WINDOW_CLOSED: "The 24-hour WhatsApp window is closed: this contact has not written in the last 24 hours. WhatsApp only allows free-form messages inside that window — send an approved template instead.",
     MESSAGE_RETRY_UNSUPPORTED: "This provider does not support resending failed messages.",
     TELEGRAM_TOKEN_INVALID: "Telegram rejected that bot token. Check the token from BotFather and try again.",
     TELEGRAM_BOT_ALREADY_CONNECTED: "This bot is already connected to another workspace. A Telegram bot can only be connected to one workspace — disconnect it there first, then try again.",
