@@ -52,6 +52,8 @@ const CATEGORY_VALUES = [
   "saved_reply",
   "growth_link",
   "kb_document",
+  // Fase 16E: job BullMQ yang menyerah setelah semua percobaan.
+  "job",
 ] as const;
 type CategoryValue = (typeof CATEGORY_VALUES)[number];
 
@@ -76,6 +78,7 @@ const CATEGORY_LABEL_KEYS: Record<CategoryValue, TranslationKey> = {
   saved_reply: "audit.categorySavedReply",
   growth_link: "audit.categoryGrowthLink",
   kb_document: "audit.categoryKbDocument",
+  job: "audit.categoryJob",
 };
 
 /**
@@ -171,6 +174,7 @@ const ACTION_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {
   "team.role_changed": "audit.actionTeamRoleChanged",
   "team.member_removed": "audit.actionTeamMemberRemoved",
   "agent.batched": "audit.actionAgentBatched",
+  "job.failed": "audit.actionJobFailed",
 };
 
 const TARGET_LABEL_KEYS: Partial<Record<string, TranslationKey>> = {

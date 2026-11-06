@@ -283,6 +283,67 @@ mengubahnya menuntut **restart container `db`** (data aman: ada di volume
 `pgdata`). Setelah restart pertama, ekstensinya perlu dibuat sekali:
 `create extension if not exists pg_stat_statements;`
 
+### Kalau automation, flow, atau broadcast berhenti serentak
+
+Semua pipa itu digerakkan **satu relay outbox** di proses `worker`. Sejak
+Fase 16D relay memproses tiap event di savepoint sendiri: satu event rusak
+tidak lagi membatalkan seluruh batch. Event yang gagal `OUTBOX_MAX_ATTEMPTS`
+(5) kali **dikarantina**, bukan diulang selamanya — dan itu satu-satunya
+keadaan yang perlu diperiksa manual:
+
+```sql
+-- event yang menyerah: tidak diproses lagi, tetapi tidak dianggap terkirim
+SELECT id, tenant_id, type, attempts, last_error, created_at
+  FROM outbox_events
+ WHERE dead_lettered_at IS NOT NULL
+ ORDER BY dead_lettered_at DESC
+ LIMIT 20;
+
+-- antrean yang masih menunggu (normal: puluhan, bukan ribuan)
+SELECT count(*) FROM outbox_events
+ WHERE published_at IS NULL AND dead_lettered_at IS NULL;
+```
+
+`last_error` memuat sebabnya (dipotong ±500 karakter) — bukan hanya "ada
+yang gagal". Untuk mencoba ulang satu event setelah penyebabnya diperbaiki:
+
+```sql
+UPDATE outbox_events
+   SET attempts = 0, last_error = NULL, dead_lettered_at = NULL
+ WHERE id = '<id>';
+```
+
+Relay mengambilnya lagi pada siklus berikutnya (interval 2 detik). Log
+worker menandai karantina dengan awalan `outbox DEAD-LETTER id=...`, jadi
+`grep DEAD-LETTER` pada `docker compose logs worker` cukup untuk melihat
+riwayatnya.
+
+**Yang TIDAK boleh dilakukan:** menghapus baris `outbox_events` yang
+`published_at IS NULL` untuk "membersihkan" antrean. Baris itu adalah satu-
+satunya bukti bahwa sebuah automation/pesan seharusnya terjadi.
+
+### Kalau satu pelanggan berhenti di tengah alur / tidak dibalas AI
+
+Event outbox hanya menaruh job di BullMQ. Job punya `attempts: 3` dengan
+backoff eksponensial; bila ketiganya gagal, BullMQ berhenti dan job itu
+hilang dari pandangan. Sejak Fase 16E kegagalan **permanen** meninggalkan
+baris audit `job.failed` (actor `system`, actor_id = nama job) berisi
+`jobId`, `attempts`, dan pesan error terpotong:
+
+**Audit → kategori "Background job"**, atau:
+
+```sql
+SELECT created_at, actor_id, meta
+  FROM audit_logs
+ WHERE action = 'job.failed'
+ ORDER BY created_at DESC
+ LIMIT 20;
+```
+
+Perhatikan bedanya: `failed` pada BullMQ berbunyi di SETIAP percobaan,
+termasuk yang akhirnya berhasil. Yang dicatat ke audit hanya yang
+MENYERAH — jadi daftar ini tidak berisi kegagalan yang sudah pulih.
+
 ### Kalau channel Meta tidak menerima pesan
 
 Channel tampil "terhubung", token valid, dan webhook aplikasi benar — tetapi

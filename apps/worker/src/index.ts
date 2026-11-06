@@ -21,6 +21,7 @@ import {
   pruneIntegrationLogs,
   purgeExpiredTrashedChannels,
   reconcileBroadcasts,
+  recordPermanentJobFailure,
   relayUnpublishedOutboxEvents,
   resolveEmbeddingProvider,
   resolveOpenRouterConfig,
@@ -679,6 +680,28 @@ const bullWorker = new Worker<MainJobData>(
 
 bullWorker.on("failed", (job, err) => {
   console.error(`[worker] job ${job?.id} gagal:`, err);
+  // Fase 16E: `failed` berbunyi pada SETIAP percobaan, jadi tanpa
+  // pemeriksaan ini "gagal 1x lalu berhasil" dan "menyerah setelah 3x"
+  // terlihat sama di log. Hanya yang terakhir yang ditinggalkan sebagai
+  // jejak audit — itu yang perlu ditindaklanjuti.
+  if (!job) return;
+  const maxAttempts = job.opts.attempts ?? 1;
+  if (job.attemptsMade < maxAttempts) return;
+  const tenantId = (job.data as { tenantId?: unknown } | undefined)?.tenantId;
+  if (typeof tenantId !== "string") return;
+  void recordPermanentJobFailure(db, {
+    tenantId,
+    jobName: job.name,
+    jobId: String(job.id ?? ""),
+    attempts: job.attemptsMade,
+    error: err,
+  }).then((saved) => {
+    if (!saved) {
+      console.error(
+        `[worker] jejak audit job ${job.id} (${job.name}) gagal disimpan — hanya ada log di atas`,
+      );
+    }
+  });
 });
 bullWorker.on("error", (err) => {
   console.error("[worker] bullmq worker error:", err);
@@ -693,7 +716,7 @@ async function relayTick(): Promise<void> {
   if (relayRunning) return;
   relayRunning = true;
   try {
-    const processed = await relayUnpublishedOutboxEvents(db, async (_tx, event) => {
+    const relay = await relayUnpublishedOutboxEvents(db, async (_tx, event) => {
       if (!event.tenantId) return;
       // Fase 2C: langkah sequence jatuh tempo → job BullMQ TERTUNDA.
       // Titik mulai delay digeser ke saat event ter-relay (±2 dtk dari
@@ -898,11 +921,24 @@ async function relayTick(): Promise<void> {
         outboxEventId: event.id,
       });
     });
-    if (processed > 0) {
-      console.log(`[worker] outbox relay: ${processed} event ter-publish`);
+    // Fase 16D: event yang menyerah dikarantina, bukan diulang selamanya.
+    // Satu baris per event dengan id-nya supaya operator bisa langsung
+    // menelusuri (`SELECT * FROM outbox_events WHERE id = ...`) — bukan
+    // hanya "ada yang gagal" tanpa alamat.
+    for (const dead of relay.deadLettered) {
+      console.error(
+        `[worker] outbox DEAD-LETTER id=${dead.id} type=${dead.type} ` +
+          `tenant=${dead.tenantId ?? "-"} attempts=${dead.attempts} error=${dead.error}`,
+      );
+    }
+    if (relay.relayed > 0) {
+      console.log(`[worker] outbox relay: ${relay.relayed} event ter-publish`);
     }
   } catch (err) {
-    // Seluruh siklus rollback di core; event tetap unpublished & dicoba lagi.
+    // Hanya kegagalan TINGKAT TRANSAKSI sampai di sini (koneksi DB putus,
+    // lock timeout). Kegagalan per handler sudah ditangani di dalam core
+    // lewat savepoint per event, jadi satu event rusak tidak lagi
+    // menggagalkan seluruh siklus.
     console.error("[worker] outbox relay gagal (akan dicoba lagi):", err);
   } finally {
     relayRunning = false;

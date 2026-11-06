@@ -146,9 +146,17 @@ export {
   type InstantiateAutomationTemplateResult,
 } from "./automations";
 export {
+  JOB_FAILED_ACTION,
+  recordPermanentJobFailure,
+  type RecordPermanentJobFailureInput,
+} from "./job-failures";
+export {
+  OUTBOX_MAX_ATTEMPTS,
   relayUnpublishedOutboxEvents,
   type UnpublishedOutboxEvent,
   type OutboxRelayHandler,
+  type OutboxDeadLetter,
+  type OutboxRelayResult,
 } from "./outbox";
 export {
   createAgent,

@@ -88,7 +88,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 
 | Fitur | Status | Bukti |
 |---|---|---|
-| Multi-tenant RLS | ✅ | 76 policy, `db verify` |
+| Multi-tenant RLS | ✅ | 77 policy, `db verify` |
 | Tim & undangan (email Resend) | ✅ | `modules/team`, `invitations` |
 | API publik `/v1` + API key ber-scope | ✅ | `modules/public-v1` |
 | SDK TypeScript | ✅ | `packages/sdk`, `verify:sdk` |
@@ -96,6 +96,8 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | MCP server | ✅ | `apps/mcp-server` |
 | Panel admin platform | ✅ | `modules/admin`, `AdminPage` |
 | Audit log & integration log | ✅ | `audit_logs`, `integration_log` |
+| Relay outbox: isolasi per event + karantina | ✅ | `outbox.ts` (`OUTBOX_MAX_ATTEMPTS`), `outbox.test.ts` |
+| Jejak job latar yang menyerah | ✅ | `job-failures.ts`, audit `job.failed`, kategori "Background job" |
 | Analytics & dashboard | ✅ | `modules/analytics`, `modules/dashboard` |
 | i18n id/en | ✅ | `packages/i18n` |
 | Rate limit in-app | ⚠️ | fallback in-memory bila Redis mati (salah untuk multi-replika) |
@@ -107,8 +109,8 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 |---|---|---|
 | Typecheck seluruh paket | ✅ | `pnpm typecheck` |
 | ESLint | ✅ | `pnpm lint` (0 error, 20 warning) |
-| Unit test (RLS, kontrak, jobId, webhook) | ✅ | `pnpm test` (19 test) |
-| Verifikasi migrasi + RLS penuh | ✅ | `pnpm --filter db verify` (42 seksi) |
+| Unit test (RLS, kontrak, jobId, webhook) | ✅ | `pnpm test` (186 test, 18 file) |
+| Verifikasi migrasi + RLS penuh | ✅ | `pnpm --filter db verify` (44 seksi) |
 | CI | ✅ | `.github/workflows/ci.yml` |
 | Deploy Docker | ✅ | `Dockerfile`, `deploy/` |
 | E2E browser (Playwright) | ❌ | belum ada |

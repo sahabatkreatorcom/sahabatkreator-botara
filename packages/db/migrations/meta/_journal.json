@@ -36,6 +36,13 @@
       "when": 1793870118800,
       "tag": "0004_whatsapp_waba_lookup",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793870118801,
+      "tag": "0005_outbox_dead_letter",
+      "breakpoints": true
     }
   ]
 }

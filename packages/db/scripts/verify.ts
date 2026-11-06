@@ -3256,5 +3256,48 @@ console.log(
   "[43] Fase 10B: kolom whatsapp_templates.status_reason ada; lengan whatsapp_waba_lookup hanya membuka akun WhatsApp milik WABA yang di-set (fail-closed, provider lain tidak ikut): OK",
 );
 
+// ---------- 44. Outbox: hitungan percobaan + karantina (Fase 16D) ----------
+// Migrasi 0005. Yang dijaga di sini adalah BENTUK skema: relay memakai
+// `attempts` untuk berhenti mengulang dan `dead_lettered_at` untuk
+// mengeluarkan event rusak dari pemindaian tanpa mengakuinya published.
+// Perilaku relay-nya sendiri diuji di packages/core/src/outbox.test.ts.
+const OUTBOX_COLS = await db.query<{ column_name: string; column_default: string | null }>(
+  `SELECT column_name, column_default FROM information_schema.columns
+    WHERE table_name = 'outbox_events'
+      AND column_name IN ('attempts', 'last_error', 'dead_lettered_at')
+    ORDER BY column_name`,
+);
+assert.deepEqual(
+  OUTBOX_COLS.rows.map((r) => r.column_name),
+  ["attempts", "dead_lettered_at", "last_error"],
+);
+// Default 0 penting: baris lama (yang ditulis sebelum migrasi) harus
+// dianggap belum pernah gagal, bukan NULL yang membuat perbandingan
+// `attempts >= batas` menjadi false selamanya.
+assert.ok(OUTBOX_COLS.rows[0]!.column_default?.includes("0"));
+
+const OUTBOX_IDX = await db.query(
+  `SELECT 1 FROM pg_indexes
+    WHERE tablename = 'outbox_events' AND indexname = 'outbox_events_pending_idx'`,
+);
+assert.equal(OUTBOX_IDX.rows.length, 1);
+
+const outboxDefaults = await db.query<{
+  attempts: number;
+  last_error: string | null;
+  dead_lettered_at: Date | null;
+}>(
+  `INSERT INTO outbox_events (tenant_id, type, payload)
+   VALUES ($1, 'verify.outbox', '{}'::jsonb)
+   RETURNING attempts, last_error, dead_lettered_at`,
+  [TENANT_A],
+);
+assert.equal(Number(outboxDefaults.rows[0]!.attempts), 0);
+assert.equal(outboxDefaults.rows[0]!.last_error, null);
+assert.equal(outboxDefaults.rows[0]!.dead_lettered_at, null);
+console.log(
+  "[44] Fase 16D: kolom outbox_events.attempts (default 0)/last_error/dead_lettered_at ada + index parsial outbox_events_pending_idx terpasang: OK",
+);
+
 await db.close();
 console.log("db verify (PGlite): SEMUA LULUS");

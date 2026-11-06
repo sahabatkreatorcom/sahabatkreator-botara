@@ -1,10 +1,12 @@
 import {
   boolean,
   index,
+  integer,
   jsonb,
   numeric,
   pgEnum,
   pgTable,
+  text,
   timestamp,
   uniqueIndex,
   uuid,
@@ -75,6 +77,20 @@ export const outboxEvents = pgTable(
     payload: jsonb("payload").notNull().default({}),
     /** NULL = belum di-publish oleh relay. */
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    /**
+     * Berapa kali handler untuk event ini melempar (migrasi 0005). Relay
+     * memakai ini untuk berhenti mengulang selamanya: satu event yang
+     * selalu gagal tidak boleh menahan seluruh antrean.
+     */
+    attempts: integer("attempts").notNull().default(0),
+    /** Pesan error terakhir dari handler (dipotong ±500 karakter). */
+    lastError: text("last_error"),
+    /**
+     * Diisi saat relay MENYERAH setelah `OUTBOX_MAX_ATTEMPTS`. Baris
+     * ber-isi tidak dipindai lagi, tetapi tetap ada sebagai bukti untuk
+     * operator — bukan dihapus, bukan dianggap published.
+     */
+    deadLetteredAt: timestamp("dead_lettered_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
