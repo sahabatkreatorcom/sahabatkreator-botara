@@ -1,5 +1,9 @@
 import { Worker } from "bullmq";
-import { loadEnv, META_GRAPH_API_VERSION } from "@sahabat-kreator/config";
+import {
+  loadEnv,
+  META_GRAPH_API_VERSION,
+  resolveMediaStorageRoot,
+} from "@sahabat-kreator/config";
 import { createDb } from "@sahabat-kreator/db";
 import {
   createLlmProvider,
@@ -33,6 +37,7 @@ import {
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
 import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
+import { startMediaIngestLoop } from "./media-ingest";
 import {
   startMetaDeliveryPoller,
   startTelegramDeliveryPoller,
@@ -1104,6 +1109,8 @@ void tokenLifecycleTick();
 // Interval 2 detik dipertahankan persis seperti sebelumnya: latensi
 // balasan dashboard tidak boleh berubah hanya karena prosesnya pindah.
 const DELIVERY_POLL_INTERVAL_MS = 2_000;
+/** Interval ingest media masuk — tidak ada SLA, 5 dtk cukup. */
+const MEDIA_INGEST_INTERVAL_MS = 5_000;
 const deliveryPollers: DeliveryPoller[] = [
   startTelegramDeliveryPoller(
     db,
@@ -1126,6 +1133,21 @@ const deliveryPollers: DeliveryPoller[] = [
   ),
 ];
 
+// Ingest media MASUK (Fase 18). Bukan poller pengiriman: yang dipindai
+// adalah pesan yang sudah tercatat tetapi berkasnya belum diunduh.
+// Interval lebih longgar (5 dtk) karena tidak ada SLA balasan yang
+// bergantung padanya — yang penting berkasnya akhirnya ada.
+const mediaIngestLoop = startMediaIngestLoop(
+  db,
+  {
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    metaApiBase: env.META_API_BASE,
+    graphApiVersion: META_GRAPH_API_VERSION,
+    storageRoot: resolveMediaStorageRoot(env.MEDIA_STORAGE_ROOT),
+  },
+  MEDIA_INGEST_INTERVAL_MS,
+);
+
 console.log(
   `[worker] Sahabat Kreator worker aktif — antrean "${MAIN_QUEUE_NAME}", relay outbox tiap ${RELAY_INTERVAL_MS}ms`,
 );
@@ -1147,6 +1169,11 @@ async function shutdown(signal: string): Promise<void> {
   // tick aktif dibiarkan selesai (penjaga `running` di runner membuat
   // tidak ada tick baru yang dimulai).
   for (const poller of deliveryPollers) poller.stop();
+  // Sama alasannya dengan poller: siklus ingest media memakai `db`, jadi
+  // timer-nya dihentikan sebelum pool ditutup. Berkas yang belum
+  // terunduh tidak hilang — barisnya tetap menunggu dan diambil lagi
+  // saat worker hidup kembali.
+  mediaIngestLoop.stop();
   await bullWorker.close();
   await queue.close();
   realtimePublisher.close();

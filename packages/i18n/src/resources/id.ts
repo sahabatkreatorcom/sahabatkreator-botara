@@ -226,6 +226,8 @@ export const id: Resources = {
       formerMember: "Mantan anggota",
     },
     mediaMessage: "Pesan media",
+    mediaImageAlt: "Gambar yang dikirim di percakapan ini",
+    mediaDownload: "Unduh lampiran",
     groupLabel: "Grup",
     channelLabel: "Kanal",
     postButton: "Posting ke channel",

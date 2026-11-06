@@ -15,6 +15,7 @@ import {
   R2_ENDPOINT,
   createLogger,
   loadEnv,
+  resolveMediaStorageRoot,
   resolveR2Bucket,
 } from "@sahabat-kreator/config";
 import { createAuthBundle, type AuthBundle } from "./auth";
@@ -46,6 +47,7 @@ import { createTelegramRoutes } from "./modules/telegram/routes";
 import { createMetaRoutes } from "./modules/meta/routes";
 import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
+import { createMediaRoutes } from "./modules/media/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
 import { createLogsRoutes } from "./modules/logs/routes";
 import { createAuditRoutes } from "./modules/audit/routes";
@@ -66,6 +68,7 @@ import {
   type RealtimePublisher,
 } from "@sahabat-kreator/queue";
 import {
+  createDiskMediaStore,
   getProviderSecret,
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
@@ -377,6 +380,16 @@ routes.route(
 // /tenants/:tenantId/avatars/... (di balik sesi + membership; URL file
 // provider yang bertoken tidak pernah diedarkan).
 routes.route("/", createAvatarsRoutes(authBundle));
+// Modul media (Fase 18) — penyajian berkas yang dikirim pelanggan
+// /tenants/:tenantId/media/:mediaId (sesi + membership; bucket tetap
+// privat, key objek tidak pernah diedarkan).
+routes.route(
+  "/",
+  createMediaRoutes(
+    authBundle,
+    createDiskMediaStore(resolveMediaStorageRoot(env.MEDIA_STORAGE_ROOT)),
+  ),
+);
 // Modul automations (Fase 2A) — manajemen automation keyword /tenants/:tenantId/automations.
 routes.route("/", createAutomationsRoutes(authBundle));
 // Modul agents & knowledge (Fase 3A) — agent AI + KB + draf saran.

@@ -195,6 +195,19 @@ function fallbackCodeForStatus(status: number): string {
 }
 
 /**
+ * URL penyajian media (Fase 18).
+ *
+ * Sengaja BUKAN `fetch` ber-header: gambar/audio/video dipasang langsung
+ * pada `src`, dan elemen itu tidak bisa membawa header Authorization.
+ * Sesi dashboard berupa cookie httpOnly pada origin yang sama (proxy
+ * `/api`), jadi permintaan media ikut terautentikasi tanpa tambahan apa
+ * pun — dan server tetap memeriksa keanggotaan workspace per tenant.
+ */
+export function mediaUrl(tenantId: string, mediaId: string): string {
+  return `/api/tenants/${tenantId}/media/${mediaId}`;
+}
+
+/**
  * Event global saat server menjawab 401 (sesi kedaluwarsa / dicabut).
  * AuthProvider mendengarkannya lalu menyegarkan sesi — pengguna langsung
  * dialihkan ke /login alih-alih melihat error per halaman.

@@ -178,6 +178,19 @@ const EnvSchema = z.object({
   /** Override nama bucket R2; default diturunkan dari NODE_ENV (lihat R2_BUCKET_NAMES). */
   R2_BUCKET: z.string().min(1).optional(),
   /**
+   * Akar penyimpanan media di disk (Fase 18).
+   *
+   * Dipakai saat bucket R2 belum dipakai untuk media: berkas masuk
+   * (foto/dokumen dari pelanggan) dan kelak lampiran keluar disimpan
+   * sebagai berkas biasa di bawah direktori ini, dengan key
+   * `tenants/{tenantId}/media/{yyyy-mm}/{uuid}`.
+   *
+   * WAJIB berupa volume yang bertahan antar-deploy. Di container tanpa
+   * volume, media hilang setiap kali proses diganti — pesan tetap ada
+   * tetapi gambarnya menjadi tautan mati. Lihat docs/PRODUCTION.md.
+   */
+  MEDIA_STORAGE_ROOT: z.string().min(1).optional(),
+  /**
    * Email transaksional via Resend (keputusan user 2026-11-02; Fase 11B)
    * — FALLBACK env saja; sumber utama adalah Panel Admin (kunci
    * `resend_api_key` / `resend_from_email` / `resend_from_name` di
@@ -245,6 +258,19 @@ export const R2_BUCKET_NAMES = {
  */
 export function resolveR2Bucket(override?: string): string {
   return override || R2_BUCKET_NAMES.staging;
+}
+
+/**
+ * Akar penyimpanan media di disk (Fase 18).
+ *
+ * Satu fungsi dipakai API (menyajikan) DAN worker (menulis) supaya
+ * keduanya tidak bisa menunjuk direktori berbeda — kalau itu terjadi,
+ * media tersimpan tetapi tidak pernah bisa ditampilkan, tanpa error.
+ * Default relatif terhadap `cwd` proses, yang di deployment mana pun
+ * adalah akar aplikasi.
+ */
+export function resolveMediaStorageRoot(override?: string): string {
+  return override || ".data/media";
 }
 
 export type Env = z.infer<typeof EnvSchema>;

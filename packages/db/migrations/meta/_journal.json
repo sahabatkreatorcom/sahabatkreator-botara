@@ -43,6 +43,13 @@
       "when": 1793870118801,
       "tag": "0005_outbox_dead_letter",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793870118802,
+      "tag": "0006_message_media_ingest",
+      "breakpoints": true
     }
   ]
 }

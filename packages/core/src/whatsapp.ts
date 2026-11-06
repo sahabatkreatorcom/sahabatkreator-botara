@@ -332,6 +332,17 @@ export interface RecordWhatsAppInboundInput {
   type: Message["type"];
   /** Isi teks; untuk media = caption bila ada, selain itu null. */
   text: string | null;
+  /**
+   * Referensi media provider (Fase 18). Disimpan di baris pesan, BUKAN
+   * diunduh di sini: unduhan terjadi di worker (`ingestMessageMedia`)
+   * karena webhook harus di-ack cepat. Null untuk pesan teks atau bila
+   * payload tidak membawa media id.
+   */
+  media?: {
+    id: string;
+    mimeType: string | null;
+    fileName: string | null;
+  } | null;
 }
 
 /**
@@ -474,6 +485,12 @@ export async function recordWhatsAppInboundMessage(
         senderType: "contact",
         type: input.type,
         contentText: input.text,
+        // Fase 18: simpan referensi media supaya worker bisa mengunduh
+        // nanti. Tanpa ini media id hilang bersama request dan berkas
+        // pelanggan tidak bisa diambil lagi (URL Meta hanya ±5 menit).
+        providerMediaId: input.media?.id ?? null,
+        providerMediaMime: input.media?.mimeType ?? null,
+        providerMediaFileName: input.media?.fileName ?? null,
         providerMessageId: compositeId,
         replyToMessageId,
         status: "received",

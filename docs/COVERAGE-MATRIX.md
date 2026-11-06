@@ -38,7 +38,9 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Jendela 24 jam WhatsApp (tolak teks bebas di luar jendela) | ✅ | `computeMessagingWindow`, `MESSAGING_WINDOW_CLOSED` |
 | Kirim template WhatsApp dari inbox (jalan keluar jendela tertutup) | ✅ | `queueTemplateMessage`, `POST …/template` |
 | Parameter template per komponen (header teks + tombol URL) | ✅ | `deriveTemplateParamSpec`, `sendTemplateMessage`, panel inbox |
-| Header media (gambar/video/dokumen) pada template | ❌ | ditolak dengan `MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` — belum ada unggahan media |
+| Media masuk (foto/audio/video/dokumen dari pelanggan) | ✅ | `whatsAppMediaRef` → `provider_media_id` → `ingestMessageMedia` (worker) → `GET /tenants/:id/media/:mediaId` |
+| Kirim media keluar (lampiran dari inbox) | ❌ | belum ada unggahan dari klien; kanal baru punya `sendTextMessage`/`sendTemplateMessage` |
+| Header media (gambar/video/dokumen) pada template | ❌ | ditolak dengan `MESSAGE_TEMPLATE_MEDIA_HEADER_UNSUPPORTED` — menunggu kirim media keluar |
 | Paginasi pesan lama (`before` + `hasMore`) | ✅ | `listMessagesPage` |
 
 ## Otomasi

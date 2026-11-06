@@ -200,6 +200,38 @@ Keputusan yang mengikat:
   yang hilang dipulihkan dari `outbox_events` yang belum terbit.
 - Media di R2 mengikuti retensi bucket.
 
+### Media pelanggan (Fase 18)
+
+Foto, audio, video, dan dokumen yang dikirim pelanggan **disimpan di
+disk** pada `MEDIA_STORAGE_ROOT` (default `.data/media`, relatif terhadap
+`cwd` proses). Worker menulis, API menyajikan — keduanya WAJIB menunjuk
+direktori yang sama, dan `resolveMediaStorageRoot` dipakai oleh keduanya
+supaya tidak bisa menyimpang. Kalau menyimpang, berkasnya tersimpan
+tetapi tidak pernah bisa ditampilkan, tanpa satu pun error.
+
+**Wajib:** arahkan `MEDIA_STORAGE_ROOT` ke volume yang bertahan
+antar-deploy. Di container tanpa volume, setiap penggantian proses
+membuat semua media lama menjadi tautan mati (pesan tetap ada,
+gambarnya tidak). Ini juga berarti:
+
+- direktori ini harus ikut dibackup bila media dianggap data, dan
+- `media` (tabel) menunjuk object key; memulihkan DB tanpa memulihkan
+  direktori ini menghasilkan 404 "Media object missing" untuk berkas
+  lama — sengaja dibedakan dari 404 biasa supaya kelihatan.
+
+Bucket R2 sudah terkonfigurasi tetapi BELUM dipakai untuk media: adapter
+S3-nya belum ditulis karena tidak bisa diuji terhadap bucket sungguhan di
+lingkungan build. `MediaObjectStore` adalah slotnya — mengganti disk
+dengan R2 tidak menyentuh domain, route, maupun UI.
+
+Batas unduhan 25 MB (plafon Meta: 16 MB media, 100 MB dokumen). Berkas
+di atas batas TIDAK dibuang diam-diam: alasannya dicatat di
+`messages.media_ingest_error`, dan setelah 5 percobaan barisnya berhenti
+dipindai. Percobaan diberi jarak 5 menit (`MEDIA_INGEST_RETRY_BACKOFF_MS`),
+jadi jatah itu menutupi gangguan ±25 menit — tanpa jarak, siklus 5 detik
+akan menghabiskannya dalam 25 detik dan satu gangguan sesaat membuat
+media hilang permanen.
+
 Retensi default: 7 dump harian + 28 hari cadangan mingguan di VPS, 30 hari
 di R2. Retensi lokal dijalankan **sesudah** backup baru sukses, sehingga
 kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.

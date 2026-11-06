@@ -31,6 +31,25 @@ export {
   type MessagingWindowState,
 } from "./messaging-window";
 export {
+  buildMediaObjectKey,
+  createDiskMediaStore,
+  createMemoryMediaStore,
+  extensionFor,
+  mediaChecksum,
+  type MediaObjectStore,
+} from "./media-storage";
+export {
+  MEDIA_INGEST_MAX_ATTEMPTS,
+  getMediaForServing,
+  ingestMessageMedia,
+  listPendingMediaIngestions,
+  runMediaIngestCycle,
+  type MediaIngestCycleResult,
+  type MediaIngestDeps,
+  type MediaIngestOutcome,
+  type PendingMediaIngestion,
+} from "./media";
+export {
   createContact,
   listContacts,
   getContact,

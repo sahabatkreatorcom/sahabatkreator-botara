@@ -31,6 +31,11 @@ coverage/
 # sandbox yang membatasi kedua lokasi itu).
 .tmp-vitest/
 
+# Media yang diunggah/diunduh (Fase 18). Default MEDIA_STORAGE_ROOT.
+# Isinya berkas pelanggan — tidak boleh masuk repo, dan tidak boleh
+# ikut tersalin ke build.
+/.data/
+
 # Berkas OS / editor
 .DS_Store
 Thumbs.db

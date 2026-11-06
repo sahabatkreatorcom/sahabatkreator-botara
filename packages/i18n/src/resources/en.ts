@@ -227,6 +227,8 @@ export const en = {
       formerMember: "Former member",
     },
     mediaMessage: "Media message",
+    mediaImageAlt: "Image sent in this conversation",
+    mediaDownload: "Download attachment",
     groupLabel: "Group",
     channelLabel: "Channel",
     postButton: "Post to channel",

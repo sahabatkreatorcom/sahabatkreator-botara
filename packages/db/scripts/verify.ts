@@ -3299,5 +3299,95 @@ console.log(
   "[44] Fase 16D: kolom outbox_events.attempts (default 0)/last_error/dead_lettered_at ada + index parsial outbox_events_pending_idx terpasang: OK",
 );
 
+// ---------- 45. Media masuk: referensi provider + pindai ingest (Fase 18) ----------
+// Migrasi 0006. Yang dijaga BENTUK skema dan AKSESNYA: ingest media
+// berjalan di worker dengan pindai lintas tenant (policy
+// meta_delivery_scan), sementara isolasi tenant tetap utuh untuk semua
+// pembacaan biasa. Perilaku ingest-nya diuji di
+// packages/core/src/media-ingest.test.ts.
+const MEDIA_COLS = await db.query<{ column_name: string; column_default: string | null }>(
+  `SELECT column_name, column_default FROM information_schema.columns
+    WHERE table_name = 'messages'
+      AND column_name IN (
+        'provider_media_id', 'provider_media_mime',
+        'provider_media_file_name', 'media_ingest_attempts', 'media_ingest_error',
+        'media_ingest_attempted_at'
+      )
+    ORDER BY column_name`,
+);
+assert.deepEqual(
+  MEDIA_COLS.rows.map((r) => r.column_name),
+  [
+    "media_ingest_attempted_at",
+    "media_ingest_attempts",
+    "media_ingest_error",
+    "provider_media_file_name",
+    "provider_media_id",
+    "provider_media_mime",
+  ],
+);
+// Default 0 penting: baris lama dianggap belum pernah dicoba, bukan NULL
+// yang membuat `attempts < batas` selalu false (media tidak pernah dicoba).
+const attemptsDefault = MEDIA_COLS.rows.find(
+  (r) => r.column_name === "media_ingest_attempts",
+);
+assert.ok(attemptsDefault?.column_default?.includes("0"));
+
+const MEDIA_IDX = await db.query(
+  `SELECT 1 FROM pg_indexes
+    WHERE tablename = 'messages' AND indexname = 'messages_pending_media_idx'`,
+);
+assert.equal(MEDIA_IDX.rows.length, 1);
+
+const MEDIA_CONV = "7a000000-0000-4000-8000-000000000045";
+const MEDIA_MSG = "7b000000-0000-4000-8000-000000000045";
+await db.query(
+  `INSERT INTO conversations (id, tenant_id, channel_account_id, contact_id, provider)
+   VALUES ($1, $2, $3, $4, 'webchat')`,
+  [MEDIA_CONV, TENANT_A, chanA.rows[0].id, CONTACT_A],
+);
+await db.query(
+  `INSERT INTO messages
+     (id, tenant_id, conversation_id, direction, sender_type, type, content_text,
+      provider_media_id, provider_media_mime, provider_media_file_name, status)
+   VALUES ($1, $2, $3, 'inbound', 'contact', 'image', 'foto rusak',
+           'media-verif', 'image/jpeg', 'foto.jpg', 'received')`,
+  [MEDIA_MSG, TENANT_A, MEDIA_CONV],
+);
+
+const mediaScan = await db.transaction(async (tx) => {
+  await tx.query(`SET LOCAL ROLE app_user`);
+  // Tanpa konteks apa pun: tertutup sepenuhnya.
+  const noCtx = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM messages WHERE provider_media_id = 'media-verif'`,
+  );
+  // Konteks tenant B: baris milik A tidak boleh terlihat.
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_B]);
+  const otherTenant = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM messages WHERE provider_media_id = 'media-verif'`,
+  );
+  // Konteks pemilik: terlihat.
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_A]);
+  const owner = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM messages WHERE provider_media_id = 'media-verif'`,
+  );
+  // Lengan pindai ingest: worker melihat baris ini lintas tenant.
+  await tx.query(`SELECT set_config('app.tenant_id', '', true)`);
+  await tx.query(`SELECT set_config('app.system_delivery', 'whatsapp', true)`);
+  const relay = await tx.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM messages WHERE provider_media_id = 'media-verif'`,
+  );
+  return { noCtx, otherTenant, owner, relay };
+});
+assert.equal(mediaScan.noCtx.rows[0].n, "0");
+assert.equal(mediaScan.otherTenant.rows[0].n, "0");
+assert.equal(mediaScan.owner.rows[0].n, "1");
+// Inti Fase 18: tanpa lengan ini, worker tidak akan pernah melihat media
+// yang menunggu diunduh — berkasnya hilang tanpa satu pun error.
+assert.equal(mediaScan.relay.rows[0].n, "1");
+console.log(
+  "[45] Fase 18: kolom media masuk (provider_media_id/mime/file_name + media_ingest_attempts default 0) ada, index parsial messages_pending_media_idx terpasang; isolasi tenant utuh dan lengan pindai ingest membuka tepat baris yang menunggu: OK",
+);
+
 await db.close();
 console.log("db verify (PGlite): SEMUA LULUS");

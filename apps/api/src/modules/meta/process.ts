@@ -530,6 +530,10 @@ async function handleWhatsAppWebhook(
           replyToProviderMessageId: message.replyToProviderMessageId,
           type: message.type,
           text: message.text,
+          // Fase 18: media id + mime + nama berkas diteruskan ke core.
+          // Unduhannya TIDAK dilakukan di sini (webhook harus ack cepat);
+          // worker yang mengambilnya lewat `ingestMessageMedia`.
+          media: message.media,
         });
       } catch (err) {
         await log({

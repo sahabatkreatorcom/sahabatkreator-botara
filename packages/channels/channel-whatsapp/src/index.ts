@@ -130,6 +130,18 @@ export interface WhatsAppTemplateCreateInput {
 const TEMPLATE_PLACEHOLDER_RE = /\{\{(\d+)\}\}/g;
 
 /**
+ * Batas ukuran unduhan media MASUK (Fase 18).
+ *
+ * Meta mengizinkan 16 MB untuk gambar/video/audio dan 100 MB untuk
+ * dokumen. Batas kita sengaja lebih kecil dari plafon dokumen: media
+ * diunduh ke memori proses worker, dan inbox tidak butuh berkas 100 MB
+ * untuk ditampilkan. Berkas di atas batas TIDAK dibuang diam-diam —
+ * `downloadMedia` melempar `media_too_large`, ingest mencatat alasannya,
+ * dan pesan tetap tampil dengan caption + nama berkasnya.
+ */
+export const DEFAULT_MEDIA_MAX_BYTES = 25 * 1024 * 1024;
+
+/**
  * Jumlah variabel sebuah teks template = indeks {{n}} TERBESAR yang
  * muncul (Meta menomori variabel mulai 1 tanpa celah; teks tanpa
  * placeholder = 0). Murni — dipakai parser komponen di bawah.
@@ -403,6 +415,84 @@ export class WhatsAppCloudClient extends GraphHttpClient {
   }
 
   /**
+   * Tukar media id menjadi URL unduhan sementara (Fase 18):
+   * `GET /{media-id}` → `{ url, mime_type, file_size, id }`.
+   *
+   * URL hasilnya BUKAN tautan publik: ia hanya hidup ±5 menit dan tetap
+   * menuntut header Authorization yang sama saat diunduh. Karena itu
+   * yang disimpan di DB adalah media id, bukan URL ini.
+   */
+  async getMediaInfo(mediaId: string): Promise<{
+    url: string;
+    mimeType: string | null;
+    fileSize: number | null;
+  }> {
+    const body = await this.getJson<{
+      url?: string;
+      mime_type?: string;
+      file_size?: number;
+    }>(`${encodeURIComponent(mediaId)}`);
+    const url = typeof body.url === "string" ? body.url : "";
+    if (!url) {
+      throw new WhatsAppGraphError(200, null, "missing_media_url");
+    }
+    return {
+      url,
+      mimeType:
+        typeof body.mime_type === "string" && body.mime_type.trim()
+          ? body.mime_type.trim().toLowerCase()
+          : null,
+      fileSize: typeof body.file_size === "number" ? body.file_size : null,
+    };
+  }
+
+  /**
+   * Unduh isi media masuk (Fase 18): info → URL sementara → byte.
+   *
+   * `maxBytes` ditegakkan DUA kali — dari `content-length` bila ada
+   * (berhenti sebelum membaca) dan dari panjang hasil baca (berhenti
+   * sebelum menyimpan). Satu penjagaan saja tidak cukup: server bisa
+   * tidak mengirim `content-length` (chunked), dan berkas yang terlalu
+   * besar bisa menghabiskan memori proses sebelum sempat diperiksa.
+   *
+   * Melempar `WhatsAppGraphError` saat melewati batas, supaya pemanggil
+   * bisa membedakan "terlalu besar" dari "gagal jaringan" dan berhenti
+   * mencoba ulang selamanya.
+   */
+  async downloadMedia(
+    mediaId: string,
+    options: { maxBytes?: number } = {},
+  ): Promise<{ data: Buffer; mimeType: string | null }> {
+    const maxBytes = options.maxBytes ?? DEFAULT_MEDIA_MAX_BYTES;
+    const info = await this.getMediaInfo(mediaId);
+    if (info.fileSize !== null && info.fileSize > maxBytes) {
+      throw new WhatsAppGraphError(200, null, "media_too_large");
+    }
+    const response = await this.fetchImpl(info.url, {
+      headers: this.headers(),
+      signal: AbortSignal.timeout(this.timeoutMs),
+    });
+    if (!response.ok) {
+      throw new WhatsAppGraphError(response.status, null, "media_download_failed");
+    }
+    const declared = Number(response.headers.get("content-length") ?? "");
+    if (Number.isFinite(declared) && declared > maxBytes) {
+      throw new WhatsAppGraphError(200, null, "media_too_large");
+    }
+    const data = Buffer.from(await response.arrayBuffer());
+    if (data.length > maxBytes) {
+      throw new WhatsAppGraphError(200, null, "media_too_large");
+    }
+    return {
+      data,
+      mimeType:
+        info.mimeType ??
+        response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() ??
+        null,
+    };
+  }
+
+  /**
    * Kirim pesan teks (Cloud API): `POST /{phone_number_id}/messages`.
    * Mengembalikan wamid (`messages[0].id`) — id yang nantinya
    * dicocokkan webhook statuses untuk delivered/read/failed.
@@ -461,6 +551,34 @@ const WHATSAPP_TYPE_MAP: Record<string, WhatsAppInboundType> = {
   sticker: "sticker",
 };
 
+/**
+ * Bentuk objek media di dalam payload webhook (`image`, `video`, `audio`,
+ * `document`, `sticker`). Semua opsional: Meta hanya mengirim field yang
+ * relevan, dan `document` satu-satunya yang membawa `filename`.
+ */
+interface WhatsAppMediaHolder {
+  id?: string;
+  mime_type?: string;
+  sha256?: string;
+  caption?: string;
+  filename?: string;
+  voice?: boolean;
+}
+
+/** Satu media masuk WhatsApp yang dinormalisasi (Fase 18). */
+export interface WhatsAppInboundMediaRef {
+  /**
+   * Media id Meta (`image.id`). BUKAN isi berkas: harus ditukar menjadi
+   * URL unduhan sementara lewat `GET /{media-id}` lebih dulu, dan URL
+   * itu hanya valid ±5 menit. Karena itu id ini yang disimpan, bukan URL.
+   */
+  id: string;
+  /** MIME dari payload (`image.mime_type`); null bila tak disebut. */
+  mimeType: string | null;
+  /** Nama berkas asli — hanya `document` yang menyertakannya. */
+  fileName: string | null;
+}
+
 /** Satu pesan masuk WhatsApp yang dinormalisasi. */
 export interface WhatsAppInboundMessageEvent {
   /** entry.id — WABA ID induk (konteks; BUKAN kunci resolusi akun). */
@@ -482,6 +600,13 @@ export interface WhatsAppInboundMessageEvent {
   type: WhatsAppInboundType;
   /** Teks pesan; untuk media = caption bila ada, selain itu null. */
   text: string | null;
+  /**
+   * Referensi media (Fase 18) untuk tipe image/audio/video/document/
+   * sticker; null untuk pesan teks atau bila payload tidak membawa id.
+   * Tanpa field ini, foto pelanggan hilang permanen: caption saja tidak
+   * bisa dipulihkan menjadi berkas.
+   */
+  media: WhatsAppInboundMediaRef | null;
   timestamp: number | null;
 }
 
@@ -595,9 +720,11 @@ interface WhatsAppWebhookPayload {
           type?: string;
           context?: { id?: string; from?: string };
           text?: { body?: string };
-          image?: { caption?: string };
-          video?: { caption?: string };
-          document?: { caption?: string; filename?: string };
+          image?: WhatsAppMediaHolder;
+          video?: WhatsAppMediaHolder;
+          audio?: WhatsAppMediaHolder;
+          document?: WhatsAppMediaHolder;
+          sticker?: WhatsAppMediaHolder;
         }>;
         statuses?: Array<{
           id?: string;
@@ -664,6 +791,52 @@ export function isWhatsAppWebhookPayload(payload: unknown): boolean {
     payload !== null &&
     (payload as { object?: unknown }).object === "whatsapp_business_account"
   );
+}
+
+/**
+ * Referensi media satu pesan masuk (Fase 18).
+ *
+ * Sampai fase ini parser hanya memungut `caption` dan membuang `id` —
+ * jadi foto pelanggan tidak pernah bisa diambil, bahkan secara manual:
+ * URL unduhan Meta hanya valid ±5 menit, dan media id-lah satu-satunya
+ * kunci yang bertahan. Mengembalikan null bila tipe bukan media atau
+ * payload tidak membawa id (bentuk yang tidak bisa diunduh).
+ */
+export function whatsAppMediaRef(
+  type: WhatsAppInboundType,
+  holder: {
+    image?: WhatsAppMediaHolder;
+    video?: WhatsAppMediaHolder;
+    audio?: WhatsAppMediaHolder;
+    document?: WhatsAppMediaHolder;
+    sticker?: WhatsAppMediaHolder;
+  },
+): WhatsAppInboundMediaRef | null {
+  const slot =
+    type === "image"
+      ? holder.image
+      : type === "video"
+        ? holder.video
+        : type === "audio"
+          ? holder.audio
+          : type === "document"
+            ? holder.document
+            : type === "sticker"
+              ? holder.sticker
+              : undefined;
+  const id = typeof slot?.id === "string" ? slot.id.trim() : "";
+  if (!id) return null;
+  return {
+    id,
+    mimeType:
+      typeof slot?.mime_type === "string" && slot.mime_type.trim()
+        ? slot.mime_type.trim().toLowerCase()
+        : null,
+    fileName:
+      typeof slot?.filename === "string" && slot.filename.trim()
+        ? slot.filename.trim().slice(0, 255)
+        : null,
+  };
 }
 
 /**
@@ -876,6 +1049,8 @@ export function parseWhatsAppWebhookEvents(
               : null,
           type,
           text,
+          // Fase 18: referensi media — bahan ingest di worker.
+          media: whatsAppMediaRef(type, message),
           timestamp:
             typeof message.timestamp === "string"
               ? Number(message.timestamp) || null

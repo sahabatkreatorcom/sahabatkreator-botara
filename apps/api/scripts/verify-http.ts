@@ -145,4 +145,25 @@ check(
 
 limiter.close();
 
+// Fase 18: route media tanpa DB/penyimpanan harus MENOLAK dengan bentuk
+// kontrak, bukan 500 atau — lebih buruk — 200 kosong. Gelembung gambar
+// di inbox akan tampak rusak tanpa penjelasan kalau ini salah.
+const mediaNoStore = await app.request(
+  "/api/tenants/11111111-1111-4111-8111-111111111111/media/22222222-2222-4222-8222-222222222222",
+);
+check(
+  "media: tanpa penyimpanan → 503",
+  mediaNoStore.status === 503,
+  `status=${mediaNoStore.status}`,
+);
+check(
+  "media: 503 berbentuk INTERNAL_ERROR",
+  ((await mediaNoStore.json()) as { error?: { code?: string } }).error?.code ===
+    "INTERNAL_ERROR",
+);
+check(
+  "media: respons 503 tetap nosniff",
+  header(mediaNoStore, "x-content-type-options") === "nosniff",
+);
+
 console.log(`\nverify-http: ${passes} PASS${process.exitCode ? " (ADA FAIL)" : ""}`);

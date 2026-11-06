@@ -16,7 +16,7 @@ import type {
   WhatsAppTemplateResponse,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
-import { api, ApiClientError } from "../api/client";
+import { api, ApiClientError, mediaUrl } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
 import { translateApiError } from "../api/errorText";
 import { FieldError, inputClassName } from "../components/AuthLayout";
@@ -1488,11 +1488,60 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                                 {msg.senderName}
                               </p>
                             ) : null}
-                            <p className="whitespace-pre-wrap break-words">
-                              {msg.contentText ?? (
-                                <span className="italic">{t("inbox.mediaMessage")}</span>
-                              )}
-                            </p>
+                            {msg.mediaId && tenantId ? (
+                              <div className="mb-1">
+                                {msg.type === "image" ? (
+                                  <a
+                                    href={mediaUrl(tenantId, msg.mediaId)}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="block"
+                                  >
+                                    <img
+                                      src={mediaUrl(tenantId, msg.mediaId)}
+                                      alt={t("inbox.mediaImageAlt")}
+                                      loading="lazy"
+                                      className="max-h-64 w-auto max-w-full rounded-lg"
+                                    />
+                                  </a>
+                                ) : msg.type === "audio" ? (
+                                  <audio
+                                    controls
+                                    preload="none"
+                                    src={mediaUrl(tenantId, msg.mediaId)}
+                                    className="max-w-full"
+                                  />
+                                ) : msg.type === "video" ? (
+                                  <video
+                                    controls
+                                    preload="none"
+                                    src={mediaUrl(tenantId, msg.mediaId)}
+                                    className="max-h-64 max-w-full rounded-lg"
+                                  />
+                                ) : (
+                                  // Dokumen (PDF, docx, …): tautan unduh.
+                                  // Server sudah mengirim
+                                  // Content-Disposition: attachment untuk
+                                  // tipe yang tidak aman dirender inline.
+                                  <a
+                                    href={mediaUrl(tenantId, msg.mediaId)}
+                                    download
+                                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs underline ${
+                                      outbound ? "text-white/90" : "text-accent"
+                                    }`}
+                                  >
+                                    {t("inbox.mediaDownload")}
+                                  </a>
+                                )}
+                              </div>
+                            ) : null}
+                            {msg.contentText || !msg.mediaId ? (
+                              <p className="whitespace-pre-wrap break-words">
+                                {msg.contentText ?? (
+                                  <span className="italic">{t("inbox.mediaMessage")}</span>
+                                )}
+                              </p>
+                            ) : null}
                             <div
                               className={`mt-1 flex items-center gap-2 text-[11px] ${
                                 outbound ? "text-white/80" : "text-muted"

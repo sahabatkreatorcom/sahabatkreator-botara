@@ -322,6 +322,46 @@ export const messages = pgTable(
      * NULL untuk semua pesan selain DM comment-to-DM pertama.
      */
     providerCommentId: varchar("provider_comment_id", { length: 255 }),
+    /**
+     * Referensi media MASUK milik provider (Fase 18).
+     *
+     * Untuk WhatsApp, webhook hanya membawa `image.id` (media id), BUKAN
+     * isi berkasnya. Id itu harus ditukar dulu menjadi URL unduhan
+     * sementara (valid ±5 menit) lewat `GET /{media-id}`, baru byte-nya
+     * bisa diambil dengan header Authorization. Dua alasan id ini
+     * disimpan di baris pesan, bukan diunduh saat webhook:
+     *   1. unduhan video 16 MB akan menahan ack webhook, dan Meta
+     *      MENGIRIM ULANG payload bila ack lambat — unduhan pun diulang;
+     *   2. kegagalan jaringan sesaat tidak boleh menghilangkan pesan.
+     * Baris pesan tetap tercatat lebih dulu (dengan caption bila ada),
+     * lalu ingest media menyusul dan mengisi `media_id`.
+     */
+    providerMediaId: varchar("provider_media_id", { length: 255 }),
+    /** MIME dari provider (`image/jpeg`, `application/pdf`, …); null bila tak disebut. */
+    providerMediaMime: varchar("provider_media_mime", { length: 128 }),
+    /** Nama berkas asli — hanya WhatsApp document yang menyertakannya. */
+    providerMediaFileName: varchar("provider_media_file_name", { length: 255 }),
+    /**
+     * Penghitung percobaan ingest media (Fase 18). Media yang gagal
+     * diunduh SELAMANYA (mis. id kedaluwarsa >30 hari, berkas dihapus
+     * pengirim) tidak boleh dipindai tiap tick selamanya: setelah
+     * `MEDIA_INGEST_MAX_ATTEMPTS` baris berhenti dipindai dan alasannya
+     * tersimpan di `media_ingest_error` untuk dibaca operator.
+     */
+    mediaIngestAttempts: integer("media_ingest_attempts").notNull().default(0),
+    /** Alasan kegagalan ingest terakhir (dipotong 500 char), null bila belum pernah gagal. */
+    mediaIngestError: varchar("media_ingest_error", { length: 500 }),
+    /**
+     * Waktu percobaan ingest terakhir (Fase 18).
+     *
+     * Tanpa ini, siklus worker 5 detik menghabiskan seluruh jatah
+     * percobaan dalam 25 detik: gangguan jaringan semenit membuat media
+     * hilang permanen padahal berkasnya masih ada di Meta. Pemindai
+     * memakai kolom ini untuk memberi jarak antar-percobaan.
+     */
+    mediaIngestAttemptedAt: timestamp("media_ingest_attempted_at", {
+      withTimezone: true,
+    }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
@@ -339,6 +379,18 @@ export const messages = pgTable(
     uniqueIndex("messages_provider_message_id_unique")
       .on(t.providerMessageId)
       .where(sql`${t.providerMessageId} IS NOT NULL`),
+    // Fase 18: pindai ingest media (lintas tenant, dijalankan worker tiap
+    // beberapa detik). Predikatnya sengaja hanya "belum ada media_id tetapi
+    // punya referensi provider" — batas percobaan TIDAK ikut masuk predikat
+    // index karena angkanya konstanta kode (`MEDIA_INGEST_MAX_ATTEMPTS`)
+    // yang bisa berubah; menyaringnya di query tetap memakai index ini
+    // untuk bagian yang menyeleksi, lalu membuang sedikit baris yang sudah
+    // menyerah. Tanpa index, tiap tick = full scan tabel messages.
+    index("messages_pending_media_idx")
+      .on(t.createdAt)
+      .where(
+        sql`${t.mediaId} IS NULL AND ${t.providerMediaId} IS NOT NULL`,
+      ),
   ],
 );
 
