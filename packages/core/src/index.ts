@@ -191,6 +191,11 @@ export {
   type RecordPermanentJobFailureInput,
 } from "./job-failures";
 export {
+  AUTH_SESSION_GRACE_DAYS,
+  pruneExpiredAuthSessions,
+  type AuthSessionPruneResult,
+} from "./auth-session";
+export {
   OUTBOX_DEAD_LETTER_RETENTION_DAYS,
   OUTBOX_MAX_ATTEMPTS,
   OUTBOX_PUBLISHED_RETENTION_DAYS,

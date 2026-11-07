@@ -321,6 +321,23 @@ pnpm --filter @sahabat-kreator/worker prune:outbox
 Kalau relay sempat mati berhari-hari, event yang menumpuk tetap aman:
 retensi hanya menyentuh baris yang sudah selesai diproses.
 
+### Sapuan sesi login (Fase 22)
+
+Better Auth menolak sesi kedaluwarsa pada setiap permintaan, tetapi
+barisnya tidak pernah dihapus — sesi hanya hilang saat logout eksplisit.
+Sesi yang ditinggalkan (tutup browser tanpa logout) tersimpan selamanya,
+lengkap dengan `ip_address` dan `user_agent`.
+
+Worker menghapusnya **tiap jam**, dengan masa tenggang **7 hari setelah**
+kedaluwarsa. Jeda itu bukan untuk keamanan (sesi kedaluwarsa sudah
+ditolak), melainkan agar barisnya masih bisa dibaca saat pengguna melapor
+"kenapa saya tiba-tiba diminta login lagi".
+
+Sesi yang masih berlaku **tidak pernah** disentuh — menghapusnya berarti
+mengeluarkan pengguna secara acak. Tidak ada index tambahan pada
+`expires_at`: begitu sapuan rutin berjalan, isi tabel hanya sesi aktif +
+sisa masa tenggang, dan index akan membebani setiap login.
+
 Retensi default: 7 dump harian + 28 hari cadangan mingguan di VPS, 30 hari
 di R2. Retensi lokal dijalankan **sesudah** backup baru sukses, sehingga
 kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.

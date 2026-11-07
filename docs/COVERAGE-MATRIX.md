@@ -104,6 +104,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Audit log & integration log | ✅ | `audit_logs`, `integration_log` |
 | Relay outbox: isolasi per event + karantina | ✅ | `outbox.ts` (`OUTBOX_MAX_ATTEMPTS`), `outbox.test.ts` |
 | Retensi outbox: baris terbit 7 hari, dead-letter 30 hari | ✅ | `pruneOutboxEvents` (worker tiap jam + `pnpm prune:outbox`); event belum terbit tidak pernah disentuh |
+| Sapuan sesi login kedaluwarsa | ✅ | `pruneExpiredAuthSessions` (worker tiap jam); sesi aktif tidak pernah disentuh |
 | Jejak job latar yang menyerah | ✅ | `job-failures.ts`, audit `job.failed`, kategori "Background job" |
 | Analytics & dashboard | ✅ | `modules/analytics`, `modules/dashboard` |
 | i18n id/en | ✅ | `packages/i18n` |

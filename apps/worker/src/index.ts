@@ -13,6 +13,7 @@ import {
 import { MetaGraphClient } from "@sahabat-kreator/channel-messenger";
 import {
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
+  AUTH_SESSION_GRACE_DAYS,
   INTEGRATION_LOG_RETENTION_DAYS,
   INVITATION_EMAIL_OUTBOX_TYPE,
   OUTBOX_DEAD_LETTER_RETENTION_DAYS,
@@ -25,6 +26,7 @@ import {
   evaluateInboundMessageForAutomations,
   executeFlowStep,
   executeSequenceStep,
+  pruneExpiredAuthSessions,
   pruneIntegrationLogs,
   pruneOutboxEvents,
   purgeExpiredTrashedChannels,
@@ -1058,6 +1060,38 @@ const outboxPruneTimer = setInterval(
 void outboxPruneTick();
 
 // ---------------------------------------------------------------------------
+// Sapuan sesi login kedaluwarsa (Fase 22, audit A5). Better Auth menolak
+// sesi kedaluwarsa pada setiap permintaan, tetapi barisnya tidak pernah
+// dihapus — sesi hanya hilang saat logout eksplisit. Yang ditinggalkan
+// (tutup browser tanpa logout) tersimpan selamanya, lengkap dengan
+// ip_address dan user_agent. Masa tenggang 7 hari setelah kedaluwarsa
+// supaya barisnya masih bisa dibaca saat pengguna melapor "kenapa saya
+// diminta login lagi".
+const AUTH_SESSION_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+let authSessionPruneRunning = false;
+async function authSessionPruneTick(): Promise<void> {
+  if (authSessionPruneRunning) return;
+  authSessionPruneRunning = true;
+  try {
+    const result = await pruneExpiredAuthSessions(db);
+    if (result.deleted > 0) {
+      console.log(
+        `[worker] sesi login kedaluwarsa: ${result.deleted} baris >${AUTH_SESSION_GRACE_DAYS} hari setelah kedaluwarsa terhapus`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] sapuan sesi gagal (akan dicoba lagi):", err);
+  } finally {
+    authSessionPruneRunning = false;
+  }
+}
+const authSessionPruneTimer = setInterval(
+  () => void authSessionPruneTick(),
+  AUTH_SESSION_PRUNE_INTERVAL_MS,
+);
+void authSessionPruneTick();
+
+// ---------------------------------------------------------------------------
 // Finalisasi broadcast (Fase 7C): penyapu `reconcileBroadcasts` —
 // menemukan broadcast `sending` lintas tenant (lengan baca
 // system_broadcast_scan), menyinkronkan status penerima dari status
@@ -1225,6 +1259,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(purgeTimer);
   clearInterval(logPruneTimer);
   clearInterval(outboxPruneTimer);
+  clearInterval(authSessionPruneTimer);
   clearInterval(broadcastReconcileTimer);
   clearInterval(tokenLifecycleTimer);
   // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang
