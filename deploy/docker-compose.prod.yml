@@ -28,6 +28,14 @@ x-server-base: &server-base
   env_file:
     - .env
   restart: unless-stopped
+  volumes:
+    # Media pelanggan (docs/PRODUCTION.md §6 "Media pelanggan"): worker menulis,
+    # API menyajikan — keduanya WAJIB menunjuk direktori yang sama DAN direktori
+    # itu harus bertahan antar-deploy. Tanpa volume, setiap penggantian container
+    # membuat semua media lama menjadi tautan mati (pesan tetap ada, gambarnya
+    # hilang) tanpa satu pun error. Karena itu volume ini ada di anchor, bukan
+    # di salah satu service saja.
+    - mediadata:/app/.data/media
   depends_on:
     db:
       condition: service_healthy
@@ -145,3 +153,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  mediadata:
