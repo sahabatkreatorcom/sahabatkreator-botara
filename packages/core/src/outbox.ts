@@ -1,5 +1,5 @@
-import { sql } from "drizzle-orm";
-import type { Database } from "@sahabat-kreator/db";
+import { and, inArray, isNotNull, isNull, lt, sql, type SQL } from "drizzle-orm";
+import { outboxEvents, type Database } from "@sahabat-kreator/db";
 import type { DbTx } from "./tx";
 
 /**
@@ -191,4 +191,132 @@ export async function relayUnpublishedOutboxEvents(
 
     return { relayed, deadLettered };
   });
+}
+
+// ---------------------------------------------------------------------------
+// Retensi (Fase 20)
+// ---------------------------------------------------------------------------
+
+/**
+ * Umur maksimum baris yang sudah TERBIT.
+ *
+ * Event dikonsumsi dalam hitungan detik oleh relay; seminggu adalah
+ * jendela yang jauh lebih longgar daripada kebutuhan debugging apa pun.
+ * Yang disimpan setelah itu tidak pernah dibaca kode mana pun — hanya
+ * menambah ukuran tabel, waktu vacuum, dan waktu backup.
+ */
+export const OUTBOX_PUBLISHED_RETENTION_DAYS = 7;
+
+/**
+ * Umur maksimum baris DEAD-LETTER.
+ *
+ * Lebih panjang dari baris terbit karena baris ini adalah bukti: satu
+ * event yang gagal 5 kali menandakan bug handler atau kredensial yang
+ * dicabut, dan operator butuh waktu untuk menemukannya. Setelah 30 hari
+ * bukti itu sudah tidak bisa ditindaklanjuti — yang tersisa hanya biaya.
+ *
+ * Sama dengan retensi `integration_log`, supaya dua sumber jejak kegagalan
+ * bisa dibaca berdampingan tanpa salah satunya sudah hilang.
+ */
+export const OUTBOX_DEAD_LETTER_RETENTION_DAYS = 30;
+
+/** Baris per transaksi — menjaga transaksi pendek dan kunci singkat. */
+const OUTBOX_PRUNE_BATCH_SIZE = 5000;
+
+export interface OutboxPruneResult {
+  publishedDeleted: number;
+  deadLetterDeleted: number;
+}
+
+/**
+ * Hapus satu batch baris outbox yang memenuhi `predicate`.
+ *
+ * Memakai lengan `app.system_relay='outbox'` yang SAMA dengan relay:
+ * policy `system_relay` pada tabel ini memang FOR ALL, jadi penghapusan
+ * tidak menuntut lengan baru. Predikatnya selalu berbasis waktu, sehingga
+ * tidak mungkin menyentuh baris yang belum terbit.
+ */
+async function deleteOutboxBatch(
+  db: Database,
+  predicate: SQL | undefined,
+  batchSize: number,
+): Promise<number> {
+  // `and()` mengembalikan undefined bila tidak ada kondisi. Menghapus
+  // tanpa predikat berarti mengosongkan SELURUH tabel outbox — termasuk
+  // event yang belum terbit. Lebih baik tidak melakukan apa pun.
+  if (!predicate) return 0;
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('app.system_relay', 'outbox', true)`);
+    const doomed = tx
+      .select({ id: outboxEvents.id })
+      .from(outboxEvents)
+      .where(predicate)
+      .limit(batchSize);
+    const rows = await tx
+      .delete(outboxEvents)
+      .where(inArray(outboxEvents.id, doomed))
+      .returning({ id: outboxEvents.id });
+    return rows.length;
+  });
+}
+
+/**
+ * Retensi `outbox_events`: baris terbit dibuang setelah 7 hari, baris
+ * dead-letter setelah 30 hari. Baris yang BELUM terbit tidak pernah
+ * disentuh — itu pekerjaan yang belum selesai, bukan sampah.
+ *
+ * Dua jalur dipisah karena artinya berbeda, dan satu `DELETE` gabungan
+ * akan menyulitkan operator memahami mana yang terhapus saat angkanya
+ * dilaporkan.
+ */
+export async function pruneOutboxEvents(
+  db: Database,
+  opts: {
+    publishedDays?: number;
+    deadLetterDays?: number;
+    now?: Date;
+    batchSize?: number;
+  } = {},
+): Promise<OutboxPruneResult> {
+  const now = opts.now ?? new Date();
+  const batchSize = opts.batchSize ?? OUTBOX_PRUNE_BATCH_SIZE;
+  const publishedDays = opts.publishedDays ?? OUTBOX_PUBLISHED_RETENTION_DAYS;
+  const deadLetterDays =
+    opts.deadLetterDays ?? OUTBOX_DEAD_LETTER_RETENTION_DAYS;
+  const publishedCutoff = new Date(now.getTime() - publishedDays * 86_400_000);
+  const deadCutoff = new Date(now.getTime() - deadLetterDays * 86_400_000);
+
+  let publishedDeleted = 0;
+  for (;;) {
+    const deleted = await deleteOutboxBatch(
+      db,
+      and(
+        isNotNull(outboxEvents.publishedAt),
+        // Baris dead-letter punya published_at NULL, tetapi penjaga ini
+        // membuat kedua jalur tidak mungkin saling memakan baris yang
+        // sama bila suatu saat penandaan berubah.
+        isNull(outboxEvents.deadLetteredAt),
+        lt(outboxEvents.publishedAt, publishedCutoff),
+      ),
+      batchSize,
+    );
+    publishedDeleted += deleted;
+    if (deleted < batchSize) break;
+  }
+
+  let deadLetterDeleted = 0;
+  for (;;) {
+    const deleted = await deleteOutboxBatch(
+      db,
+      and(
+        isNotNull(outboxEvents.deadLetteredAt),
+        lt(outboxEvents.deadLetteredAt, deadCutoff),
+      ),
+      batchSize,
+    );
+    deadLetterDeleted += deleted;
+    if (deleted < batchSize) break;
+  }
+
+  return { publishedDeleted, deadLetterDeleted };
 }

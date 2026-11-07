@@ -297,6 +297,30 @@ Semua penghapusan baris terjadi **di konteks tenant masing-masing**;
 lengan RLS `system_media_gc_scan` hanya memberi hak BACA lintas tenant
 (diuji di `db verify` [46]).
 
+### Retensi outbox (Fase 20)
+
+`outbox_events` menyimpan setiap event domain (pesan terkirim, broadcast,
+pembayaran, sinkron janji temu) di dalam transaksi yang sama dengan
+perubahan datanya. Sampai Fase 20 tabel itu **tidak pernah dihapus sama
+sekali** — termasuk baris yang sudah terbit — sehingga tumbuh monoton
+dengan payload penuh.
+
+Worker menjalankan satu putaran **tiap jam** (dan sekali saat boot); untuk
+operasi manual:
+
+```bash
+pnpm --filter @sahabat-kreator/worker prune:outbox
+```
+
+| Baris | Umur simpan | Alasan |
+|---|---|---|
+| Sudah terbit (`published_at`) | 7 hari | Dikonsumsi relay dalam hitungan detik; seminggu jauh lebih longgar daripada kebutuhan debugging apa pun |
+| Dead-letter (`dead_lettered_at`) | 30 hari | Bukti kegagalan handler/kredensial yang sedang ditelusuri operator |
+| **Belum terbit** | **tidak pernah dihapus** | Pekerjaan yang belum selesai, bukan sampah |
+
+Kalau relay sempat mati berhari-hari, event yang menumpuk tetap aman:
+retensi hanya menyentuh baris yang sudah selesai diproses.
+
 Retensi default: 7 dump harian + 28 hari cadangan mingguan di VPS, 30 hari
 di R2. Retensi lokal dijalankan **sesudah** backup baru sukses, sehingga
 kegagalan backup tidak pernah mengurangi jumlah salinan yang ada.

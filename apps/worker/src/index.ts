@@ -15,6 +15,8 @@ import {
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
   INTEGRATION_LOG_RETENTION_DAYS,
   INVITATION_EMAIL_OUTBOX_TYPE,
+  OUTBOX_DEAD_LETTER_RETENTION_DAYS,
+  OUTBOX_PUBLISHED_RETENTION_DAYS,
   createDiskMediaStore,
   deliverInvitationEmail,
   dispatchBroadcast,
@@ -24,6 +26,7 @@ import {
   executeFlowStep,
   executeSequenceStep,
   pruneIntegrationLogs,
+  pruneOutboxEvents,
   purgeExpiredTrashedChannels,
   reconcileBroadcasts,
   recordPermanentJobFailure,
@@ -1020,6 +1023,41 @@ const logPruneTimer = setInterval(() => void logPruneTick(), LOG_PRUNE_INTERVAL_
 void logPruneTick();
 
 // ---------------------------------------------------------------------------
+// Retensi outbox (Fase 20, temuan audit A3). Sebelum ini `outbox_events`
+// TIDAK PERNAH dihapus — baris terbit maupun dead-letter — sehingga setiap
+// event domain tersimpan permanen dengan payload penuhnya. Baris terbit
+// dibuang setelah 7 hari; baris dead-letter setelah 30 hari sebagai bukti
+// yang masih bisa ditindaklanjuti operator. Event yang BELUM terbit tidak
+// pernah disentuh.
+//
+// Jalan run-once untuk operasi: `pnpm prune:outbox`
+// (scripts/prune-outbox.ts).
+const OUTBOX_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+let outboxPruneRunning = false;
+async function outboxPruneTick(): Promise<void> {
+  if (outboxPruneRunning) return;
+  outboxPruneRunning = true;
+  try {
+    const result = await pruneOutboxEvents(db);
+    if (result.publishedDeleted > 0 || result.deadLetterDeleted > 0) {
+      console.log(
+        `[worker] outbox prune: ${result.publishedDeleted} terbit >${OUTBOX_PUBLISHED_RETENTION_DAYS} hari, ` +
+          `${result.deadLetterDeleted} dead-letter >${OUTBOX_DEAD_LETTER_RETENTION_DAYS} hari terhapus`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] outbox prune gagal (akan dicoba lagi):", err);
+  } finally {
+    outboxPruneRunning = false;
+  }
+}
+const outboxPruneTimer = setInterval(
+  () => void outboxPruneTick(),
+  OUTBOX_PRUNE_INTERVAL_MS,
+);
+void outboxPruneTick();
+
+// ---------------------------------------------------------------------------
 // Finalisasi broadcast (Fase 7C): penyapu `reconcileBroadcasts` —
 // menemukan broadcast `sending` lintas tenant (lengan baca
 // system_broadcast_scan), menyinkronkan status penerima dari status
@@ -1186,6 +1224,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(relayTimer);
   clearInterval(purgeTimer);
   clearInterval(logPruneTimer);
+  clearInterval(outboxPruneTimer);
   clearInterval(broadcastReconcileTimer);
   clearInterval(tokenLifecycleTimer);
   // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang

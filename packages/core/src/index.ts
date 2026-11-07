@@ -191,8 +191,12 @@ export {
   type RecordPermanentJobFailureInput,
 } from "./job-failures";
 export {
+  OUTBOX_DEAD_LETTER_RETENTION_DAYS,
   OUTBOX_MAX_ATTEMPTS,
+  OUTBOX_PUBLISHED_RETENTION_DAYS,
+  pruneOutboxEvents,
   relayUnpublishedOutboxEvents,
+  type OutboxPruneResult,
   type UnpublishedOutboxEvent,
   type OutboxRelayHandler,
   type OutboxDeadLetter,

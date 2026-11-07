@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { PGlite } from "@electric-sql/pglite";
 import {
   OUTBOX_MAX_ATTEMPTS,
+  pruneOutboxEvents,
   relayUnpublishedOutboxEvents,
 } from "./outbox";
 import { createTestDb, TEST_TENANT_ID, type TestDb } from "./testing/pglite";
@@ -187,5 +188,146 @@ describe("relay outbox: isolasi per event", () => {
     });
     expect(result.relayed).toBe(1);
     expect((await row(id)).published_at).not.toBeNull();
+  });
+});
+
+/**
+ * Retensi outbox (Fase 20).
+ *
+ * Temuan audit: tabel ini TIDAK PERNAH dihapus sama sekali — bukan hanya
+ * baris dead-letter, baris yang sudah terbit pun tidak. Yang diuji di
+ * sini adalah batas-batasnya, karena retensi yang salah arah jauh lebih
+ * merusak daripada tidak ada retensi:
+ *
+ *   1. event yang BELUM terbit tidak boleh tersentuh berapa pun usianya —
+ *      itu pekerjaan yang belum selesai, bukan sampah;
+ *   2. jendela dead-letter harus lebih panjang dari jendela terbit, karena
+ *      baris itu bukti kegagalan yang sedang ditelusuri operator;
+ *   3. penghapusan berjalan per batch sampai habis, bukan hanya batch
+ *      pertama.
+ */
+describe("retensi outbox_events", () => {
+  let test: TestDb;
+  let pglite: PGlite;
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const NOW = new Date("2026-11-07T03:00:00Z");
+
+  beforeAll(async () => {
+    test = await createTestDb();
+    pglite = test.pglite;
+  }, 120_000);
+
+  afterAll(async () => {
+    await test.close();
+  });
+
+  beforeEach(async () => {
+    await pglite.query(`DELETE FROM outbox_events`);
+  });
+
+  async function insertEvent(opts: {
+    createdAt: Date;
+    publishedAt?: Date | null;
+    deadLetteredAt?: Date | null;
+  }): Promise<string> {
+    const id = crypto.randomUUID();
+    await pglite.query(
+      `INSERT INTO outbox_events
+         (id, tenant_id, type, payload, created_at, published_at, dead_lettered_at)
+       VALUES ($1, $2, 'message.sent', '{}'::jsonb, $3, $4, $5)`,
+      [
+        id,
+        TEST_TENANT_ID,
+        opts.createdAt.toISOString(),
+        opts.publishedAt ? opts.publishedAt.toISOString() : null,
+        opts.deadLetteredAt ? opts.deadLetteredAt.toISOString() : null,
+      ],
+    );
+    return id;
+  }
+
+  async function count(): Promise<number> {
+    const res = await pglite.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM outbox_events`,
+    );
+    return res.rows[0]?.n ?? 0;
+  }
+
+  it("membuang baris terbit yang lewat retensi, menyisakan yang baru", async () => {
+    await insertEvent({
+      createdAt: new Date(NOW.getTime() - 9 * DAY),
+      publishedAt: new Date(NOW.getTime() - 8 * DAY),
+    });
+    await insertEvent({
+      createdAt: new Date(NOW.getTime() - 2 * DAY),
+      publishedAt: new Date(NOW.getTime() - 1 * DAY),
+    });
+
+    const result = await pruneOutboxEvents(test.db, { now: NOW });
+
+    expect(result.publishedDeleted).toBe(1);
+    expect(await count()).toBe(1);
+  });
+
+  it("TIDAK menyentuh event yang belum terbit, seberapa pun tuanya", async () => {
+    // Event yang belum terbit adalah pekerjaan yang belum selesai. Kalau
+    // retensi menyentuhnya, relay yang sempat mati berhari-hari akan
+    // kehilangan event yang seharusnya masih bisa diproses — tanpa error.
+    const pending = await insertEvent({
+      createdAt: new Date(NOW.getTime() - 60 * DAY),
+    });
+
+    const result = await pruneOutboxEvents(test.db, { now: NOW });
+
+    expect(result.publishedDeleted).toBe(0);
+    expect(result.deadLetterDeleted).toBe(0);
+    const res = await pglite.query<{ n: number }>(
+      `SELECT count(*)::int AS n FROM outbox_events WHERE id = $1`,
+      [pending],
+    );
+    expect(res.rows[0]?.n).toBe(1);
+  });
+
+  it("mempertahankan dead-letter lebih lama daripada baris terbit", async () => {
+    // Baris dead-letter adalah bukti kegagalan yang sedang ditelusuri.
+    // Menyamakan jendelanya dengan baris terbit berarti bukti itu hilang
+    // seminggu setelah masalahnya muncul.
+    const bukti = await insertEvent({
+      createdAt: new Date(NOW.getTime() - 20 * DAY),
+      deadLetteredAt: new Date(NOW.getTime() - 10 * DAY),
+    });
+    const kedaluwarsa = await insertEvent({
+      createdAt: new Date(NOW.getTime() - 60 * DAY),
+      deadLetteredAt: new Date(NOW.getTime() - 40 * DAY),
+    });
+
+    const result = await pruneOutboxEvents(test.db, { now: NOW });
+
+    expect(result.deadLetterDeleted).toBe(1);
+    const sisa = await pglite.query<{ id: string }>(
+      `SELECT id FROM outbox_events`,
+    );
+    expect(sisa.rows.map((r) => r.id)).toEqual([bukti]);
+    expect(sisa.rows.map((r) => r.id)).not.toContain(kedaluwarsa);
+  });
+
+  it("menghapus per batch sampai habis", async () => {
+    // Batch kecil menyembunyikan bug "hanya batch pertama terhapus":
+    // angkanya terlihat masuk akal, sisanya tertinggal selamanya.
+    for (let i = 0; i < 7; i += 1) {
+      await insertEvent({
+        createdAt: new Date(NOW.getTime() - 30 * DAY),
+        publishedAt: new Date(NOW.getTime() - 20 * DAY),
+      });
+    }
+
+    const result = await pruneOutboxEvents(test.db, {
+      now: NOW,
+      batchSize: 3,
+    });
+
+    expect(result.publishedDeleted).toBe(7);
+    expect(await count()).toBe(0);
   });
 });

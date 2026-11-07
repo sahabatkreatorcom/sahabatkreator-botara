@@ -57,6 +57,13 @@
       "when": 1793870118803,
       "tag": "0007_media_gc_scan_arm",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793870118804,
+      "tag": "0008_outbox_prune",
+      "breakpoints": true
     }
   ]
 }

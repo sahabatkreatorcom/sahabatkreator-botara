@@ -3449,5 +3449,64 @@ console.log(
   "[46] Fase 19: lengan system_media_gc_scan membuka media lintas tenant untuk GC, tetapi TIDAK memberi hak hapus lintas tenant (penghapusan tetap di konteks tenant): OK",
 );
 
+// ---------------------------------------------------------------------------
+// [47] Fase 20: retensi outbox_events — index parsial terpasang, dan lengan
+// relay mengizinkan penghapusan lintas tenant TANPA menyentuh event yang
+// belum terbit.
+//
+// Sebelum Fase 20 tabel ini tidak pernah dihapus sama sekali. Yang dijaga di
+// sini: penghapusan berjalan lewat lengan yang sudah ada (`system_relay`),
+// dan predikatnya berbasis `published_at`/`dead_lettered_at` sehingga event
+// yang belum terbit — pekerjaan yang belum selesai — tidak mungkin ikut
+// terbuang.
+// ---------------------------------------------------------------------------
+const OUTBOX_DEAD_IDX = await db.query(
+  `SELECT 1 FROM pg_indexes
+    WHERE tablename = 'outbox_events'
+      AND indexname = 'outbox_events_dead_letter_idx'`,
+);
+assert.equal(OUTBOX_DEAD_IDX.rows.length, 1);
+
+const OB_PUBLISHED = "7d000000-0000-4000-8000-000000000047";
+const OB_DEAD = "7d100000-0000-4000-8000-000000000047";
+const OB_PENDING = "7d200000-0000-4000-8000-000000000047";
+await db.query(
+  `INSERT INTO outbox_events (id, tenant_id, type, payload, created_at, published_at, dead_lettered_at)
+   VALUES
+     ($1, $4, 'message.sent', '{}'::jsonb, now() - interval '10 days', now() - interval '10 days', NULL),
+     ($2, $4, 'message.sent', '{}'::jsonb, now() - interval '40 days', NULL, now() - interval '40 days'),
+     ($3, $4, 'message.sent', '{}'::jsonb, now() - interval '60 days', NULL, NULL)`,
+  [OB_PUBLISHED, OB_DEAD, OB_PENDING, TENANT_A],
+);
+
+await db.transaction(async (tx) => {
+  await tx.query(`SET LOCAL ROLE app_user`);
+  await tx.query(`SELECT set_config('app.system_relay', 'outbox', true)`);
+  // Dua predikat yang sama dengan `pruneOutboxEvents` di core.
+  await tx.query(
+    `DELETE FROM outbox_events
+      WHERE published_at IS NOT NULL AND dead_lettered_at IS NULL
+        AND published_at < now() - interval '7 days'`,
+  );
+  await tx.query(
+    `DELETE FROM outbox_events
+      WHERE dead_lettered_at IS NOT NULL
+        AND dead_lettered_at < now() - interval '30 days'`,
+  );
+});
+
+const outboxGcLeft = await db.query<{ id: string }>(
+  `SELECT id FROM outbox_events WHERE id = ANY($1::uuid[]) ORDER BY id`,
+  [[OB_PUBLISHED, OB_DEAD, OB_PENDING]],
+);
+assert.deepEqual(
+  outboxGcLeft.rows.map((r) => r.id),
+  [OB_PENDING],
+);
+await db.query(`DELETE FROM outbox_events WHERE id = $1`, [OB_PENDING]);
+console.log(
+  "[47] Fase 20: index parsial outbox_events_dead_letter_idx terpasang; lengan system_relay menghapus baris terbit & dead-letter yang lewat retensi, dan event yang belum terbit TIDAK tersentuh: OK",
+);
+
 await db.close();
 console.log("db verify (PGlite): SEMUA LULUS");
