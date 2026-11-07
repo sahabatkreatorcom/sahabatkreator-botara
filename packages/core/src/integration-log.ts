@@ -9,8 +9,7 @@ import { withTenantDb, type DbTx } from "./tx";
 
 /**
  * Log integrasi webhook & pengiriman (Fase 7B.1) — lapisan
- * OBSERVABILITAS di atas `webhook_inbox` (yang tetap menjadi lapisan
- * DEDUP provider sejak Fase 1A dan tidak berubah). Satu baris per hit
+ * OBSERVABILITAS. Satu baris per hit
  * webhook (direction 'in') atau per percobaan kirim keluar poller
  * (direction 'out'), termasuk hit yang selama ini senyap: tanda tangan
  * salah, akun tak dikenal, akun disconnected, echo, duplikat, dan

@@ -64,6 +64,13 @@
       "when": 1793870118804,
       "tag": "0008_outbox_prune",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793870118805,
+      "tag": "0009_drop_webhook_inbox",
+      "breakpoints": true
     }
   ]
 }

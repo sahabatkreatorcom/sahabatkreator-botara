@@ -55,8 +55,11 @@ import { withTenantDb } from "./tx";
  *                         lintas channel.
  * - usage_ledger        → TIDAK dihapus (append-only, dasar billing);
  *   ref_id-nya varchar tanpa FK, jadi tidak menghalangi penghapusan.
- * - webhook_inbox       → TIDAK disentuh: dedup provider tingkat tenant,
- *   tanpa FK ke akun channel.
+ *
+ * Catatan Fase 21: `webhook_inbox` dulu tercatat di sini sebagai "tidak
+ * disentuh". Tabel itu sudah DIHAPUS (migrasi 0009) karena tidak pernah
+ * menerima INSERT — dedup pesan masuk hidup di
+ * `messages.provider_message_id`.
  *
  * Pemindaian lintas tenant memakai lengan RLS `system_purge_scan`
  * (migrasi 0023): flag transaksi `app.system_relay='channel_purge'`

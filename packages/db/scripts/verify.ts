@@ -5,7 +5,8 @@
  * lokal di VM ini karena Docker tidak tersedia. Yang dibuktikan:
  *  1. Semua file migrasi (termasuk migrasi RLS) teraplikasi bersih dari nol.
  *  2. Insert dasar 2 tenant + member + data sistem bekerja.
- *  3. Constraint unik webhook_inbox (provider + provider_event_id) menolak duplikat.
+ *  3. Dedup pesan masuk: duplikat provider_message_id ditolak unique index
+ *     (webhook_inbox dihapus di migrasi 0009 — tabel itu tidak pernah dipakai).
  *  4. Isolasi RLS SUNGGUHAN: sebagai role non-superuser `app_user` dengan
  *     konteks app.tenant_id = tenant A, query hanya melihat data tenant A,
  *     dan insert untuk tenant B ditolak policy (WITH CHECK).
@@ -102,7 +103,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 5 tabel Fase 13G (appointment_services, appointment_settings,
 //   appointment_availability, bookings, google_calendar_connections)
 // + 1 tabel Fase 14A (payment_provider_configs)
-assert.equal(Number(tablesRes.rows[0].count), 59);
+// − 1 tabel Fase 21 (webhook_inbox dihapus — tidak pernah dipakai)
+assert.equal(Number(tablesRes.rows[0].count), 58);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -139,21 +141,33 @@ await db.query(
 );
 console.log("[2] seed 2 tenant + member + usage + audit + outbox + contacts: OK");
 
-// ---------- 3. Dedup webhook_inbox ----------
-await db.query(
-  `INSERT INTO webhook_inbox (tenant_id, provider, provider_event_id, payload)
-   VALUES ($1, 'whatsapp', 'evt-1', '{}')`,
-  [TENANT_A],
+// ---------- 3. Dedup pesan masuk (bukan tabel mati) ----------
+//
+// Fase 21 (audit A2): cek ini dulu menguji constraint `webhook_inbox`, tabel
+// yang TIDAK PERNAH menerima INSERT — verifikasi hijau untuk mekanisme yang
+// tidak dipakai, dan justru itu yang membuat dedup terlihat "sudah diurus".
+//
+// Dedup yang benar-benar berjalan ada di `messages.provider_message_id`:
+// unique index parsial + pemeriksaan sebelum insert. Cek ini memastikan
+// tabel mati itu tidak ada lagi dan index penggantinya terpasang; penolakan
+// duplikatnya diuji langsung di [48] (butuh baris pesan, jadi dijalankan di
+// bagian akhir agar tidak mengubah hitungan cek isolasi di atas).
+const NO_WEBHOOK_INBOX = await db.query(
+  `SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'webhook_inbox'`,
 );
-await assert.rejects(
-  db.query(
-    `INSERT INTO webhook_inbox (tenant_id, provider, provider_event_id, payload)
-     VALUES ($1, 'whatsapp', 'evt-1', '{}')`,
-    [TENANT_B],
-  ),
-  /duplicate key|unique/i,
+assert.equal(NO_WEBHOOK_INBOX.rows.length, 0);
+
+const DEDUP_INDEX = await db.query(
+  `SELECT 1 FROM pg_indexes
+    WHERE tablename = 'messages'
+      AND indexname = 'messages_provider_message_id_unique'`,
 );
-console.log("[3] webhook_inbox: duplikat (provider, provider_event_id) ditolak: OK");
+assert.equal(DEDUP_INDEX.rows.length, 1);
+
+console.log(
+  "[3] webhook_inbox sudah tidak ada (migrasi 0009); unique index dedup messages_provider_message_id_unique terpasang: OK",
+);
 
 // ---------- 4. Isolasi RLS sebagai role non-superuser ----------
 const policies = await db.query<{ count: string }>(
@@ -223,14 +237,17 @@ const policies = await db.query<{ count: string }>(
 // 2026-11-07: + lengan `system_media_gc_scan` pada media (migrasi 0007)
 // untuk pembersihan media lintas tenant = 78. SELECT saja — hak hapus
 // lintas tenant sengaja TIDAK diberikan (diuji di [46]).
-assert.equal(Number(policies.rows[0].count), 78);
+//
+// 2026-11-07: migrasi 0009 menghapus tabel `webhook_inbox` beserta
+// policy-nya (tabel itu tidak pernah dipakai) → kembali 77.
+assert.equal(Number(policies.rows[0].count), 77);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
   CREATE ROLE app_user NOLOGIN;
   GRANT SELECT, INSERT, UPDATE, DELETE ON
     tenants, users, plans, tenant_members, invitations, api_keys,
-    subscriptions, webhook_inbox, outbox_events, audit_logs, usage_ledger,
+    subscriptions, outbox_events, audit_logs, usage_ledger,
     auth_user, auth_session, auth_account, auth_verification,
     channel_accounts, channel_identities, contacts, media, conversations, messages,
     automations, automation_runs,
@@ -2345,6 +2362,8 @@ function oneHotVector(index: number): string {
   // 2026-11-06: migrasi 0004 menambah lengan `whatsapp_waba_lookup` → 77
   // (kolom baru `whatsapp_templates.status_reason` tidak menambah policy).
   // 2026-11-07: migrasi 0007 menambah lengan `system_media_gc_scan` → 78.
+  // 2026-11-07: migrasi 0009 menghapus `webhook_inbox` (tabel mati, audit
+  // A2) → tabel 58, policy 77.
   const counts = await db.query<{ tables: string; policies: string }>(
     `SELECT
        (SELECT count(*)::text FROM information_schema.tables
@@ -2352,8 +2371,8 @@ function oneHotVector(index: number): string {
        (SELECT count(*)::text FROM pg_policies
          WHERE schemaname = 'public') AS policies`,
   );
-  assert.equal(counts.rows[0].tables, "59");
-  assert.equal(counts.rows[0].policies, "78");
+  assert.equal(counts.rows[0].tables, "58");
+  assert.equal(counts.rows[0].policies, "77");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
@@ -3506,6 +3525,37 @@ assert.deepEqual(
 await db.query(`DELETE FROM outbox_events WHERE id = $1`, [OB_PENDING]);
 console.log(
   "[47] Fase 20: index parsial outbox_events_dead_letter_idx terpasang; lengan system_relay menghapus baris terbit & dead-letter yang lewat retensi, dan event yang belum terbit TIDAK tersentuh: OK",
+);
+
+// ---------------------------------------------------------------------------
+// [48] Fase 21: dedup pesan masuk benar-benar menolak duplikat.
+//
+// Dijalankan di akhir karena butuh baris pesan: menaruhnya di [3] akan
+// menambah kontak/percakapan yang mengubah hitungan cek isolasi [5].
+// Percakapan MEDIA_CONV sudah ada dari [45] dan tidak dihitung lagi setelah
+// ini, jadi dipakai ulang.
+// ---------------------------------------------------------------------------
+const DEDUP_MSG_A = "7e000000-0000-4000-8000-000000000048";
+await db.query(
+  `INSERT INTO messages
+     (id, tenant_id, conversation_id, direction, sender_type, type, content_text,
+      provider_message_id, status)
+   VALUES ($1, $2, $3, 'inbound', 'contact', 'text', 'halo', 'wa:evt-dedup', 'received')`,
+  [DEDUP_MSG_A, TENANT_A, MEDIA_CONV],
+);
+await assert.rejects(
+  db.query(
+    `INSERT INTO messages
+       (id, tenant_id, conversation_id, direction, sender_type, type, content_text,
+        provider_message_id, status)
+     VALUES ($1, $2, $3, 'inbound', 'contact', 'text', 'halo lagi', 'wa:evt-dedup', 'received')`,
+    ["7e100000-0000-4000-8000-000000000048", TENANT_A, MEDIA_CONV],
+  ),
+  /duplicate key|unique/i,
+);
+await db.query(`DELETE FROM messages WHERE id = $1`, [DEDUP_MSG_A]);
+console.log(
+  "[48] Fase 21: dedup pesan masuk nyata — duplikat provider_message_id ditolak unique index (bukan lagi tabel webhook_inbox yang mati): OK",
 );
 
 await db.close();

@@ -131,7 +131,7 @@ dibuatkan paket kosong.
 | Kelompok | Tabel |
 |---|---|
 | Identity & tenant | `users`, `plans`, `tenants`, `tenant_members`, `invitations`, `api_keys`, `subscriptions` |
-| Sistem | `webhook_inbox`, `outbox_events`, `audit_logs`, `usage_ledger`, `integration_log`, `platform_settings` |
+| Sistem | ~~`webhook_inbox`~~ (dihapus di migrasi 0009 — tidak pernah dipakai), `outbox_events`, `audit_logs`, `usage_ledger`, `integration_log`, `platform_settings` |
 | Auth | `auth_user`, `auth_session`, `auth_account`, `auth_verification` |
 | Kanal | `channel_accounts`, `channel_identities`, `profile_photos` |
 | Inbox | `contacts`, `conversations`, `messages`, `media`, `conversation_notes` |
@@ -153,7 +153,7 @@ Total 59 tabel. `usage_ledger` **append-only** (tanpa `updated_at`).
 ```
 webhook provider
   → verifikasi tanda tangan (HMAC app secret / secret token)
-  → webhook_inbox (dedup provider + provider_event_id)
+  → dedup di messages.provider_message_id (rencana awal: webhook_inbox)
   → transaksi tenant: contact, conversation, message, outbox_events
   → relay (worker, ±2s, FOR UPDATE SKIP LOCKED)
   → job automation.evaluate

@@ -1,0 +1,25 @@
+-- 0009_drop_webhook_inbox.sql
+--
+-- Fase 21 (audit A2): hapus tabel `webhook_inbox` yang tidak pernah dipakai.
+--
+-- Tabel ini dibuat di Fase 1A sebagai lapisan dedup webhook provider, dengan
+-- unique index (provider, provider_event_id). Sejak dedup dipindahkan ke
+-- `messages.provider_message_id` (unique index parsial), TIDAK ADA satu pun
+-- kode yang menulis ke sini — bukan berhenti dipakai, tetapi tidak pernah
+-- dipakai sama sekali.
+--
+-- Yang membuat ini layak dihapus, bukan sekadar dibiarkan:
+--   1. dokumentasi (integration-log.ts, db README, RANCANGAN) menyebut tabel
+--      ini sebagai lapisan dedup yang AKTIF, sehingga siapa pun yang
+--      menelusuri mekanisme dedup berhenti di tempat yang salah;
+--   2. `db verify` cek [3] menguji constraint tabel mati dan hijau — bentuk
+--      keyakinan palsu yang membuat orang berhenti memeriksa;
+--   3. tabel + index + policy RLS + grant menambah permukaan yang harus
+--      dijaga (backup, audit akses) tanpa memberi nilai apa pun.
+--
+-- Aman dijatuhkan: tidak ada kode yang membaca maupun menulis, sehingga
+-- tidak ada data yang hilang kecuali sisa pengujian. Dedup pesan masuk
+-- TIDAK terpengaruh — ia hidup di unique index `messages` dan diuji ulang
+-- oleh verify cek [3] yang baru.
+
+DROP TABLE IF EXISTS "webhook_inbox" CASCADE;

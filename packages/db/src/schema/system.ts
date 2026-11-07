@@ -8,7 +8,6 @@ import {
   pgTable,
   text,
   timestamp,
-  uniqueIndex,
   uuid,
   varchar,
 } from "drizzle-orm/pg-core";
@@ -18,7 +17,6 @@ import { messages } from "./inbox";
 
 /**
  * Tabel sistem fondasi (RANCANGAN §2 & §6):
- * - webhook_inbox : dedup webhook provider (unik provider + provider_event_id)
  * - outbox_events : Transactional Outbox — event ditulis dalam transaksi yang
  *                   sama dengan perubahan datanya, relay mem-publish yang
  *                   published_at-nya masih NULL.
@@ -28,9 +26,13 @@ import { messages } from "./inbox";
  * - integration_log: log observabilitas integrasi (Fase 7B.1) — SETIAP hit
  *                   webhook provider (telegram/meta) dan SETIAP percobaan
  *                   kirim keluar poller tercatat dengan outcome jujur.
- *                   Terpisah dari webhook_inbox di atas: tabel itu tetap
- *                   dedup provider; tabel ini lapisan observabilitasnya
  *                   (payload dibatasi ±32KB, retensi 30 hari oleh worker).
+ *
+ * `webhook_inbox` DIHAPUS di migrasi 0009 (Fase 21). Tabel itu tidak pernah
+ * menerima satu pun INSERT sejak dedup pindah ke
+ * `messages.provider_message_id` (unique index) — lihat catatan di sana.
+ * Ia dipertahankan lama hanya karena dokumentasi menyebutnya sebagai
+ * lapisan dedup, sehingga `db verify` pun menguji constraint tabel mati.
  */
 
 export const auditActorTypeEnum = pgEnum("audit_actor_type", [
@@ -46,25 +48,6 @@ export const usageTypeEnum = pgEnum("usage_type", [
   "ai_token",
   "contact",
 ]);
-
-export const webhookInbox = pgTable(
-  "webhook_inbox",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    /** Boleh NULL: webhook bisa tiba sebelum ter-resolve ke tenant tertentu. */
-    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
-    /** 'whatsapp' | 'instagram' | 'messenger' | 'telegram' | ... */
-    provider: varchar("provider", { length: 32 }).notNull(),
-    providerEventId: varchar("provider_event_id", { length: 255 }).notNull(),
-    payload: jsonb("payload").notNull(),
-    processedAt: timestamp("processed_at", { withTimezone: true }),
-    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  },
-  (t) => [
-    uniqueIndex("webhook_inbox_provider_event_unique").on(t.provider, t.providerEventId),
-    index("webhook_inbox_tenant_id_idx").on(t.tenantId),
-  ],
-);
 
 export const outboxEvents = pgTable(
   "outbox_events",
@@ -238,8 +221,6 @@ export const integrationLog = pgTable(
   ],
 );
 
-export type WebhookInboxRow = typeof webhookInbox.$inferSelect;
-export type NewWebhookInboxRow = typeof webhookInbox.$inferInsert;
 export type OutboxEvent = typeof outboxEvents.$inferSelect;
 export type NewOutboxEvent = typeof outboxEvents.$inferInsert;
 export type AuditLog = typeof auditLogs.$inferSelect;
