@@ -30,12 +30,24 @@ export const subscriptionStatusEnum = pgEnum("subscription_status", [
   "canceled",
 ]);
 
+/**
+ * Status workspace (migrasi 0010). `suspended` = ditangguhkan admin platform:
+ * seluruh route bersarang menjawab 404 karena `getTenantForUser` menolak
+ * tenant non-aktif. Datanya TIDAK dihapus — penangguhan harus selalu bisa
+ * dibatalkan tanpa memulihkan backup.
+ */
+export const tenantStatusEnum = pgEnum("tenant_status", ["active", "suspended"]);
+
 export const tenants = pgTable("tenants", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: varchar("name", { length: 255 }).notNull(),
   slug: varchar("slug", { length: 128 }).notNull().unique(),
   defaultLocale: varchar("default_locale", { length: 10 }).notNull().default("en"),
   timezone: varchar("timezone", { length: 64 }).notNull().default("Asia/Jakarta"),
+  status: tenantStatusEnum("status").notNull().default("active"),
+  /** Alasan penangguhan yang diketik admin — dibaca pemilik saat mengajukan banding. */
+  statusReason: text("status_reason"),
+  statusChangedAt: timestamp("status_changed_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });

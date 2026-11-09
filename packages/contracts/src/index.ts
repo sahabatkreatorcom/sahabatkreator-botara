@@ -24,6 +24,7 @@ export * from "./commerce";
 export * from "./api-keys";
 export * from "./realtime";
 export * from "./admin";
+export * from "./admin-console";
 export * from "./integration-logs";
 export * from "./audit";
 export * from "./analytics";

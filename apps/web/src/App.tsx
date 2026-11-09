@@ -90,8 +90,10 @@ const ProductsPage = lazy(() =>
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
-const AdminPage = lazy(() =>
-  import("./pages/AdminPage").then((m) => ({ default: m.AdminPage })),
+const AdminConsolePage = lazy(() =>
+  import("./pages/admin/AdminConsolePage").then((m) => ({
+    default: m.AdminConsolePage,
+  })),
 );
 const LogsPage = lazy(() =>
   import("./pages/LogsPage").then((m) => ({ default: m.LogsPage })),
@@ -362,7 +364,7 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
         ) : activeId === "analytics" ? (
           <AnalyticsPage t={t} locale={locale} />
         ) : activeId === "admin" && isPlatformAdmin ? (
-          <AdminPage t={t} locale={locale} />
+          <AdminConsolePage t={t} locale={locale} />
         ) : (
           <PlaceholderPage t={t} titleKey={activeItem.labelKey} />
         )}

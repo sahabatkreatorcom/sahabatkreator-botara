@@ -240,7 +240,14 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-07: migrasi 0009 menghapus tabel `webhook_inbox` beserta
 // policy-nya (tabel itu tidak pernah dipakai) → kembali 77.
-assert.equal(Number(policies.rows[0].count), 77);
+//
+// 2026-11-07: migrasi 0010 menambah konsol admin platform — 8 lengan di
+// bawah flag BARU `app.platform_admin`: tenant_members, channel_accounts,
+// subscriptions, messages, conversations, audit (baca), audit (tulis),
+// outbox_events → 85. Flag sengaja dipisah dari `app.platform_settings`
+// supaya kemampuan "baca data pelanggan" bisa dicabut tanpa mematikan
+// panel kredensial; pemisahan itu diuji di platform-admin-rls.test.ts.
+assert.equal(Number(policies.rows[0].count), 85);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2364,6 +2371,9 @@ function oneHotVector(index: number): string {
   // 2026-11-07: migrasi 0007 menambah lengan `system_media_gc_scan` → 78.
   // 2026-11-07: migrasi 0009 menghapus `webhook_inbox` (tabel mati, audit
   // A2) → tabel 58, policy 77.
+  // 2026-11-07: migrasi 0010 menambah 8 lengan konsol admin platform di
+  // bawah flag `app.platform_admin` (tabel tetap 58 — kolom `tenants.status`
+  // tidak menambah tabel maupun policy) → policy 85.
   const counts = await db.query<{ tables: string; policies: string }>(
     `SELECT
        (SELECT count(*)::text FROM information_schema.tables
@@ -2372,7 +2382,7 @@ function oneHotVector(index: number): string {
          WHERE schemaname = 'public') AS policies`,
   );
   assert.equal(counts.rows[0].tables, "58");
-  assert.equal(counts.rows[0].policies, "77");
+  assert.equal(counts.rows[0].policies, "85");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

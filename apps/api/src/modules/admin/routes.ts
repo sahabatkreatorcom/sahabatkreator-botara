@@ -24,6 +24,7 @@ import {
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 import { requireAuth } from "../auth/session";
+import { registerAdminConsoleRoutes } from "./console";
 import { probeOpenRouterKey, probeR2Bucket, probeResendKey, type ProbeResult } from "./probes";
 
 export interface AdminRoutesOptions {
@@ -141,6 +142,11 @@ export function createAdminRoutes(
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     app.post("/admin/settings/:key/test", (c) =>
+      apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
+    );
+    // Konsol (migrasi 0010) butuh database untuk apa pun; satu gerbang
+    // menyeluruh lebih jujur daripada 9 route yang masing-masing menjawab 404.
+    app.all("/admin/*", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -310,6 +316,11 @@ export function createAdminRoutes(
     });
     return c.json(body);
   });
+
+  // Konsol operasi (Ringkasan, Tenant, Pengguna, Operasional, Sistem).
+  // Didaftarkan DI SINI, setelah kedua gerbang di atas terpasang pada
+  // "/admin/*", supaya route baru tidak mungkin lupa digerbangi.
+  registerAdminConsoleRoutes(app, bundle);
 
   return app;
 }

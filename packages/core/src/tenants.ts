@@ -103,6 +103,12 @@ export async function listTenantsForUser(
         slug: tenants.slug,
         defaultLocale: tenants.defaultLocale,
         timezone: tenants.timezone,
+        // Status ikut dikirim supaya dashboard bisa MENJELASKAN kenapa
+        // workspace tidak bisa dibuka (migrasi 0010), bukan sekadar
+        // menghilangkannya dari daftar tanpa alasan.
+        status: tenants.status,
+        statusReason: tenants.statusReason,
+        statusChangedAt: tenants.statusChangedAt,
         createdAt: tenants.createdAt,
         updatedAt: tenants.updatedAt,
         role: tenantMembers.role,
@@ -133,6 +139,9 @@ export async function getTenantForUser(
         slug: tenants.slug,
         defaultLocale: tenants.defaultLocale,
         timezone: tenants.timezone,
+        status: tenants.status,
+        statusReason: tenants.statusReason,
+        statusChangedAt: tenants.statusChangedAt,
         createdAt: tenants.createdAt,
         updatedAt: tenants.updatedAt,
         role: tenantMembers.role,
@@ -143,6 +152,11 @@ export async function getTenantForUser(
         and(
           eq(tenantMembers.tenantId, ctx.tenantId),
           eq(tenantMembers.userId, ctx.userId),
+          // Penangguhan ditegakkan DI SINI, satu tempat, karena seluruh route
+          // bersarang memakai fungsi ini untuk menyelesaikan konteks. Tenant
+          // non-aktif karena itu menjawab 404 — sama seperti non-member —
+          // sehingga status tidak bisa dilewati lewat jalur lain.
+          eq(tenants.status, "active"),
         ),
       )
       .limit(1);

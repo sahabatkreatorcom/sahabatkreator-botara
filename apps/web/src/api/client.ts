@@ -126,6 +126,16 @@ import type {
   PlatformSettingsResponse,
   PlatformSettingStatus,
   PlatformSettingTestResult,
+  PlatformOverviewResponse,
+  PlatformTenantListResponse,
+  PlatformTenantDetailResponse,
+  PlatformUserListResponse,
+  RevokeSessionsResponse,
+  SetPlatformTenantStatusResponse,
+  DeadLetterOutboxListResponse,
+  RetryOutboxResponse,
+  PlatformSystemResponse,
+  TenantStatus,
   ProductListResponse,
   ProductResponse,
   PublicPaymentResponse,
@@ -1411,6 +1421,95 @@ export const api = {
         `/api/admin/settings/${key}/test`,
         { method: "POST", body: JSON.stringify({}) },
       );
+    },
+
+    // --- Konsol operasi (migrasi 0010) -----------------------------------
+    // Semua route di bawah ini digerbangi sesi + allowlist email platform
+    // admin; non-admin menerima 404, bukan 403 (eksistensi panel tidak
+    // dibocorkan).
+
+    /** GET /api/admin/overview → angka satu layar untuk halaman Ringkasan. */
+    getOverview(): Promise<PlatformOverviewResponse> {
+      return request<PlatformOverviewResponse>("/api/admin/overview", {
+        method: "GET",
+      });
+    },
+
+    /** GET /api/admin/tenants?q=&status=&limit=&offset= */
+    listTenants(params: {
+      q?: string;
+      status?: TenantStatus;
+      limit?: number;
+      offset?: number;
+    } = {}): Promise<PlatformTenantListResponse> {
+      const search = new URLSearchParams();
+      if (params.q) search.set("q", params.q);
+      if (params.status) search.set("status", params.status);
+      if (params.limit !== undefined) search.set("limit", String(params.limit));
+      if (params.offset !== undefined) search.set("offset", String(params.offset));
+      const qs = search.toString();
+      return request<PlatformTenantListResponse>(
+        `/api/admin/tenants${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+
+    /** GET /api/admin/tenants/:id → detail satu workspace. */
+    getTenant(tenantId: string): Promise<PlatformTenantDetailResponse> {
+      return request<PlatformTenantDetailResponse>(
+        `/api/admin/tenants/${tenantId}`,
+        { method: "GET" },
+      );
+    },
+
+    /** PATCH /api/admin/tenants/:id {status, reason} → tangguhkan / aktifkan. */
+    setTenantStatus(
+      tenantId: string,
+      body: { status: TenantStatus; reason?: string },
+    ): Promise<SetPlatformTenantStatusResponse> {
+      return request<SetPlatformTenantStatusResponse>(
+        `/api/admin/tenants/${tenantId}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      );
+    },
+
+    /** GET /api/admin/users?q= → cari pengguna lintas tenant (min 2 karakter). */
+    searchUsers(q: string): Promise<PlatformUserListResponse> {
+      return request<PlatformUserListResponse>(
+        `/api/admin/users?q=${encodeURIComponent(q)}`,
+        { method: "GET" },
+      );
+    },
+
+    /** POST /api/admin/users/:id/sessions/revoke → paksa logout semua sesi. */
+    revokeSessions(userId: string): Promise<RevokeSessionsResponse> {
+      return request<RevokeSessionsResponse>(
+        `/api/admin/users/${userId}/sessions/revoke`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+
+    /** GET /api/admin/operations/outbox → event yang dikarantina. */
+    listDeadLetter(): Promise<DeadLetterOutboxListResponse> {
+      return request<DeadLetterOutboxListResponse>(
+        "/api/admin/operations/outbox",
+        { method: "GET" },
+      );
+    },
+
+    /** POST /api/admin/operations/outbox/:id/retry → kembalikan ke antrean. */
+    retryOutbox(id: string): Promise<RetryOutboxResponse> {
+      return request<RetryOutboxResponse>(
+        `/api/admin/operations/outbox/${id}/retry`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+
+    /** GET /api/admin/system → versi aplikasi + statistik database. */
+    getSystem(): Promise<PlatformSystemResponse> {
+      return request<PlatformSystemResponse>("/api/admin/system", {
+        method: "GET",
+      });
     },
   },
   logs: {
