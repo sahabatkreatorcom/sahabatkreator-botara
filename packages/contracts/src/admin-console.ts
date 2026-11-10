@@ -211,3 +211,69 @@ export const PlatformSystemResponseSchema = z.object({
 export type PlatformSystemResponse = z.infer<
   typeof PlatformSystemResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Manajemen admin platform & status backup (migrasi 0011)
+// ---------------------------------------------------------------------------
+
+export const PlatformAdminEntrySchema = z.object({
+  email: z.string(),
+  source: z.enum(["env", "panel"]),
+  /** Baris env tidak bisa dicabut dari panel (harus lewat .env + deploy). */
+  removable: z.boolean(),
+  /** False = email ini belum punya akun yang terdaftar. */
+  registered: z.boolean(),
+  addedByEmail: z.string().nullable(),
+  createdAt: z.string().datetime().nullable(),
+});
+
+export const PlatformAdminListResponseSchema = z.object({
+  rows: z.array(PlatformAdminEntrySchema),
+});
+export type PlatformAdminListResponse = z.infer<
+  typeof PlatformAdminListResponseSchema
+>;
+
+export const AddPlatformAdminRequestSchema = z.object({
+  email: z.string().trim().email().max(320),
+});
+export type AddPlatformAdminRequest = z.infer<
+  typeof AddPlatformAdminRequestSchema
+>;
+
+export const AddPlatformAdminResponseSchema = z.object({
+  email: z.string(),
+  created: z.boolean(),
+});
+export type AddPlatformAdminResponse = z.infer<
+  typeof AddPlatformAdminResponseSchema
+>;
+
+export const RemovePlatformAdminResponseSchema = z.object({
+  removed: z.boolean(),
+  reason: z
+    .enum(["not_found", "env_locked", "self", "last_admin"])
+    .optional(),
+  email: z.string().optional(),
+});
+export type RemovePlatformAdminResponse = z.infer<
+  typeof RemovePlatformAdminResponseSchema
+>;
+
+export const BackupRunEntrySchema = z.object({
+  id: z.string().uuid(),
+  kind: z.string(),
+  status: z.string(),
+  sizeBytes: z.number().int().nonnegative().nullable(),
+  detail: z.string().nullable(),
+  createdAt: z.string().datetime(),
+});
+
+export const PlatformBackupResponseSchema = z.object({
+  rows: z.array(BackupRunEntrySchema),
+  lastDaily: z.string().datetime().nullable(),
+  lastDrill: z.string().datetime().nullable(),
+});
+export type PlatformBackupResponse = z.infer<
+  typeof PlatformBackupResponseSchema
+>;

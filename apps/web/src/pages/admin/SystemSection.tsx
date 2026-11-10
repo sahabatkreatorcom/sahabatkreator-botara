@@ -3,6 +3,7 @@ import type { PlatformSystemResponse } from "@sahabat-kreator/contracts";
 import { api, ApiClientError } from "../../api/client";
 import { translateApiError } from "../../api/errorText";
 import { KeyValue, Stat, secondaryButton, type AdminSectionProps } from "./shared";
+import { BackupPanel } from "./BackupPanel";
 
 /** Ubah detik menjadi "3h 12m" — lebih mudah dibaca daripada 11520. */
 function humanUptime(seconds: number): string {
@@ -15,15 +16,13 @@ function humanUptime(seconds: number): string {
 }
 
 /**
- * Sistem — versi, uptime, dan ukuran database.
+ * Sistem — versi, uptime, ukuran database, dan status backup.
  *
- * Yang TIDAK ada di sini: status backup. Backup berjalan sebagai cron di
- * host dan menulis ke berkas log, bukan ke database — menampilkannya di
- * panel menuntut tabel baru plus penulisan dari skrip backup, dan itu
- * pekerjaan tersendiri. Lebih jujur tidak menampilkannya daripada
- * menampilkan "OK" yang tidak diperiksa apa pun.
+ * Status backup kini bersumber dari tabel `backup_runs` (migrasi 0011)
+ * yang ditulis skrip cron setiap kali backup harian atau drill berjalan.
+ * Tanpa baris, panel berkata "belum ada catatan" — bukan "backup aman".
  */
-export function SystemSection({ t }: AdminSectionProps) {
+export function SystemSection({ t, locale }: AdminSectionProps) {
   const [data, setData] = useState<PlatformSystemResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -123,6 +122,8 @@ export function SystemSection({ t }: AdminSectionProps) {
           </p>
         </>
       ) : null}
+
+      <BackupPanel t={t} locale={locale} />
     </section>
   );
 }

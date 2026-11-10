@@ -104,7 +104,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 //   appointment_availability, bookings, google_calendar_connections)
 // + 1 tabel Fase 14A (payment_provider_configs)
 // − 1 tabel Fase 21 (webhook_inbox dihapus — tidak pernah dipakai)
-assert.equal(Number(tablesRes.rows[0].count), 58);
+// + 2 tabel migrasi 0011 (platform_admins, backup_runs — global, tanpa RLS)
+assert.equal(Number(tablesRes.rows[0].count), 60);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -247,6 +248,9 @@ const policies = await db.query<{ count: string }>(
 // outbox_events → 85. Flag sengaja dipisah dari `app.platform_settings`
 // supaya kemampuan "baca data pelanggan" bisa dicabut tanpa mematikan
 // panel kredensial; pemisahan itu diuji di platform-admin-rls.test.ts.
+//
+// 2026-11-09: migrasi 0011 menambah 2 tabel global (platform_admins,
+// backup_runs) TANPA policy baru — jumlah policy tetap 85.
 assert.equal(Number(policies.rows[0].count), 85);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
@@ -2374,6 +2378,8 @@ function oneHotVector(index: number): string {
   // 2026-11-07: migrasi 0010 menambah 8 lengan konsol admin platform di
   // bawah flag `app.platform_admin` (tabel tetap 58 — kolom `tenants.status`
   // tidak menambah tabel maupun policy) → policy 85.
+  // 2026-11-09: migrasi 0011 menambah `platform_admins` + `backup_runs`
+  // (global, tanpa RLS) → tabel 60, policy tetap 85.
   const counts = await db.query<{ tables: string; policies: string }>(
     `SELECT
        (SELECT count(*)::text FROM information_schema.tables
@@ -2381,7 +2387,7 @@ function oneHotVector(index: number): string {
        (SELECT count(*)::text FROM pg_policies
          WHERE schemaname = 'public') AS policies`,
   );
-  assert.equal(counts.rows[0].tables, "58");
+  assert.equal(counts.rows[0].tables, "60");
   assert.equal(counts.rows[0].policies, "85");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",

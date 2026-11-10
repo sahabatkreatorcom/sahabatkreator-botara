@@ -6,7 +6,7 @@ import {
   type AuditLogResponse,
 } from "@sahabat-kreator/contracts";
 import {
-  isPlatformAdminEmail,
+  isPlatformAdmin,
   listPlatformAuditLogs,
   listTenantAuditLogs,
   type AuditLogEntry,
@@ -119,7 +119,12 @@ export function createAuditRoutes(
 
   app.get("/audit/platform", async (c) => {
     const appUser = c.get("appUser");
-    if (!isPlatformAdminEmail(appUser.email, opts.platformAdminEmails)) {
+    const allowed = await isPlatformAdmin(
+      bundle.db,
+      appUser.email,
+      opts.platformAdminEmails,
+    );
+    if (!allowed) {
       return apiError(c, 404, "NOT_FOUND", "Not found");
     }
     const parsed = AuditLogListQuerySchema.safeParse(c.req.query());

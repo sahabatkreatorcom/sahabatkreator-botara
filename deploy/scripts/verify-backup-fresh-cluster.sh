@@ -47,6 +47,25 @@ DRILL_PW="$(head -c 24 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*"; }
 die() { log "GAGAL: $*"; exit 1; }
 
+# Catatan hasil drill ke DB (migrasi 0011). Pencatatan tidak pernah
+# menggagalkan drill — kalau DB produksi sedang mati, yang hilang hanya
+# baris statusnya, bukan bukti restore-nya.
+# shellcheck source=record-backup-run.sh
+. "$SCRIPT_DIR/record-backup-run.sh"
+DRILL_RECORDED=0
+
+cleanup() {
+  local code=$?
+  docker rm -f "$DRILL" >/dev/null 2>&1 || true
+  docker volume rm "$DRILL_VOL" >/dev/null 2>&1 || true
+  # Kegagalan drill juga harus terlihat di panel. Sukses dicatat eksplisit
+  # di akhir skrip dan menaikkan penanda ini supaya tidak dobel.
+  if [ "$DRILL_RECORDED" -eq 0 ]; then
+    record_backup_run drill failed "" "exit=${code}" || true
+  fi
+}
+trap cleanup EXIT
+
 # --- Dump yang diuji ---------------------------------------------------------
 DUMP="${1:-}"
 if [ -z "$DUMP" ]; then
@@ -65,12 +84,6 @@ psql_drill() {
   docker exec -i "$DRILL" \
     psql -U "$DB_USER" -d "$DB_NAME" -tA -c "$1"
 }
-
-cleanup() {
-  docker rm -f "$DRILL" >/dev/null 2>&1 || true
-  docker volume rm "$DRILL_VOL" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
 
 # --- 1. Cluster perawan ------------------------------------------------------
 #
@@ -246,5 +259,9 @@ psql_drill "select 1 from pg_constraint where conname='bookings_no_overlap_confi
 # + GRANT). Dicetak agar tidak jadi kejutan saat benar-benar dipakai.
 role_drill="$(psql_drill "select count(*) from pg_roles where rolname='sk_app'")"
 log "role sk_app di cluster baru: $role_drill (0 = normal; dibuat migrasi 0002 / restore-db.sh)"
+
+drill_size="$(stat -c %s "$DUMP" 2>/dev/null || echo "")"
+record_backup_run drill ok "$drill_size" "struktur & isi identik" || true
+DRILL_RECORDED=1
 
 log "SELESAI: dump dapat menghidupkan cluster kosong dan identik dengan produksi"

@@ -1,4 +1,12 @@
-import { pgTable, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import {
+  bigint,
+  index,
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  varchar,
+} from "drizzle-orm/pg-core";
 import { users } from "./identity";
 
 /**
@@ -36,3 +44,49 @@ export const platformSettings = pgTable("platform_settings", {
 
 export type PlatformSettingRow = typeof platformSettings.$inferSelect;
 export type NewPlatformSettingRow = typeof platformSettings.$inferInsert;
+
+/**
+ * Admin platform yang dikelola dari panel (migrasi 0011). Env
+ * `PLATFORM_ADMIN_EMAILS` TETAP berlaku sebagai bootstrap/darurat dan tidak
+ * disalin ke sini — jadi mencabut semua baris panel tidak pernah mengunci
+ * sistem selama env masih terisi.
+ *
+ * Tidak ber-RLS (global), sama seperti `users`: yang menjaganya adalah
+ * gerbang API. `added_by` ON DELETE SET NULL supaya jejak tetap ada walau
+ * akun yang menambahkan sudah dihapus.
+ */
+export const platformAdmins = pgTable("platform_admins", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  email: varchar("email", { length: 320 }).notNull().unique(),
+  addedBy: uuid("added_by").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+/**
+ * Satu baris per eksekusi backup/drill (migrasi 0011). Ditulis skrip cron
+ * di host, dibaca panel lewat API. Sengaja TIDAK ada status bawaan "sukses":
+ * tanpa baris, panel harus berkata "belum ada catatan".
+ */
+export const backupRuns = pgTable(
+  "backup_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    /** 'daily' | 'drill'. */
+    kind: varchar("kind", { length: 16 }).notNull(),
+    /** 'ok' | 'failed'. */
+    status: varchar("status", { length: 16 }).notNull(),
+    sizeBytes: bigint("size_bytes", { mode: "number" }),
+    detail: varchar("detail", { length: 255 }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("backup_runs_kind_created_idx").on(t.kind, t.createdAt)],
+);
+
+export type PlatformAdminRow = typeof platformAdmins.$inferSelect;
+export type BackupRunRow = typeof backupRuns.$inferSelect;

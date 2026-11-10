@@ -4,6 +4,7 @@ import { customSession } from "better-auth/plugins";
 import { eq } from "drizzle-orm";
 import {
   deliverPasswordResetEmail,
+  isPlatformAdmin,
   isPlatformAdminEmail,
   PASSWORD_RESET_EXPIRES_IN_SECONDS,
   type PlatformSettingsOptions,
@@ -68,21 +69,30 @@ function createAuthInstance(
     secret: opts.secret,
     baseURL: opts.baseURL,
     plugins: [
-      // Fase 6C: respons get-session diperkaya flag `isPlatformAdmin`
-      // pada user (dicocokkan dari allowlist env PLATFORM_ADMIN_EMAILS)
-      // agar web bisa menyembunyikan menu Admin dari non-admin. Gerbang
-      // sesungguhnya tetap di endpoint /api/admin/* (404 untuk non-admin);
-      // flag ini murni petunjuk tampilan.
-      customSession(async ({ session, user }) => ({
-        session,
-        user: {
-          ...user,
-          isPlatformAdmin: isPlatformAdminEmail(
-            user.email,
-            opts.platformAdminEmails,
-          ),
-        },
-      })),
+      // Fase 6C / 0011: respons get-session diperkaya flag `isPlatformAdmin`
+      // (allowlist env ATAU daftar yang dikelola di panel) agar web bisa
+      // menyembunyikan menu Admin dari non-admin. Gerbang sesungguhnya tetap
+      // di endpoint /api/admin/* (404 untuk non-admin); flag ini murni
+      // petunjuk tampilan.
+      customSession(async ({ session, user }) => {
+        // Env ATAU daftar panel (migrasi 0011). Kalau DB sedang bermasalah,
+        // jangan sampai setiap pembacaan sesi gagal hanya karena satu query
+        // daftar admin: fallback ke env saja. Admin bootstrap tetap masuk,
+        // admin panel untuk sementara tidak melihat menu — degradasi yang
+        // jujur, bukan kegagalan login massal.
+        let admin = isPlatformAdminEmail(user.email, opts.platformAdminEmails);
+        if (!admin) {
+          try {
+            admin = await isPlatformAdmin(db, user.email, opts.platformAdminEmails);
+          } catch {
+            admin = false;
+          }
+        }
+        return {
+          session,
+          user: { ...user, isPlatformAdmin: admin },
+        };
+      }),
     ],
     database: drizzleAdapter(db, {
       provider: "pg",

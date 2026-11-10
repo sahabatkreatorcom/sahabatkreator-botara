@@ -3,6 +3,11 @@ import {
   DeadLetterOutboxListResponseSchema,
   PlatformOverviewResponseSchema,
   PlatformSystemResponseSchema,
+  PlatformAdminListResponseSchema,
+  PlatformBackupResponseSchema,
+  AddPlatformAdminRequestSchema,
+  AddPlatformAdminResponseSchema,
+  RemovePlatformAdminResponseSchema,
   PlatformTenantDetailResponseSchema,
   PlatformTenantListResponseSchema,
   PlatformUserListResponseSchema,
@@ -12,11 +17,16 @@ import {
   SetPlatformTenantStatusResponseSchema,
 } from "@sahabat-kreator/contracts";
 import {
+  addPlatformAdmin,
+  getBackupStatus,
   getPlatformOverview,
   getPlatformSystemStats,
   getPlatformTenant,
+  listBackupRuns,
   listDeadLetterOutbox,
+  listPlatformAdmins,
   listPlatformTenants,
+  removePlatformAdmin,
   retryDeadLetterOutbox,
   revokePlatformUserSessions,
   searchPlatformUsers,
@@ -78,6 +88,7 @@ function toTenantRow(row: {
 export function registerAdminConsoleRoutes(
   app: AdminApp,
   bundle: AuthBundle,
+  platformAdminEmails?: string,
 ): void {
   app.get("/admin/overview", async (c) => {
     const overview = await getPlatformOverview(bundle.db);
@@ -237,6 +248,59 @@ export function registerAdminConsoleRoutes(
       actorUserId: c.get("appUser").id,
     });
     return c.json(RetryOutboxResponseSchema.parse(result));
+  });
+
+  // --- Daftar admin platform (migrasi 0011) ------------------------------
+  app.get("/admin/admins", async (c) => {
+    const rows = await listPlatformAdmins(bundle.db, platformAdminEmails);
+    return c.json(PlatformAdminListResponseSchema.parse({ rows }));
+  });
+
+  app.post("/admin/admins", async (c) => {
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const body = AddPlatformAdminRequestSchema.safeParse(json);
+    if (!body.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "A valid email is required");
+    }
+    const result = await addPlatformAdmin(bundle.db, {
+      email: body.data.email,
+      actorUserId: c.get("appUser").id,
+    });
+    return c.json(AddPlatformAdminResponseSchema.parse(result));
+  });
+
+  app.delete("/admin/admins/:email", async (c) => {
+    const email = c.req.param("email");
+    const result = await removePlatformAdmin(bundle.db, {
+      email,
+      actorUserId: c.get("appUser").id,
+      actorEmail: c.get("appUser").email,
+      rawAllowlist: platformAdminEmails,
+    });
+    // Gagal dicabut (env terkunci / diri sendiri / admin terakhir) tetap
+    // 200 dengan alasan: ini bukan error HTTP, melainkan keputusan bisnis
+    // yang harus dijelaskan ke operator lewat UI.
+    return c.json(RemovePlatformAdminResponseSchema.parse(result));
+  });
+
+  // --- Status backup (migrasi 0011) ---------------------------------------
+  app.get("/admin/backups", async (c) => {
+    const [rows, status] = await Promise.all([
+      listBackupRuns(bundle.db, 12),
+      getBackupStatus(bundle.db),
+    ]);
+    return c.json(
+      PlatformBackupResponseSchema.parse({
+        rows,
+        lastDaily: status.lastDaily,
+        lastDrill: status.lastDrill,
+      }),
+    );
   });
 
   app.get("/admin/system", async (c) => {

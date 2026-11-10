@@ -12,7 +12,7 @@ import {
   clearPlatformSetting,
   getPlatformPublicConfig,
   getProviderSecret,
-  isPlatformAdminEmail,
+  isPlatformAdmin,
   isPlatformSettingKey,
   listPlatformSettingStatuses,
   recordPlatformSettingTest,
@@ -158,7 +158,14 @@ export function createAdminRoutes(
     next,
   ) => {
     const appUser = c.get("appUser");
-    if (!isPlatformAdminEmail(appUser.email, options.platformAdminEmails)) {
+    // Env ATAU daftar yang dikelola panel. Tidak di-cache: pencabutan hak
+    // harus langsung berlaku pada cookie yang sudah ada.
+    const allowed = await isPlatformAdmin(
+      bundle.db,
+      appUser.email,
+      options.platformAdminEmails,
+    );
+    if (!allowed) {
       return apiError(c, 404, "NOT_FOUND", "Not found");
     }
     await next();
@@ -320,7 +327,7 @@ export function createAdminRoutes(
   // Konsol operasi (Ringkasan, Tenant, Pengguna, Operasional, Sistem).
   // Didaftarkan DI SINI, setelah kedua gerbang di atas terpasang pada
   // "/admin/*", supaya route baru tidak mungkin lupa digerbangi.
-  registerAdminConsoleRoutes(app, bundle);
+  registerAdminConsoleRoutes(app, bundle, options.platformAdminEmails);
 
   return app;
 }

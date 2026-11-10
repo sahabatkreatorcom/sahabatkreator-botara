@@ -135,6 +135,10 @@ import type {
   DeadLetterOutboxListResponse,
   RetryOutboxResponse,
   PlatformSystemResponse,
+  PlatformAdminListResponse,
+  AddPlatformAdminResponse,
+  RemovePlatformAdminResponse,
+  PlatformBackupResponse,
   TenantStatus,
   ProductListResponse,
   ProductResponse,
@@ -1508,6 +1512,36 @@ export const api = {
     /** GET /api/admin/system → versi aplikasi + statistik database. */
     getSystem(): Promise<PlatformSystemResponse> {
       return request<PlatformSystemResponse>("/api/admin/system", {
+        method: "GET",
+      });
+    },
+
+    /** GET /api/admin/admins → daftar admin (env terkunci + panel). */
+    getAdmins(): Promise<PlatformAdminListResponse> {
+      return request<PlatformAdminListResponse>("/api/admin/admins", {
+        method: "GET",
+      });
+    },
+
+    /** POST /api/admin/admins {email} → tambah admin platform. */
+    addAdmin(email: string): Promise<AddPlatformAdminResponse> {
+      return request<AddPlatformAdminResponse>("/api/admin/admins", {
+        method: "POST",
+        body: JSON.stringify({ email }),
+      });
+    },
+
+    /** DELETE /api/admin/admins/:email → cabut admin panel. */
+    removeAdmin(email: string): Promise<RemovePlatformAdminResponse> {
+      return request<RemovePlatformAdminResponse>(
+        `/api/admin/admins/${encodeURIComponent(email)}`,
+        { method: "DELETE" },
+      );
+    },
+
+    /** GET /api/admin/backups → riwayat backup harian + drill. */
+    getBackups(): Promise<PlatformBackupResponse> {
+      return request<PlatformBackupResponse>("/api/admin/backups", {
         method: "GET",
       });
     },

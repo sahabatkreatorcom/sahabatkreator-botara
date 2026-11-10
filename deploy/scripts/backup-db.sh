@@ -76,6 +76,14 @@ chmod 700 "$BACKUP_DIR"
 # shellcheck source=lib-notify.sh
 . "$SCRIPT_DIR/lib-notify.sh"
 
+# Pencatatan hasil eksekusi ke DB (migrasi 0011) supaya Panel Admin bisa
+# menunjukkan kapan backup terakhir benar-benar berjalan — bukan sekadar
+# "cron terpasang". Fungsinya sengaja tidak pernah menggagalkan backup.
+# shellcheck source=record-backup-run.sh
+. "$SCRIPT_DIR/record-backup-run.sh"
+
+BACKUP_RUN_RECORDED=0
+
 fail() {
   log "GAGAL: $*"
   notify "Backup Sahabat Kreator GAGAL: $*" || true
@@ -107,6 +115,19 @@ if [ "${1:-}" = "--test-notify" ]; then
 fi
 
 # --- 1. Pagar ruang disk ----------------------------------------------------
+#
+# EXIT trap: apapun yang menghentikan skrip sebelum baris sukses dicatat
+# (disk penuh, pg_dump gagal, dump tak terbaca) meninggalkan SATU baris
+# "failed". Tanpa ini kegagalan justru TIDAK terlihat di panel: yang tampil
+# tetap backup sukses kemarin, seolah semuanya baik-baik saja.
+record_backup_exit() {
+  local code=$?
+  if [ "$BACKUP_RUN_RECORDED" -eq 0 ]; then
+    record_backup_run daily failed "" "exit=${code}" || true
+  fi
+}
+trap record_backup_exit EXIT
+
 free_kb="$(df -Pk "$BACKUP_DIR" | awk 'NR==2 {print $4}')"
 [ -n "$free_kb" ] || fail "tidak dapat membaca ruang disk"
 if [ "$free_kb" -lt "$MIN_FREE_KB" ]; then
@@ -187,7 +208,17 @@ kept_daily="$(find "$BACKUP_DIR/daily" -name '*.dump' -type f | wc -l)"
 kept_weekly="$(find "$BACKUP_DIR/weekly" -name '*.dump' -type f | wc -l)"
 log "selesai: tersimpan $kept_daily harian, $kept_weekly mingguan di $BACKUP_DIR"
 
+size_bytes="$(stat -c %s "$file" 2>/dev/null || echo "")"
+
 if [ "$OFFSITE_OK" = "0" ]; then
+  # Kontrak skrip: setengah berhasil = gagal. Barisnya tetap mencatat
+  # ukuran dump, karena salinan lokalnya memang sah dan tersimpan.
+  record_backup_run daily failed "$size_bytes" "off-site gagal" || true
+  BACKUP_RUN_RECORDED=1
   log "GAGAL (sebagian): backup lokal ada, salinan off-site TIDAK"
   exit 1
 fi
+
+record_backup_run daily ok "$size_bytes" "dump terverifikasi" || true
+BACKUP_RUN_RECORDED=1
+log "catatan eksekusi tersimpan di backup_runs"

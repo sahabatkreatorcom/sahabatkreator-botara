@@ -888,3 +888,17 @@ export {
   type DeadLetterOutboxRow,
   type PlatformSystemStats,
 } from "./platform-console";
+export {
+  normalizeAdminEmail,
+  isPlatformAdmin,
+  listPlatformAdmins,
+  addPlatformAdmin,
+  removePlatformAdmin,
+  listBackupRuns,
+  getBackupStatus,
+  type PlatformAdminEntry,
+  type BackupRunEntry,
+  type AddPlatformAdminInput,
+  type RemovePlatformAdminInput,
+  type RemoveAdminResult,
+} from "./platform-admins";

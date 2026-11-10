@@ -19,7 +19,7 @@ import {
   evaluateIntegrationLogReplayEligibility,
   getIntegrationLog,
   getUnresolvedIntegrationLog,
-  isPlatformAdminEmail,
+  isPlatformAdmin,
   listFailedOutboundMessages,
   listIntegrationLogs,
   listUnresolvedIntegrationLogs,
@@ -243,7 +243,12 @@ export function createLogsRoutes(
 
   app.get("/logs/unresolved", async (c) => {
     const appUser = c.get("appUser");
-    if (!isPlatformAdminEmail(appUser.email, opts.platformAdminEmails)) {
+    const allowed = await isPlatformAdmin(
+      bundle.db,
+      appUser.email,
+      opts.platformAdminEmails,
+    );
+    if (!allowed) {
       return apiError(c, 404, "NOT_FOUND", "Not found");
     }
     const parsed = IntegrationLogListQuerySchema.safeParse(c.req.query());
@@ -263,7 +268,12 @@ export function createLogsRoutes(
 
   app.get("/logs/unresolved/:logId", async (c) => {
     const appUser = c.get("appUser");
-    if (!isPlatformAdminEmail(appUser.email, opts.platformAdminEmails)) {
+    const allowed = await isPlatformAdmin(
+      bundle.db,
+      appUser.email,
+      opts.platformAdminEmails,
+    );
+    if (!allowed) {
       return apiError(c, 404, "NOT_FOUND", "Not found");
     }
     const logId = c.req.param("logId");
@@ -280,7 +290,12 @@ export function createLogsRoutes(
   // yang sama seperti replay tenant, mesin di ./replay.ts.
   app.post("/logs/unresolved/:logId/replay", async (c) => {
     const appUser = c.get("appUser");
-    if (!isPlatformAdminEmail(appUser.email, opts.platformAdminEmails)) {
+    const allowed = await isPlatformAdmin(
+      bundle.db,
+      appUser.email,
+      opts.platformAdminEmails,
+    );
+    if (!allowed) {
       return apiError(c, 404, "NOT_FOUND", "Not found");
     }
     const logId = c.req.param("logId");

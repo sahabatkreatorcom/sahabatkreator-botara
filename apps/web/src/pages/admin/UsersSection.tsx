@@ -5,6 +5,7 @@ import { translateApiError } from "../../api/errorText";
 import { inputClassName } from "../../components/AuthLayout";
 import { formatDateTime } from "../../utils/format";
 import { dangerButton, type AdminSectionProps } from "./shared";
+import { PlatformAdminsPanel } from "./PlatformAdminsPanel";
 
 /**
  * Pengguna & akses — pencarian lintas tenant + paksa logout.
@@ -77,7 +78,11 @@ export function UsersSection({ t, locale }: AdminSectionProps) {
 
   return (
     <section className="mt-6">
-      <p className="max-w-2xl text-sm text-muted">{t("adminConsole.usersBody")}</p>
+      <PlatformAdminsPanel t={t} locale={locale} />
+
+      <p className="mt-8 max-w-2xl text-sm text-muted">
+        {t("adminConsole.usersBody")}
+      </p>
 
       <label className="mt-4 block max-w-md">
         <span className="text-xs text-muted">{t("adminConsole.searchLabel")}</span>
