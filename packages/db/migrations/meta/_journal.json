@@ -85,6 +85,13 @@
       "when": 1793870118807,
       "tag": "0011_platform_admin_management",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1793870118808,
+      "tag": "0012_content_posts",
+      "breakpoints": true
     }
   ]
 }

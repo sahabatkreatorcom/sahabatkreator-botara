@@ -105,7 +105,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 1 tabel Fase 14A (payment_provider_configs)
 // − 1 tabel Fase 21 (webhook_inbox dihapus — tidak pernah dipakai)
 // + 2 tabel migrasi 0011 (platform_admins, backup_runs — global, tanpa RLS)
-assert.equal(Number(tablesRes.rows[0].count), 60);
+// + 2 tabel Fase 23 / migrasi 0012 (posts, post_media)
+assert.equal(Number(tablesRes.rows[0].count), 62);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -251,7 +252,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-09: migrasi 0011 menambah 2 tabel global (platform_admins,
 // backup_runs) TANPA policy baru — jumlah policy tetap 85.
-assert.equal(Number(policies.rows[0].count), 85);
+//
+// 2026-11-10: migrasi 0012 menambah `posts` + `post_media` dengan
+// tenant_isolation masing-masing → 87.
+assert.equal(Number(policies.rows[0].count), 87);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -279,7 +283,8 @@ await db.exec(`
     carts, cart_items, orders, order_items,
     appointment_services, appointment_settings, appointment_availability,
     bookings, google_calendar_connections,
-    payment_provider_configs
+    payment_provider_configs,
+    posts, post_media
   TO app_user;
 `);
 
@@ -2387,8 +2392,10 @@ function oneHotVector(index: number): string {
        (SELECT count(*)::text FROM pg_policies
          WHERE schemaname = 'public') AS policies`,
   );
-  assert.equal(counts.rows[0].tables, "60");
-  assert.equal(counts.rows[0].policies, "85");
+  // 2026-11-10: migrasi 0012 (content schedule) menambah posts +
+  // post_media beserta tenant_isolation-nya → tabel 62, policy 87.
+  assert.equal(counts.rows[0].tables, "62");
+  assert.equal(counts.rows[0].policies, "87");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
@@ -3572,6 +3579,84 @@ await assert.rejects(
 await db.query(`DELETE FROM messages WHERE id = $1`, [DEDUP_MSG_A]);
 console.log(
   "[48] Fase 21: dedup pesan masuk nyata — duplikat provider_message_id ditolak unique index (bukan lagi tabel webhook_inbox yang mati): OK",
+);
+
+// ---------------------------------------------------------------------------
+// [49] Fase 23: content schedule — isolasi tenant + penjaga aset.
+//
+// Dua hal yang diuji di sini, keduanya di LEVEL DATA (state machine-nya
+// diuji di posts.test.ts):
+//
+//   1. `posts`/`post_media` benar-benar ber-RLS. Tanpa cek ini, migrasi
+//      0011 bisa lupa ENABLE ROW LEVEL SECURITY dan seluruh isolasi tenant
+//      untuk fitur baru jadi hiasan.
+//   2. FK `post_media.media_id` adalah RESTRICT. Ini penjaga terakhir
+//      terhadap `media-gc`: bila penghitungan "tak dirujuk" suatu saat
+//      salah, sapuan harus GAGAL, bukan mengosongkan lampiran postingan
+//      yang sudah terjadwal.
+//
+// Fixture ditaruh di akhir (pelajaran Fase 21): menambah kontak/percakapan
+// lebih awal akan mengubah hitungan cek isolasi [5].
+// ---------------------------------------------------------------------------
+const POST_CH = "7f000000-0000-4000-8000-000000000049";
+const POST_CONTACT = "7f100000-0000-4000-8000-000000000049";
+const POST_CONV = "7f200000-0000-4000-8000-000000000049";
+const POST_MEDIA = "7f300000-0000-4000-8000-000000000049";
+const POST_ID = "7f400000-0000-4000-8000-000000000049";
+
+await db.query(
+  `INSERT INTO channel_accounts (id, tenant_id, provider, external_id, display_name, status)
+   VALUES ($1, $2, 'telegram', 'post-verify-bot', 'Bot Posting', 'connected')`,
+  [POST_CH, TENANT_A],
+);
+await db.query(
+  `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Posting')`,
+  [POST_CONTACT, TENANT_A],
+);
+await db.query(
+  `INSERT INTO conversations
+     (id, tenant_id, channel_account_id, contact_id, provider, provider_chat_id, title, kind)
+   VALUES ($1, $2, $3, $4, 'telegram', '-1001234567890', 'Channel Posting', 'channel')`,
+  [POST_CONV, TENANT_A, POST_CH, POST_CONTACT],
+);
+await db.query(
+  `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
+   VALUES ($1, $2, 'tenant-a/post-cover.jpg', 'cover.jpg', 'image/jpeg', 1024)`,
+  [POST_MEDIA, TENANT_A],
+);
+await db.query(
+  `INSERT INTO posts (id, tenant_id, channel_account_id, conversation_id, title, caption, status, scheduled_at)
+   VALUES ($1, $2, $3, $4, 'Promo Senin', 'Halo semua', 'scheduled', now() + interval '1 day')`,
+  [POST_ID, TENANT_A, POST_CH, POST_CONV],
+);
+await db.query(
+  `INSERT INTO post_media (tenant_id, post_id, media_id, position) VALUES ($1, $2, $3, 0)`,
+  [TENANT_A, POST_ID, POST_MEDIA],
+);
+
+await assert.rejects(
+  db.query(`DELETE FROM media WHERE id = $1`, [POST_MEDIA]),
+  /foreign key|violates/i,
+);
+
+const postIsolation = await db.transaction(async (tx) => {
+  await tx.query(`SET LOCAL ROLE app_user`);
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_A]);
+  const own = await tx.query(`SELECT id FROM posts`);
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_B]);
+  const other = await tx.query(`SELECT id FROM posts`);
+  return { own: own.rows.length, other: other.rows.length };
+});
+assert.equal(postIsolation.own, 1);
+assert.equal(postIsolation.other, 0);
+
+await db.query(`DELETE FROM posts WHERE id = $1`, [POST_ID]);
+await db.query(`DELETE FROM media WHERE id = $1`, [POST_MEDIA]);
+await db.query(`DELETE FROM conversations WHERE id = $1`, [POST_CONV]);
+await db.query(`DELETE FROM contacts WHERE id = $1`, [POST_CONTACT]);
+await db.query(`DELETE FROM channel_accounts WHERE id = $1`, [POST_CH]);
+console.log(
+  "[49] Fase 23: posts/post_media ber-RLS (tenant lain melihat 0 baris) dan FK media RESTRICT menolak penghapusan aset yang masih dirujuk postingan: OK",
 );
 
 await db.close();

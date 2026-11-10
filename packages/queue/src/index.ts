@@ -54,6 +54,7 @@ export const COMMENT_EVALUATE_JOB = "comment.evaluate";
 export const KB_EMBED_JOB = "kb.embed";
 export const TEAM_INVITATION_EMAIL_JOB = "team.invitation_email";
 export const APPOINTMENT_GOOGLE_SYNC_JOB = "appointment.google_sync";
+export const POST_PUBLISH_JOB = "post.publish";
 
 export interface AutomationEvaluateJobData {
   tenantId: string;
@@ -190,6 +191,23 @@ export interface AppointmentGoogleSyncJobData {
   outboxEventId: string;
 }
 
+/**
+ * Job Fase 23: terbitkan SATU postingan channel. Di-enqueue oleh relay
+ * outbox dari event `post.publish_due`, sebagai job TERTUNDA dengan delay
+ * = jam tayang.
+ *
+ * `scheduledAt` ikut dibawa dan WAJIB dicocokkan dengan kolom
+ * `posts.scheduled_at` sebelum mengirim: penjadwalan ulang membuat job
+ * baru, dan job lama (yang masih hidup di Redis) tidak boleh menerbitkan
+ * lebih awal. jobId memuat `scheduledAt` supaya dua jadwal berbeda tidak
+ * saling menimpa di antrean.
+ */
+export interface PostPublishJobData {
+  tenantId: string;
+  postId: string;
+  scheduledAt: string;
+}
+
 /** jobId deterministik dari id event outbox — fondasi idempotensi relay. */
 export function automationEvaluateJobId(outboxEventId: string): string {
   return `automation-evaluate-${outboxEventId}`;
@@ -280,7 +298,8 @@ export type MainJobData =
   | CommentEvaluateJobData
   | KbEmbedJobData
   | InvitationEmailJobData
-  | AppointmentGoogleSyncJobData;
+  | AppointmentGoogleSyncJobData
+  | PostPublishJobData;
 
 export type MainQueue = Queue<MainJobData>;
 
@@ -504,6 +523,44 @@ export async function enqueueAppointmentGoogleSync(
     ...options,
   });
   return job.id ?? appointmentGoogleSyncJobId(data.outboxEventId);
+}
+
+/**
+ * jobId deterministik untuk publikasi postingan: SATU jadwal = SATU job.
+ * `scheduledAt` ikut di dalam id supaya penjadwalan ulang menghasilkan job
+ * baru (jadwal lama tetap hidup sampai waktunya tiba, lalu ditolak
+ * publisher karena `scheduled_at` sudah berbeda).
+ */
+export function postPublishJobId(postId: string, scheduledAt: string): string {
+  const stamp = new Date(scheduledAt).getTime();
+  return `post-${postId}-${Number.isFinite(stamp) ? stamp : scheduledAt}`;
+}
+
+/**
+ * Meng-enqueue publikasi postingan sebagai job TERTUNDA BullMQ.
+ *
+ * `attempts: 1` SENGAJA — berbeda dari broadcast/sequence. Menerbitkan
+ * postingan ke linimasa publik TIDAK idempoten: percobaan ulang setelah
+ * provider menerima (tetapi sebelum penandaan berhasil) akan menghasilkan
+ * dua postingan. Kegagalan dicatat sebagai `failed` dan operator yang
+ * memutuskan, bukan mesin yang mencoba lagi diam-diam.
+ */
+export async function enqueuePostPublish(
+  queue: MainQueue,
+  data: PostPublishJobData,
+  delayMs: number,
+  options?: JobsOptions,
+): Promise<string> {
+  const jobId = postPublishJobId(data.postId, data.scheduledAt);
+  const job = await queue.add(POST_PUBLISH_JOB, data, {
+    jobId,
+    delay: Math.max(0, Math.floor(delayMs)),
+    attempts: 1,
+    removeOnComplete: 1_000,
+    removeOnFail: 1_000,
+    ...options,
+  });
+  return job.id ?? jobId;
 }
 
 export {

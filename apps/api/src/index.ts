@@ -52,6 +52,7 @@ import { createAdminRoutes } from "./modules/admin/routes";
 import { createLogsRoutes } from "./modules/logs/routes";
 import { createAuditRoutes } from "./modules/audit/routes";
 import { createBroadcastsRoutes } from "./modules/broadcasts/routes";
+import { createPostsRoutes } from "./modules/posts/routes";
 import { createWhatsAppTemplatesRoutes } from "./modules/whatsapp-templates/routes";
 import { createCommentsRoutes } from "./modules/comments/routes";
 import { createFlowsRoutes } from "./modules/flows/routes";
@@ -259,6 +260,10 @@ routes.route(
 // Modul broadcasts (Fase 7C) — kampanye siaran /tenants/:tenantId/broadcasts;
 // eksekusi dispatch ada di worker (event outbox broadcast.dispatch_due).
 routes.route("/", createBroadcastsRoutes(authBundle));
+// Modul posts (Fase 23) — Content Schedule untuk channel Telegram
+// /tenants/:tenantId/posts; penerbitan oleh worker (event outbox
+// post.publish_due → job post.publish).
+routes.route("/", createPostsRoutes(authBundle));
 // Modul whatsapp-templates (Fase 10A) — template pesan resmi WhatsApp
 // /tenants/:tenantId/whatsapp-templates (cermin lokal + Graph Meta).
 routes.route(

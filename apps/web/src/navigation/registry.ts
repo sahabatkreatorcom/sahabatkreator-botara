@@ -12,7 +12,7 @@ import type { TranslationKey } from "@sahabat-kreator/i18n";
 export type IconName =
   | "home" | "inbox" | "bot" | "megaphone" | "users" | "workflow" | "book"
   | "bag" | "link" | "chart" | "card" | "settings" | "shield" | "more"
-  | "list" | "audit" | "flow" | "growth" | "calendar";
+  | "list" | "audit" | "flow" | "growth" | "calendar" | "post";
 
 export interface NavItem {
   id: string;
@@ -31,6 +31,10 @@ export const NAV_REGISTRY: NavItem[] = [
   { id: "inbox",       labelKey: "nav.inbox",       icon: "inbox",     route: "/inbox",       badge: "unreadInbox",      mobile: { slot: 2 },      order: { desktop: 2,  more: 0 } },
   { id: "agents",      labelKey: "nav.agents",      icon: "bot",       route: "/agents",      badge: "pendingApprovals", mobile: { slot: 3 },      order: { desktop: 3,  more: 0 } },
   { id: "broadcasts",  labelKey: "nav.broadcasts",  icon: "megaphone", route: "/broadcasts", mobile: { slot: 4 },      order: { desktop: 4,  more: 0 } },
+  // Jadwal Konten (Fase 23): postingan terjadwal ke channel Telegram.
+  // Bersebelahan dengan Broadcasts karena keduanya "kirim sesuatu pada
+  // waktu tertentu" — bedanya broadcast punya penerima, ini tidak.
+  { id: "posts",       labelKey: "nav.posts",       icon: "post",      route: "/posts",       mobile: { slot: "more" }, order: { desktop: 4.5, more: 0.5 } },
   { id: "contacts",    labelKey: "nav.contacts",    icon: "users",     route: "/contacts",    mobile: { slot: "more" }, order: { desktop: 5,  more: 1 } },
   { id: "automations", labelKey: "nav.automations", icon: "workflow",  route: "/automations", mobile: { slot: "more" }, order: { desktop: 6,  more: 2 } },
   // Flow Builder (Fase 8B): daftar /flows + builder canvas /flows/:flowId

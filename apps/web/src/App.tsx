@@ -73,6 +73,9 @@ const AutomationsPage = lazy(() =>
 const BroadcastsPage = lazy(() =>
   import("./pages/BroadcastsPage").then((m) => ({ default: m.BroadcastsPage })),
 );
+const PostsPage = lazy(() =>
+  import("./pages/PostsPage").then((m) => ({ default: m.PostsPage })),
+);
 const AnalyticsPage = lazy(() =>
   import("./pages/AnalyticsPage").then((m) => ({ default: m.AnalyticsPage })),
 );
@@ -334,6 +337,8 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
           <AutomationsPage t={t} locale={locale} />
         ) : activeId === "broadcasts" ? (
           <BroadcastsPage t={t} locale={locale} />
+        ) : activeId === "posts" ? (
+          <PostsPage t={t} locale={locale} />
         ) : activeId === "flows" ? (
           match.segment ? (
             <FlowBuilderPage

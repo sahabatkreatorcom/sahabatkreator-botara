@@ -146,6 +146,17 @@ export const ErrorCodeSchema = z.enum([
   // Fase 16B: instantiate galeri template automation dengan slug tak
   // dikenal → 404 (padanan FLOW_TEMPLATE_NOT_FOUND untuk /automations).
   "AUTOMATION_TEMPLATE_NOT_FOUND",
+  // Fase 23: content schedule. Kode domain PostDomainError dipetakan 1:1
+  // ke sini supaya UI menerjemahkan sebabnya, bukan menebak dari status.
+  "POST_NOT_FOUND",
+  "POST_TARGET_NOT_FOUND",
+  "POST_TARGET_NOT_CONNECTED",
+  "POST_MEDIA_NOT_FOUND",
+  "POST_MEDIA_ALBUM_UNSUPPORTED",
+  "POST_NOT_EDITABLE",
+  "POST_NOT_SCHEDULABLE",
+  "POST_NOT_CANCELLABLE",
+  "POST_EMPTY",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

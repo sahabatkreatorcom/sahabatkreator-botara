@@ -23,6 +23,12 @@ import type {
   BroadcastRecipientListResponse,
   BroadcastResponse,
   CreateBroadcastRequest,
+  CreatePostRequest,
+  PostListResponse,
+  PostResponse,
+  PostStatus,
+  PostTargetListResponse,
+  UpdatePostRequest,
   ScheduleBroadcastRequest,
   UpdateBroadcastRequest,
   CreateWhatsAppTemplateRequest,
@@ -1643,6 +1649,69 @@ export const api = {
     replayUnresolved(logId: string): Promise<IntegrationLogReplayResponse> {
       return request<IntegrationLogReplayResponse>(
         `/api/logs/unresolved/${logId}/replay`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+  },
+  /**
+   * Content Schedule (Fase 23) — postingan terjadwal ke channel Telegram.
+   * `targets` kosong berarti bot belum menjadi admin di channel mana pun;
+   * UI memakai itu untuk instruksi, bukan pemilih kosong.
+   */
+  posts: {
+    async targets(tenantId: string): Promise<PostTargetListResponse> {
+      return request<PostTargetListResponse>(
+        `/api/tenants/${tenantId}/posts/targets`,
+        { method: "GET" },
+      );
+    },
+    async list(
+      tenantId: string,
+      params: { status?: PostStatus } = {},
+    ): Promise<PostListResponse> {
+      const qs = params.status ? `?status=${params.status}` : "";
+      return request<PostListResponse>(
+        `/api/tenants/${tenantId}/posts${qs}`,
+        { method: "GET" },
+      );
+    },
+    create(tenantId: string, input: CreatePostRequest): Promise<PostResponse> {
+      return request<PostResponse>(`/api/tenants/${tenantId}/posts`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    update(
+      tenantId: string,
+      postId: string,
+      input: UpdatePostRequest,
+    ): Promise<PostResponse> {
+      return request<PostResponse>(`/api/tenants/${tenantId}/posts/${postId}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
+    },
+    async remove(tenantId: string, postId: string): Promise<void> {
+      await request<unknown>(`/api/tenants/${tenantId}/posts/${postId}`, {
+        method: "DELETE",
+      });
+    },
+    schedule(
+      tenantId: string,
+      postId: string,
+      scheduledAt?: string | null,
+    ): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/schedule`,
+        {
+          method: "POST",
+          body: JSON.stringify(scheduledAt ? { scheduledAt } : {}),
+        },
+      );
+    },
+    cancel(tenantId: string, postId: string): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/cancel`,
         { method: "POST", body: JSON.stringify({}) },
       );
     },

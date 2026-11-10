@@ -50,6 +50,7 @@ import {
   startTelegramDeliveryPoller,
   type DeliveryPoller,
 } from "./delivery";
+import { publishTelegramPost } from "./delivery/telegram-post";
 import {
   AGENT_RESPOND_JOB,
   AUTOMATION_EVALUATE_JOB,
@@ -61,6 +62,7 @@ import {
   SEQUENCE_STEP_JOB,
   TEAM_INVITATION_EMAIL_JOB,
   APPOINTMENT_GOOGLE_SYNC_JOB,
+  POST_PUBLISH_JOB,
   createAutomationQueue,
   createRealtimePublisher,
   createRedisConnection,
@@ -71,6 +73,7 @@ import {
   enqueueFlowStep,
   enqueueAppointmentGoogleSync,
   enqueueInvitationEmail,
+  enqueuePostPublish,
   enqueueKbEmbed,
   enqueueSequenceStep,
   type AgentRespondJobData,
@@ -79,6 +82,7 @@ import {
   type CommentEvaluateJobData,
   type FlowStepJobData,
   type AppointmentGoogleSyncJobData,
+  type PostPublishJobData,
   type InvitationEmailJobData,
   type KbEmbedJobData,
   type MainJobData,
@@ -479,6 +483,30 @@ const bullWorker = new Worker<MainJobData>(
       );
       return result;
     }
+    if (job.name === POST_PUBLISH_JOB) {
+      // Fase 23: terbitkan SATU postingan channel. Klaim atomik, validasi
+      // ulang, dan penandaan status ada di core; worker hanya memegang
+      // pengiriman (token, berkas, Bot API).
+      const data = job.data as PostPublishJobData;
+      const result = await publishTelegramPost(
+        db,
+        {
+          tenantId: data.tenantId,
+          postId: data.postId,
+          scheduledAt: data.scheduledAt,
+        },
+        {
+          channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+          telegramApiBase: env.TELEGRAM_API_BASE,
+          mediaStore,
+        },
+      );
+      console.log(
+        `[worker] post.publish post=${data.postId} published=${result.published}` +
+          (result.reason ? ` reason=${result.reason}` : ""),
+      );
+      return result;
+    }
     if (job.name === FLOW_STEP_JOB) {
       // Fase 8A: eksekusi run flow — node demi node di core sampai run
       // menunggu (delay) atau terminal. Node `ai_response` me-resolve
@@ -783,6 +811,37 @@ async function relayTick(): Promise<void> {
         await enqueueBroadcastDispatch(
           queue,
           { tenantId: event.tenantId, broadcastId: payload.broadcastId },
+          Number.isNaN(delayMs) ? 0 : delayMs,
+        );
+        return;
+      }
+      // Fase 23: postingan jatuh tempo → job BullMQ TERTUNDA
+      // `post.publish` (delay = scheduledAt − sekarang). Postingan yang
+      // dibatalkan atau dijadwal ulang tetap menghasilkan job; publisher
+      // menolaknya lewat pencocokan `scheduled_at`, jadi tidak pernah
+      // terbit lebih awal.
+      if (event.type === "post.publish_due") {
+        const payload = event.payload as {
+          postId?: unknown;
+          scheduledAt?: unknown;
+        };
+        if (
+          typeof payload.postId !== "string" ||
+          typeof payload.scheduledAt !== "string"
+        ) {
+          console.warn(
+            `[worker] event post.publish_due ${event.id} payload tidak lengkap — ditandai published tanpa job`,
+          );
+          return;
+        }
+        const delayMs = Date.parse(payload.scheduledAt) - Date.now();
+        await enqueuePostPublish(
+          queue,
+          {
+            tenantId: event.tenantId,
+            postId: payload.postId,
+            scheduledAt: payload.scheduledAt,
+          },
           Number.isNaN(delayMs) ? 0 : delayMs,
         );
         return;

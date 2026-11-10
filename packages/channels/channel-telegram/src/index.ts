@@ -269,6 +269,127 @@ export class TelegramBotApiClient {
     });
     return { providerMessageId: String(result.message_id) };
   }
+
+  /**
+   * Terbitkan SATU postingan ke channel (Fase 23): teks saja, satu media,
+   * atau album 2–10 foto/video.
+   *
+   * Kenapa satu metode, bukan tiga yang dipanggil pemanggil: memilih
+   * metode Bot API yang tepat adalah pengetahuan provider, bukan
+   * pengetahuan worker. Worker hanya tahu "kirim ini ke sana".
+   *
+   * Batasan Bot API yang ditegakkan di sini:
+   * - caption maksimum 1024 karakter (dipotong, bukan ditolak — kontrak
+   *   sudah menolak lebih awal; pemotongan ini jaring pengaman);
+   * - `sendMediaGroup` menolak campuran dokumen dengan foto/video, jadi
+   *   album hanya untuk foto/video (divalidasi core saat penjadwalan);
+   * - unggahan memakai multipart, sehingga berkas dibaca dari object
+   *   store lalu dikirim langsung — tanpa URL publik bertanda tangan.
+   */
+  async sendChannelPost(input: {
+    chatId: string;
+    caption: string;
+    files: TelegramPostFile[];
+  }): Promise<{ providerMessageId: string }> {
+    const caption = input.caption.slice(0, 1024);
+    const files = input.files;
+
+    if (files.length === 0) {
+      const result = await this.call<TelegramMessage>("sendMessage", {
+        chat_id: input.chatId,
+        text: caption,
+      });
+      return { providerMessageId: String(result.message_id) };
+    }
+
+    if (files.length === 1) {
+      const file = files[0]!;
+      const method =
+        file.kind === "photo"
+          ? "sendPhoto"
+          : file.kind === "video"
+            ? "sendVideo"
+            : "sendDocument";
+      const field = file.kind === "photo" ? "photo" : file.kind === "video" ? "video" : "document";
+      const form = new FormData();
+      form.set("chat_id", input.chatId);
+      if (caption.length > 0) form.set("caption", caption);
+      form.set(field, toBlob(file), file.filename);
+      const result = await this.callMultipart<TelegramMessage>(method, form);
+      return { providerMessageId: String(result.message_id) };
+    }
+
+    // Album. `attach://<name>` menunjuk berkas yang dikirim di field
+    // bernama sama pada form yang sama.
+    const form = new FormData();
+    form.set("chat_id", input.chatId);
+    const items = files.map((file, index) => {
+      const attach = `f${index}`;
+      form.set(attach, toBlob(file), file.filename);
+      return {
+        type: file.kind === "video" ? "video" : "photo",
+        media: `attach://${attach}`,
+        ...(index === 0 && caption.length > 0 ? { caption } : {}),
+      };
+    });
+    form.set("media", JSON.stringify(items));
+    const result = await this.callMultipart<TelegramMessage[]>(
+      "sendMediaGroup",
+      form,
+    );
+    const first = Array.isArray(result) ? result[0] : undefined;
+    return { providerMessageId: String(first?.message_id ?? "") };
+  }
+
+  /**
+   * Varian multipart dari `call`. Dipisah karena `content-type` TIDAK
+   * boleh di-set manual: boundary-nya dibuat oleh FormData.
+   */
+  private async callMultipart<T>(method: string, form: FormData): Promise<T> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/bot${this.token}/${method}`,
+        {
+          method: "POST",
+          body: form,
+          signal: AbortSignal.timeout(this.timeoutMs),
+        },
+      );
+    } catch {
+      throw new TelegramApiError(0, "network_error");
+    }
+    let body: { ok?: boolean; result?: T; description?: string } = {};
+    try {
+      body = (await response.json()) as typeof body;
+    } catch {
+      throw new TelegramApiError(response.status, "invalid_response");
+    }
+    if (!response.ok || body.ok !== true) {
+      throw new TelegramApiError(
+        response.status,
+        typeof body.description === "string"
+          ? body.description.slice(0, 200)
+          : "telegram_error",
+      );
+    }
+    return body.result as T;
+  }
+}
+
+/** Berkas yang akan diunggah sebagai bagian dari postingan channel. */
+export interface TelegramPostFile {
+  data: Uint8Array;
+  filename: string;
+  contentType: string;
+  kind: "photo" | "video" | "document";
+}
+
+function toBlob(file: TelegramPostFile): Blob {
+  // Salinan bertipe `Uint8Array<ArrayBuffer>` supaya sah sebagai BlobPart
+  // tanpa cast: buffer dari object store bisa saja berupa view atas buffer
+  // bersama, dan Blob menyalinnya sendiri saat dikirim.
+  return new Blob([new Uint8Array(file.data)], { type: file.contentType });
 }
 
 // ---------------------------------------------------------------------------

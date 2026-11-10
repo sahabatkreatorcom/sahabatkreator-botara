@@ -1,5 +1,5 @@
 import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
-import { media, messages, type Database } from "@sahabat-kreator/db";
+import { media, messages, postMedia, type Database } from "@sahabat-kreator/db";
 import type { MediaObjectStore } from "./media-storage";
 import { withTenantDb } from "./tx";
 
@@ -361,7 +361,14 @@ export async function pruneUnreferencedMedia(
               media.id,
               tenantRows.map((row) => row.id),
             ),
-            sql`NOT EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.mediaId} = ${media.id})`,
+            // Fase 23: media yang dirujuk postingan terjadwal BUKAN sampah.
+            // Tanpa lengan ini, aset sebuah post yang dijadwalkan dua
+            // minggu ke depan dihapus lebih dulu (masa tenggang 7 hari),
+            // dan kegagalannya baru terlihat saat jam tayang. FK
+            // `post_media.media_id` yang RESTRICT adalah jaring kedua bila
+            // penghitungan di sini suatu saat salah.
+            sql`NOT EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.mediaId} = ${media.id})
+                AND NOT EXISTS (SELECT 1 FROM ${postMedia} WHERE ${postMedia.mediaId} = ${media.id})`,
           ),
         );
     });

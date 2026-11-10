@@ -38,5 +38,6 @@ export * from "./saved-replies";
 export * from "./growth";
 export * from "./segments";
 export * from "./orders";
+export * from "./posts";
 export * from "./appointments";
 export * from "./public-v1";

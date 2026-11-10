@@ -54,6 +54,7 @@ Legenda: ✅ selesai · ⚠️ sebagian · ❌ belum
 | Node flow (15+ tipe: condition, delay, ai_response, http_request, goto_flow, ab_split, wait_reply, questionnaire, show_catalog, cart_checkout, book_appointment, …) | ✅ | `validateFlowNodeConfig` |
 | Eksperimen A/B di flow | ✅ | `flow_experiment_assignments` |
 | Broadcast kampanye | ✅ | `core/broadcasts.ts` |
+| Jadwal konten (postingan channel Telegram) | ⚠️ | `core/posts.ts`, migrasi 0011, `post.publish` — Telegram saja; album foto/video; belum ada alur persetujuan |
 | Segmen audiens | ✅ | `core/segments.ts` |
 | Opt-in/opt-out consent | ✅ | `tenant_opt_in_settings` |
 
