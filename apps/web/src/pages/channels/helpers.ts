@@ -64,6 +64,32 @@ export function handleLine(channel: ChannelAccountResponse): string | null {
     // Webchat tidak punya @handle — siteKey terpotong adalah identitasnya.
     return truncateMiddle(channel.externalId);
   }
+  if (
+    channel.provider === "threads" ||
+    channel.provider === "tiktok" ||
+    channel.provider === "pinterest" ||
+    channel.provider === "bluesky"
+  ) {
+    // Provider sasaran /posts dengan @handle publik (Threads/TikTok/
+    // Pinterest username; Bluesky handle = DID tampil? bukan — yang
+    // disimpan sebagai publicHandle adalah handle bsky yang terbaca).
+    return channel.publicHandle
+      ? `@${channel.publicHandle}`
+      : truncateMiddle(channel.externalId);
+  }
+  if (channel.provider === "linkedin") {
+    // Profil LinkedIn tidak memakai @handle di kartu — nama tampil
+    // adalah identitasnya; baris handle menampilkan slug profil bila
+    // ada (publicHandle), selain itu id terpotong.
+    return channel.publicHandle ?? truncateMiddle(channel.externalId);
+  }
+  if (channel.provider === "youtube" || channel.provider === "google_business") {
+    // Kanal YouTube / lokasi bisnis: nama tampil adalah identitasnya;
+    // tanpa handle publik tersimpan, tampilkan id terpotong.
+    return channel.publicHandle
+      ? `@${channel.publicHandle}`
+      : truncateMiddle(channel.externalId);
+  }
   return null;
 }
 

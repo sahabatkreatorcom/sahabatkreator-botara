@@ -15,12 +15,16 @@ import {
 } from "react";
 import type {
   ChannelAccountResponse,
+  GoogleCalendarConnectionResponse,
+  LinkedInOAuthInfoResponse,
   MetaOAuthAsset,
   MetaOAuthInfoResponse,
   MetaOAuthProvider,
   MetaOAuthSessionResponse,
   MetaWebhookInfoResponse,
+  PinterestOAuthInfoResponse,
   ThreadsOAuthInfoResponse,
+  TikTokOAuthInfoResponse,
 } from "@sahabat-kreator/contracts";
 import { api, ApiClientError } from "../api/client";
 import { translateApiError } from "../api/errorText";
@@ -39,8 +43,10 @@ import {
   CONNECT_PROVIDERS,
   META_PROVIDERS,
   ChannelHealthBlock,
+  GoogleChannelsStepBlock,
   MetaOAuthStepBlock,
   MetaWebhookInfoBlock,
+  ProviderOAuthStepBlock,
   StatusPill,
   ThreadsOAuthStepBlock,
   type ConnectProvider,
@@ -163,6 +169,36 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     string | null
   >(null);
   const [threadsConnected, setThreadsConnected] = useState(false);
+  // OAuth gelombang Semua OAuth (TikTok/LinkedIn/Pinterest): pola
+  // Threads yang sama — info ketersediaan per provider, satu status
+  // start bersama (modal hanya menampilkan satu langkah pada satu
+  // waktu), dan banner sukses generik sesudah kepulangan callback.
+  const [tiktokOAuthInfo, setTikTokOAuthInfo] =
+    useState<TikTokOAuthInfoResponse | null>(null);
+  const [linkedinOAuthInfo, setLinkedInOAuthInfo] =
+    useState<LinkedInOAuthInfoResponse | null>(null);
+  const [pinterestOAuthInfo, setPinterestOAuthInfo] =
+    useState<PinterestOAuthInfoResponse | null>(null);
+  const [providerOAuthStarting, setProviderOAuthStarting] = useState(false);
+  const [providerOAuthStartError, setProviderOAuthStartError] = useState<
+    string | null
+  >(null);
+  const [oauthConnectedNotice, setOauthConnectedNotice] = useState<
+    string | null
+  >(null);
+  // Bluesky (bukan OAuth): formulir handle + App Password.
+  const [blueskyHandle, setBlueskyHandle] = useState("");
+  const [blueskyAppPassword, setBlueskyAppPassword] = useState("");
+  const [blueskyConnecting, setBlueskyConnecting] = useState(false);
+  const [blueskyError, setBlueskyError] = useState<string | null>(null);
+  // Google di Channels: status koneksi Google tenant (alur yang sama
+  // seperti halaman Kalender) + status membuka dialog Google.
+  const [googleStatus, setGoogleStatus] =
+    useState<GoogleCalendarConnectionResponse | null>(null);
+  const [googleStarting, setGoogleStarting] = useState(false);
+  const [googleStartError, setGoogleStartError] = useState<string | null>(
+    null,
+  );
   const [copiedWebhookField, setCopiedWebhookField] = useState<string | null>(
     null,
   );
@@ -265,6 +301,40 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       .catch(() => {
         if (!cancelled) setThreadsOAuthInfo(null);
       });
+    // Ketersediaan connect TikTok/LinkedIn/Pinterest — pola yang sama.
+    api.channels
+      .tiktokOAuthInfo(tenantId)
+      .then((info) => {
+        if (!cancelled) setTikTokOAuthInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setTikTokOAuthInfo(null);
+      });
+    api.channels
+      .linkedinOAuthInfo(tenantId)
+      .then((info) => {
+        if (!cancelled) setLinkedInOAuthInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setLinkedInOAuthInfo(null);
+      });
+    api.channels
+      .pinterestOAuthInfo(tenantId)
+      .then((info) => {
+        if (!cancelled) setPinterestOAuthInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setPinterestOAuthInfo(null);
+      });
+    // Status koneksi Google tenant (untuk blok Google di Channels).
+    api.appointments
+      .googleStatus(tenantId)
+      .then((status) => {
+        if (!cancelled) setGoogleStatus(status);
+      })
+      .catch(() => {
+        if (!cancelled) setGoogleStatus(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -275,6 +345,9 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     setManualOpen(false);
     setOauthStartError(null);
     setThreadsOAuthStartError(null);
+    setProviderOAuthStartError(null);
+    setGoogleStartError(null);
+    setBlueskyError(null);
   }, [connectStep]);
 
   // Kepulangan dari dialog Meta (Fase 7D): callback API me-redirect ke
@@ -291,11 +364,29 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     const errorCode = params.get("meta_oauth_error");
     const threadsResult = params.get("threads_oauth");
     const threadsError = params.get("threads_oauth_error");
-    if (!sessionId && !errorCode && !threadsResult && !threadsError) return;
+    // Kepulangan provider gelombang Semua OAuth — penanda per
+    // provider dengan bentuk yang sama seperti Threads.
+    const waveProviders = [
+      { key: "tiktok", noticeKey: "channels.tiktokConnectedNotice" },
+      { key: "linkedin", noticeKey: "channels.linkedinConnectedNotice" },
+      { key: "pinterest", noticeKey: "channels.pinterestConnectedNotice" },
+    ] as const;
+    const waveResults = waveProviders.map((p) => ({
+      ...p,
+      result: params.get(`${p.key}_oauth`),
+      error: params.get(`${p.key}_oauth_error`),
+    }));
+    const hasWave = waveResults.some((w) => w.result || w.error);
+    if (!sessionId && !errorCode && !threadsResult && !threadsError && !hasWave)
+      return;
     params.delete("meta_oauth");
     params.delete("meta_oauth_error");
     params.delete("threads_oauth");
     params.delete("threads_oauth_error");
+    for (const w of waveResults) {
+      params.delete(`${w.key}_oauth`);
+      params.delete(`${w.key}_oauth_error`);
+    }
     const rest = params.toString();
     window.history.replaceState(
       null,
@@ -320,6 +411,17 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     if (threadsResult === "connected") {
       setThreadsConnected(true);
       void load();
+    }
+    for (const w of waveResults) {
+      if (w.error) {
+        setOauthBannerError(
+          translateApiError(t, new ApiClientError(0, w.error, "")),
+        );
+      }
+      if (w.result === "connected") {
+        setOauthConnectedNotice(t(w.noticeKey));
+        void load();
+      }
     }
     // Sengaja hanya sekali saat mount; `t` dari render pertama cukup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -564,6 +666,83 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     }
   };
 
+  /**
+   * Mulai connect provider OAuth gelombang Semua OAuth
+   * (TikTok/LinkedIn/Pinterest): pola Threads — minta URL dialog
+   * lalu arahkan browser ke sana; callback langsung menghubungkan.
+   */
+  const handleProviderOAuthStart = async (
+    provider: "tiktok" | "linkedin" | "pinterest",
+  ) => {
+    if (!tenantId || providerOAuthStarting) return;
+    setProviderOAuthStarting(true);
+    setProviderOAuthStartError(null);
+    try {
+      const started =
+        provider === "tiktok"
+          ? await api.channels.tiktokOAuthStart(tenantId)
+          : provider === "linkedin"
+            ? await api.channels.linkedinOAuthStart(tenantId)
+            : await api.channels.pinterestOAuthStart(tenantId);
+      window.location.href = started.dialogUrl;
+    } catch (err) {
+      setProviderOAuthStartError(
+        err instanceof ApiClientError
+          ? translateApiError(t, err)
+          : t("errors.generic"),
+      );
+      setProviderOAuthStarting(false);
+    }
+  };
+
+  /** Hubungkan Bluesky (formulir handle + App Password, bukan OAuth). */
+  const handleConnectBluesky = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!tenantId || blueskyConnecting) return;
+    setBlueskyConnecting(true);
+    setBlueskyError(null);
+    try {
+      const result = await api.channels.blueskyConnect(tenantId, {
+        handle: blueskyHandle.trim(),
+        appPassword: blueskyAppPassword,
+      });
+      setBlueskyHandle("");
+      setBlueskyAppPassword("");
+      await load();
+      finishConnect(result.channelAccountId);
+    } catch (err) {
+      setBlueskyError(
+        err instanceof ApiClientError
+          ? translateApiError(t, err)
+          : t("errors.generic"),
+      );
+    } finally {
+      setBlueskyConnecting(false);
+    }
+  };
+
+  /**
+   * Hubungkan Google dari Channels: memakai alur OAuth Google yang
+   * SUDAH ada (sama seperti halaman Kalender) — sekali consent
+   * menyinkronkan kanal YouTube + lokasi Google Business.
+   */
+  const handleGoogleConnect = async () => {
+    if (!tenantId || googleStarting) return;
+    setGoogleStarting(true);
+    setGoogleStartError(null);
+    try {
+      const started = await api.appointments.googleConnect(tenantId);
+      window.location.href = started.url;
+    } catch (err) {
+      setGoogleStartError(
+        err instanceof ApiClientError
+          ? translateApiError(t, err)
+          : t("errors.generic"),
+      );
+      setGoogleStarting(false);
+    }
+  };
+
   /** Selesaikan OAuth: hubungkan aset terpilih dari sesi (Fase 7D). */
   const handleOAuthComplete = async (asset: MetaOAuthAsset) => {
     // Hotfix R1: aset nonaktif (Page tanpa token yang dapat dipakai)
@@ -770,6 +949,19 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
           <button
             type="button"
             onClick={() => setThreadsConnected(false)}
+            className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-muted hover:text-ink"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+      ) : null}
+
+      {oauthConnectedNotice ? (
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-line bg-elevated px-3 py-2">
+          <p className="text-sm text-ink">{oauthConnectedNotice}</p>
+          <button
+            type="button"
+            onClick={() => setOauthConnectedNotice(null)}
             className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-muted hover:text-ink"
           >
             {t("common.close")}
@@ -1485,6 +1677,134 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                     starting={threadsOAuthStarting}
                     startError={threadsOAuthStartError}
                     onStart={() => void handleThreadsOAuthStart()}
+                  />
+                ) : null}
+
+                {connectStep === "tiktok" ? (
+                  <ProviderOAuthStepBlock
+                    t={t}
+                    info={tiktokOAuthInfo}
+                    starting={providerOAuthStarting}
+                    startError={providerOAuthStartError}
+                    onStart={() => void handleProviderOAuthStart("tiktok")}
+                    keys={{
+                      body: "channels.tiktokConnectBody",
+                      redirectUriLabel: "channels.tiktokRedirectUriLabel",
+                      continueLabel: "channels.tiktokContinue",
+                      startingLabel: "channels.tiktokStarting",
+                      notConfigured: "channels.tiktokNotConfigured",
+                    }}
+                    buttonId="tiktok-connect-button"
+                    buttonStyle={{ backgroundColor: "#010101" }}
+                  />
+                ) : null}
+
+                {connectStep === "linkedin" ? (
+                  <ProviderOAuthStepBlock
+                    t={t}
+                    info={linkedinOAuthInfo}
+                    starting={providerOAuthStarting}
+                    startError={providerOAuthStartError}
+                    onStart={() => void handleProviderOAuthStart("linkedin")}
+                    keys={{
+                      body: "channels.linkedinConnectBody",
+                      redirectUriLabel: "channels.linkedinRedirectUriLabel",
+                      continueLabel: "channels.linkedinContinue",
+                      startingLabel: "channels.linkedinStarting",
+                      notConfigured: "channels.linkedinNotConfigured",
+                    }}
+                    buttonId="linkedin-connect-button"
+                    buttonStyle={{ backgroundColor: "#0A66C2" }}
+                  />
+                ) : null}
+
+                {connectStep === "pinterest" ? (
+                  <ProviderOAuthStepBlock
+                    t={t}
+                    info={pinterestOAuthInfo}
+                    starting={providerOAuthStarting}
+                    startError={providerOAuthStartError}
+                    onStart={() => void handleProviderOAuthStart("pinterest")}
+                    keys={{
+                      body: "channels.pinterestConnectBody",
+                      redirectUriLabel: "channels.pinterestRedirectUriLabel",
+                      continueLabel: "channels.pinterestContinue",
+                      startingLabel: "channels.pinterestStarting",
+                      notConfigured: "channels.pinterestNotConfigured",
+                    }}
+                    buttonId="pinterest-connect-button"
+                    buttonStyle={{ backgroundColor: "#E60023" }}
+                  />
+                ) : null}
+
+                {connectStep === "bluesky" ? (
+                  <form onSubmit={handleConnectBluesky}>
+                    <p className="mt-3 text-sm text-muted">
+                      {t("channels.blueskyConnectBody")}
+                    </p>
+                    <label
+                      className="mt-3 block text-sm font-medium"
+                      htmlFor="bluesky-handle"
+                    >
+                      {t("channels.blueskyHandleLabel")}
+                    </label>
+                    <input
+                      id="bluesky-handle"
+                      value={blueskyHandle}
+                      onChange={(e) => setBlueskyHandle(e.target.value)}
+                      placeholder={t("channels.blueskyHandlePlaceholder")}
+                      maxLength={253}
+                      autoComplete="off"
+                      className={`${inputClassName} mt-1`}
+                    />
+                    <label
+                      className="mt-3 block text-sm font-medium"
+                      htmlFor="bluesky-app-password"
+                    >
+                      {t("channels.blueskyAppPasswordLabel")}
+                    </label>
+                    <PasswordInput
+                      t={t}
+                      id="bluesky-app-password"
+                      value={blueskyAppPassword}
+                      onChange={(e) => setBlueskyAppPassword(e.target.value)}
+                      placeholder={t("channels.blueskyAppPasswordPlaceholder")}
+                      maxLength={255}
+                      autoComplete="off"
+                      className={`${inputClassName} mt-1`}
+                    />
+                    <p className="mt-1 text-xs text-muted">
+                      {t("channels.blueskyAppPasswordHint")}
+                    </p>
+                    {blueskyError ? (
+                      <div className="mt-2">
+                        <FieldError message={blueskyError} />
+                      </div>
+                    ) : null}
+                    <button
+                      type="submit"
+                      disabled={
+                        blueskyConnecting ||
+                        !blueskyHandle.trim() ||
+                        !blueskyAppPassword
+                      }
+                      className="mt-3 rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                      style={{ backgroundColor: "#0085FF" }}
+                    >
+                      {blueskyConnecting
+                        ? t("channels.blueskyConnecting")
+                        : t("channels.blueskyConnectButton")}
+                    </button>
+                  </form>
+                ) : null}
+
+                {connectStep === "google" ? (
+                  <GoogleChannelsStepBlock
+                    t={t}
+                    status={googleStatus}
+                    starting={googleStarting}
+                    startError={googleStartError}
+                    onConnect={() => void handleGoogleConnect()}
                   />
                 ) : null}
 

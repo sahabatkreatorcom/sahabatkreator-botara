@@ -77,6 +77,66 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
       </>
     ),
   },
+  tiktok: {
+    // Aksen merah muda TikTok — terbaca di tema terang maupun gelap
+    // (hitam mereknya tidak), pola keputusan yang sama seperti Threads.
+    color: "#FE2C55",
+    glyph: (
+      <>
+        <path d="M9 18V5l12-2v13" />
+        <circle cx="6" cy="18" r="3" />
+        <circle cx="18" cy="16" r="3" />
+      </>
+    ),
+  },
+  linkedin: {
+    color: "#0A66C2",
+    filled: true,
+    glyph: (
+      <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 1 1 0-4.124 2.062 2.062 0 0 1 0 4.124zM7.119 20.452H3.554V9h3.565v11.452z" />
+    ),
+  },
+  pinterest: {
+    color: "#E60023",
+    glyph: (
+      <>
+        <circle cx="12" cy="12" r="9.5" />
+        <path d="M12 7.5a4.7 4.7 0 1 0 1.8 9.1c.6.1 1.1-.1 1.4-.5" />
+        <path d="M10.2 21.2l2.2-8.2" />
+      </>
+    ),
+  },
+  bluesky: {
+    color: "#0085FF",
+    glyph: (
+      <path d="M12 10.2C10.2 6.9 7.3 5 4.3 5c0 3.9 1.4 6.8 4.3 7.9-2.3 1-3.3 3.4-3.3 6.1 2.4 0 4.8-1.9 6.7-4.8 1.9 2.9 4.3 4.8 6.7 4.8 0-2.7-1-5.1-3.3-6.1 2.9-1.1 4.3-4 4.3-7.9-3 0-5.9 1.9-7.7 5.2z" />
+    ),
+  },
+  youtube: {
+    color: "#FF0000",
+    glyph: (
+      <>
+        <rect x="2" y="5.5" width="20" height="13" rx="4" />
+        <path d="M10.2 9.7v4.6L14.4 12z" />
+      </>
+    ),
+  },
+  google_business: {
+    color: "#34A853",
+    glyph: (
+      <>
+        <path d="M12 21.2S5.2 15.6 5.2 10a6.8 6.8 0 0 1 13.6 0c0 5.6-6.8 11.2-6.8 11.2z" />
+        <circle cx="12" cy="10" r="2.5" />
+      </>
+    ),
+  },
+  google: {
+    color: "#4285F4",
+    filled: true,
+    glyph: (
+      <path d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.35 0 9.25-3.67 9.25-9.09 0-1.15-.15-1.81-.15-1.81z" />
+    ),
+  },
   messenger: {
     color: "#0084FF",
     // Fase 7A (permintaan user): path logo Messenger autentik (gelembung

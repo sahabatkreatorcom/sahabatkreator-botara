@@ -112,6 +112,14 @@ import type {
   MetaWebhookInfoResponse,
   ThreadsOAuthInfoResponse,
   ThreadsOAuthStartResponse,
+  TikTokOAuthInfoResponse,
+  TikTokOAuthStartResponse,
+  LinkedInOAuthInfoResponse,
+  LinkedInOAuthStartResponse,
+  PinterestOAuthInfoResponse,
+  PinterestOAuthStartResponse,
+  BlueskyConnectRequest,
+  BlueskyConnectResponse,
   PaymentLinkListResponse,
   PaymentLinkResponse,
   OrderListResponse,
@@ -629,6 +637,70 @@ export const api = {
       return request<ThreadsOAuthStartResponse>(
         `/api/tenants/${tenantId}/threads-oauth/start`,
         { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /**
+     * GET /api/tenants/:tenantId/channels/tiktok-oauth-info —
+     * ketersediaan connect TikTok (Login Kit). Pola Threads:
+     * Redirect URI resmi + status kredensial aplikasi (Client Key
+     * publik boleh tampil; secret tidak).
+     */
+    tiktokOAuthInfo(tenantId: string): Promise<TikTokOAuthInfoResponse> {
+      return request<TikTokOAuthInfoResponse>(
+        `/api/tenants/${tenantId}/channels/tiktok-oauth-info`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/tiktok-oauth/start — state sekali
+     * pakai + URL dialog authorize TikTok; browser diarahkan ke sana.
+     */
+    tiktokOAuthStart(tenantId: string): Promise<TikTokOAuthStartResponse> {
+      return request<TikTokOAuthStartResponse>(
+        `/api/tenants/${tenantId}/tiktok-oauth/start`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** GET .../channels/linkedin-oauth-info — ketersediaan connect LinkedIn. */
+    linkedinOAuthInfo(tenantId: string): Promise<LinkedInOAuthInfoResponse> {
+      return request<LinkedInOAuthInfoResponse>(
+        `/api/tenants/${tenantId}/channels/linkedin-oauth-info`,
+        { method: "GET" },
+      );
+    },
+    /** POST .../linkedin-oauth/start — state + URL dialog LinkedIn. */
+    linkedinOAuthStart(tenantId: string): Promise<LinkedInOAuthStartResponse> {
+      return request<LinkedInOAuthStartResponse>(
+        `/api/tenants/${tenantId}/linkedin-oauth/start`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** GET .../channels/pinterest-oauth-info — ketersediaan connect Pinterest. */
+    pinterestOAuthInfo(tenantId: string): Promise<PinterestOAuthInfoResponse> {
+      return request<PinterestOAuthInfoResponse>(
+        `/api/tenants/${tenantId}/channels/pinterest-oauth-info`,
+        { method: "GET" },
+      );
+    },
+    /** POST .../pinterest-oauth/start — state + URL dialog Pinterest. */
+    pinterestOAuthStart(tenantId: string): Promise<PinterestOAuthStartResponse> {
+      return request<PinterestOAuthStartResponse>(
+        `/api/tenants/${tenantId}/pinterest-oauth/start`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/bluesky-connect — hubungkan Bluesky
+     * dengan handle + App Password (bukan OAuth). App password hanya
+     * dikirim sekali ini; respons membawa channel hasil connect.
+     */
+    blueskyConnect(
+      tenantId: string,
+      body: BlueskyConnectRequest,
+    ): Promise<BlueskyConnectResponse> {
+      return request<BlueskyConnectResponse>(
+        `/api/tenants/${tenantId}/bluesky-connect`,
+        { method: "POST", body: JSON.stringify(body) },
       );
     },
     /** DELETE /api/tenants/:tenantId/channels/:channelId — putuskan koneksi (hotfix Telegram); riwayat percakapan tidak dihapus. */

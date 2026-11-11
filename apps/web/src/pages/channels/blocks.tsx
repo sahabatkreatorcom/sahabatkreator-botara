@@ -5,6 +5,7 @@
  * Semua sudah berupa komponen dengan props eksplisit — tidak ada yang
  * membaca closure halaman — sehingga pemindahannya murni relokasi.
  */
+import type { CSSProperties } from "react";
 import type {
   ChannelAccountResponse,
   MetaOAuthProvider,
@@ -132,6 +133,130 @@ export function ThreadsOAuthStepBlock({
           {t("channels.threadsNotConfigured")}
         </p>
       ) : null}
+      {startError ? (
+        <div className="mt-2">
+          <FieldError message={startError} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Blok OAuth generik gelombang Semua OAuth (TikTok/LinkedIn/
+ * Pinterest) — pola ThreadsOAuthStepBlock persis: penjelasan +
+ * Redirect URI resmi yang harus didaftarkan di aplikasi platform +
+ * tombol primer bila kredensial aplikasi terisi di Panel Admin.
+ * Perbedaan antar platform hanya kunci i18n + warna tombol, jadi
+ * satu komponen parameterized dipakai bertiga; Threads tetap memakai
+ * blok khususnya sendiri yang sudah lebih dulu mendarat.
+ */
+export function ProviderOAuthStepBlock({
+  t,
+  info,
+  starting,
+  startError,
+  onStart,
+  keys,
+  buttonId,
+  buttonStyle,
+}: {
+  t: Translate;
+  info: { available: boolean; oauthRedirectUri: string } | null;
+  starting: boolean;
+  startError: string | null;
+  onStart: () => void;
+  keys: {
+    body: TranslationKey;
+    redirectUriLabel: TranslationKey;
+    continueLabel: TranslationKey;
+    startingLabel: TranslationKey;
+    notConfigured: TranslationKey;
+  };
+  buttonId: string;
+  buttonStyle: CSSProperties;
+}) {
+  const available = info?.available ?? false;
+  return (
+    <div className="mt-4">
+      <p className="text-sm text-muted">{t(keys.body)}</p>
+      {info ? (
+        <div className="mt-3 rounded-lg border border-line bg-elevated/40 p-3">
+          <div className="text-xs text-muted">{t(keys.redirectUriLabel)}</div>
+          <div className="mt-0.5 break-all font-mono text-xs text-ink">
+            {info.oauthRedirectUri}
+          </div>
+        </div>
+      ) : null}
+      <button
+        id={buttonId}
+        type="button"
+        disabled={!available || starting}
+        onClick={onStart}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+        style={buttonStyle}
+      >
+        {starting ? t(keys.startingLabel) : t(keys.continueLabel)}
+      </button>
+      {!available ? (
+        <p className="mt-2 text-xs text-muted">{t(keys.notConfigured)}</p>
+      ) : null}
+      {startError ? (
+        <div className="mt-2">
+          <FieldError message={startError} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Blok Google di modal Channels (gelombang Semua OAuth): BUKAN OAuth
+ * baru — jembatan UI ke alur OAuth Google yang sudah ada (dipakai
+ * Kalender). Sekali consent meminta scope lengkap (kalender +
+ * youtube.upload/readonly + business.manage) dan callback-nya
+ * menyinkronkan kanal YouTube + lokasi Google Business menjadi akun
+ * channel; blok ini menampilkan status koneksi tenant + tombol
+ * hubungkan yang memakai jalur yang sama seperti halaman Kalender.
+ */
+export function GoogleChannelsStepBlock({
+  t,
+  status,
+  starting,
+  startError,
+  onConnect,
+}: {
+  t: Translate;
+  status: { connected: boolean; accountEmail: string | null } | null;
+  starting: boolean;
+  startError: string | null;
+  onConnect: () => void;
+}) {
+  return (
+    <div className="mt-4">
+      <p className="text-sm text-muted">{t("channels.googleConnectBody")}</p>
+      <div className="mt-3 rounded-lg border border-line bg-elevated/40 p-3 text-sm">
+        {status?.connected ? (
+          <span className="text-ink">
+            {t("channels.googleConnectedAs", {
+              email: status.accountEmail ?? "—",
+            })}
+          </span>
+        ) : (
+          <span className="text-muted">{t("channels.googleNotConnected")}</span>
+        )}
+      </div>
+      <button
+        id="google-connect-button"
+        type="button"
+        disabled={starting}
+        onClick={onConnect}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {starting
+          ? t("channels.googleConnecting")
+          : t("channels.googleConnectButton")}
+      </button>
       {startError ? (
         <div className="mt-2">
           <FieldError message={startError} />
@@ -277,6 +402,11 @@ export const CONNECT_PROVIDERS = [
   { provider: "instagram", descKey: "channels.pickInstagramDesc" },
   { provider: "whatsapp", descKey: "channels.pickWhatsappDesc" },
   { provider: "threads", descKey: "channels.pickThreadsDesc" },
+  { provider: "tiktok", descKey: "channels.pickTiktokDesc" },
+  { provider: "linkedin", descKey: "channels.pickLinkedinDesc" },
+  { provider: "pinterest", descKey: "channels.pickPinterestDesc" },
+  { provider: "bluesky", descKey: "channels.pickBlueskyDesc" },
+  { provider: "google", descKey: "channels.pickGoogleDesc" },
 ] as const;
 
 export type ConnectProvider = (typeof CONNECT_PROVIDERS)[number]["provider"];
@@ -292,6 +422,11 @@ export const CONNECT_FORM_TITLES: Record<ConnectProvider, TranslationKey> = {
   instagram: "channels.instagramTitle",
   whatsapp: "channels.whatsappTitle",
   threads: "channels.threadsTitle",
+  tiktok: "channels.tiktokTitle",
+  linkedin: "channels.linkedinTitle",
+  pinterest: "channels.pinterestTitle",
+  bluesky: "channels.blueskyTitle",
+  google: "channels.googleTitle",
 };
 
 /** Field pertama yang difokuskan saat langkah form modal dibuka. */
@@ -303,6 +438,12 @@ export const CONNECT_FORM_FOCUS_IDS: Record<ConnectProvider, string> = {
   whatsapp: "whatsapp-phone-id",
   // Threads tanpa form manual: fokus ke tombol connect OAuth-nya.
   threads: "threads-connect-button",
+  tiktok: "tiktok-connect-button",
+  linkedin: "linkedin-connect-button",
+  pinterest: "pinterest-connect-button",
+  // Bluesky = formulir handle + app password: fokus ke handle.
+  bluesky: "bluesky-handle",
+  google: "google-connect-button",
 };
 
 /**
