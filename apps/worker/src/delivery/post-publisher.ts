@@ -13,6 +13,7 @@ import { threadsPostPublisher } from "./threads-post";
 import { blueskyPostPublisher } from "./bluesky-post";
 import { youtubePostPublisher } from "./youtube-post";
 import { linkedinPostPublisher } from "./linkedin-post";
+import { pinterestPostPublisher } from "./pinterest-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -70,12 +71,15 @@ export interface PostPublisherOptions {
   youtubePrivacyStatus?: string | undefined;
   /** Base URL LinkedIn API (env LINKEDIN_API_BASE; default api.linkedin.com). */
   linkedinApiBase?: string | undefined;
+  /** Base URL Pinterest API v5 (env PINTEREST_API_BASE; default api.pinterest.com). */
+  pinterestApiBase?: string | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
    * (endpoint API bersesi), jadi adapter container Meta (IG/Threads)
-   * gagal aman tanpa konfigurasi ini. Bentuk URL final:
-   * `{base}/{r2Key}` dengan tiap segmen path ter-encode.
+   * dan jalur `image_url` Pinterest gagal aman tanpa konfigurasi
+   * ini. Bentuk URL final: `{base}/{r2Key}` dengan tiap segmen path
+   * ter-encode.
    */
   publicMediaBaseUrl?: string | undefined;
   /** Resolver URL media publik khusus — dipakai rantai uji/mock. */
@@ -139,6 +143,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   blueskyPostPublisher,
   youtubePostPublisher,
   linkedinPostPublisher,
+  pinterestPostPublisher,
 ];
 
 export function getPostPublisher(

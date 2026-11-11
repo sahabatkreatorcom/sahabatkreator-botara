@@ -108,6 +108,13 @@ const EnvSchema = z.object({
    */
   LINKEDIN_API_BASE: z.string().url().optional(),
   /**
+   * Base URL Pinterest API v5. Default https://api.pinterest.com;
+   * override hanya untuk uji mock — pola yang sama dengan
+   * LINKEDIN_API_BASE. Kredensial per akun (access token OAuth)
+   * tersimpan terenkripsi pada akun channel, bukan di env.
+   */
+  PINTEREST_API_BASE: z.string().url().optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta

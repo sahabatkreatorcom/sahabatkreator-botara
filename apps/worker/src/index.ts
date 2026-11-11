@@ -507,6 +507,7 @@ const bullWorker = new Worker<MainJobData>(
           google: googleDeps,
           youtubePrivacyStatus: env.YOUTUBE_PRIVACY_STATUS,
           linkedinApiBase: env.LINKEDIN_API_BASE,
+          pinterestApiBase: env.PINTEREST_API_BASE,
           mediaStore,
         },
       );
