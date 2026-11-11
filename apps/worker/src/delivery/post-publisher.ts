@@ -15,6 +15,7 @@ import { youtubePostPublisher } from "./youtube-post";
 import { linkedinPostPublisher } from "./linkedin-post";
 import { pinterestPostPublisher } from "./pinterest-post";
 import { googleBusinessPostPublisher } from "./google-business-post";
+import { tiktokPostPublisher } from "./tiktok-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -81,6 +82,19 @@ export interface PostPublisherOptions {
    * dari objek `google` di atas.
    */
   googleBusinessApiBase?: string | undefined;
+  /** Base URL TikTok API (env TIKTOK_API_BASE; default open.tiktokapis.com). */
+  tiktokApiBase?: string | undefined;
+  /**
+   * Level privasi direct post TikTok (env TIKTOK_PRIVACY_LEVEL;
+   * bawaan `SELF_ONLY` — satu-satunya level yang diizinkan sebelum
+   * aplikasi pemilik lolos audit Content Posting API TikTok; lihat
+   * OWNER-ACTIONS roadmap content schedule).
+   */
+  tiktokPrivacyLevel?: string | undefined;
+  /** Jeda polling status publikasi TikTok; default 3000 ms. */
+  tiktokStatusPollIntervalMs?: number | undefined;
+  /** Batas polling status publikasi TikTok; default 20 kali. */
+  tiktokStatusMaxPolls?: number | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
@@ -153,6 +167,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   linkedinPostPublisher,
   pinterestPostPublisher,
   googleBusinessPostPublisher,
+  tiktokPostPublisher,
 ];
 
 export function getPostPublisher(

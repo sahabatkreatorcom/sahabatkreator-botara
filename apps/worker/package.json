@@ -7,6 +7,7 @@
     "@sahabat-kreator/channel-messenger": "workspace:*",
     "@sahabat-kreator/channel-pinterest": "workspace:*",
     "@sahabat-kreator/channel-telegram": "workspace:*",
+    "@sahabat-kreator/channel-tiktok": "workspace:*",
     "@sahabat-kreator/channel-whatsapp": "workspace:*",
     "@sahabat-kreator/channel-youtube": "workspace:*",
     "@sahabat-kreator/config": "workspace:*",
@@ -53,7 +54,8 @@
     "meta:token-lifecycle": "tsx scripts/meta-token-lifecycle.ts",
     "verify:linkedin-post": "tsx scripts/verify-linkedin-post.ts",
     "verify:pinterest-post": "tsx scripts/verify-pinterest-post.ts",
-    "verify:google-business-post": "tsx scripts/verify-google-business-post.ts"
+    "verify:google-business-post": "tsx scripts/verify-google-business-post.ts",
+    "verify:tiktok-post": "tsx scripts/verify-tiktok-post.ts"
   },
   "type": "module",
   "types": "./src/index.ts",

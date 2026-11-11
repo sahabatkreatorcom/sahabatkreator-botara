@@ -115,6 +115,14 @@ const EnvSchema = z.object({
    */
   PINTEREST_API_BASE: z.string().url().optional(),
   /**
+   * Base URL TikTok API (Content Posting API). Default
+   * https://open.tiktokapis.com; override hanya untuk uji mock —
+   * pola yang sama dengan PINTEREST_API_BASE. Kredensial per akun
+   * (access token OAuth) tersimpan terenkripsi pada akun channel,
+   * bukan di env.
+   */
+  TIKTOK_API_BASE: z.string().url().optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta
@@ -305,6 +313,25 @@ const EnvSchema = z.object({
   YOUTUBE_PRIVACY_STATUS: z
     .enum(["private", "unlisted", "public"])
     .default("private"),
+  /**
+   * Level privasi direct post TikTok hasil content schedule
+   * (Gelombang 4). Bawaan `SELF_ONLY` DISENGAJA dan merupakan
+   * GERBANG AUDIT: sebelum aplikasi TikTok pemilik lolos audit
+   * Content Posting API, API hanya mengizinkan postingan privat
+   * untuk kreator sendiri — level lain akan ditolak TikTok (dan
+   * ditolak lebih awal oleh adapter bila akun tidak mencantumkannya
+   * di `privacy_level_options`). Pemilik platform menaikkan env ini
+   * setelah audit lolos (lihat OWNER-ACTIONS roadmap content
+   * schedule).
+   */
+  TIKTOK_PRIVACY_LEVEL: z
+    .enum([
+      "PUBLIC_TO_EVERYONE",
+      "MUTUAL_FOLLOW_FRIENDS",
+      "FOLLOWER_OF_CREATOR",
+      "SELF_ONLY",
+    ])
+    .default("SELF_ONLY"),
 });
 
 /**

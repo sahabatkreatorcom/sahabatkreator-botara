@@ -509,6 +509,8 @@ const bullWorker = new Worker<MainJobData>(
           linkedinApiBase: env.LINKEDIN_API_BASE,
           pinterestApiBase: env.PINTEREST_API_BASE,
           googleBusinessApiBase: env.GOOGLE_BUSINESS_API_BASE,
+          tiktokApiBase: env.TIKTOK_API_BASE,
+          tiktokPrivacyLevel: env.TIKTOK_PRIVACY_LEVEL,
           mediaStore,
         },
       );
