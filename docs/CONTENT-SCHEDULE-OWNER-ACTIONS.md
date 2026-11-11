@@ -88,6 +88,31 @@ hanya bisa diajukan dari akun pemilik:
    channel inbox; seluruh protokol container diverifikasi melawan
    fake Threads API (`verify:threads-post`).
 
+## Gelombang 1.5 — Bluesky
+
+1. **Bluesky** — dibutuhkan: akun Bluesky milik pemilik (handle,
+   mis. akun brand di bsky.social) dan **app password** yang dibuat
+   dari akun itu (Bluesky → Settings → Privacy and Security → App
+   Passwords), plus DID akun tersebut. Untuk apa: adapter menukar
+   app password menjadi sesi XRPC (`createSession`) setiap publikasi
+   dengan identifier = DID; app password tersimpan terenkripsi pada
+   akun channel (`access_token_encrypted`), handle pada
+   `public_handle`, dan DID pada `external_id` — tanpa ketiganya
+   tidak ada akun Bluesky nyata yang bisa diterbitkani. Sudah
+   dimock: provider `bluesky` ditambahkan end-to-end sebatas
+   akun/sasaran linimasa + capability + adapter (migrasi 0015), dan
+   seluruh protokol sesi → `uploadBlob` → `createRecord` diverifikasi
+   melawan fake XRPC (`verify:bluesky-post`) dengan DID dan app
+   password uji; TIDAK dibutuhkan URL media publik (media diunggah
+   sebagai biner). Catatan batas: provisioning/connect Bluesky belum
+   dibuka di endpoint channel generik (dijawab
+   `CHANNEL_NOT_AVAILABLE_YET`, sama seperti Threads) — pendaftaran
+   akun nyata menunggu alur pendaftaran app password khusus atau
+   penyemaian akun oleh operator; dan akun yang tinggal di PDS
+   mandiri di luar entryway bsky.social memerlukan resolusi DID → PDS
+   per akun yang belum dibangun (default mengasumsikan akun
+   ter-hosting Bluesky).
+
 ## Gelombang berikutnya
 
 _(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_
