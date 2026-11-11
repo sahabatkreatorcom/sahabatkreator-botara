@@ -45,6 +45,7 @@ import { createMetaRoutes } from "./modules/meta/routes";
 import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
 import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
 import { createTikTokOAuthRoutes } from "./modules/tiktok-oauth/routes";
+import { createLinkedInOAuthRoutes } from "./modules/linkedin-oauth/routes";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
 import { createMediaRoutes } from "./modules/media/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
@@ -380,6 +381,7 @@ routes.route(
     metaApiBase: env.META_API_BASE,
     threadsApiBase: env.THREADS_API_BASE,
     tiktokApiBase: env.TIKTOK_API_BASE,
+    linkedinApiBase: env.LINKEDIN_API_BASE,
     // Token verifikasi efektif (Panel Admin → env) agar info webhook
     // yang dilihat owner/admin workspace selalu token yang berlaku —
     // pola yang sama seperti metaAppSecretConfigured di bawah.
@@ -583,6 +585,24 @@ routes.route(
     platform: platformOptions,
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
     tiktokApiBase: env.TIKTOK_API_BASE,
+    publicBaseUrl: env.BETTER_AUTH_URL,
+    redisUrl: env.REDIS_URL,
+    stateSecret: env.BETTER_AUTH_SECRET,
+  }),
+);
+// Modul LinkedIn OAuth Connect (gelombang Semua OAuth) —
+// "Hubungkan dengan LinkedIn" untuk profil pribadi: start ber-state
+// sekali pakai + callback tunggal publik /linkedin/oauth/callback +
+// info ketersediaan. Kredensial aplikasi dari Panel Admin
+// (linkedin_client_id/secret; env hanya fallback). TANPA refresh
+// token (program standar LinkedIn tidak menerbitkannya) —
+// lifecycle worker bersifat tandai-reconnect.
+routes.route(
+  "/",
+  createLinkedInOAuthRoutes(authBundle, {
+    platform: platformOptions,
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    linkedinApiBase: env.LINKEDIN_API_BASE,
     publicBaseUrl: env.BETTER_AUTH_URL,
     redisUrl: env.REDIS_URL,
     stateSecret: env.BETTER_AUTH_SECRET,

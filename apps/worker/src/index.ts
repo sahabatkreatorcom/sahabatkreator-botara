@@ -48,6 +48,7 @@ import {
 import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
 import { runThreadsTokenLifecycle } from "./threads-token-lifecycle";
 import { runTikTokTokenLifecycle } from "./tiktok-token-lifecycle";
+import { runLinkedInTokenLifecycle } from "./linkedin-token-lifecycle";
 import { startMediaIngestLoop } from "./media-ingest";
 import { MEDIA_GC_INTERVAL_MS, startMediaGcLoop } from "./media-gc";
 import {
@@ -1388,6 +1389,38 @@ const tiktokTokenLifecycleTimer = setInterval(
 void tiktokTokenLifecycleTick();
 
 // ---------------------------------------------------------------------------
+// Lifecycle token LinkedIn (gelombang Semua OAuth): TANDAI-RECONNECT
+// — LinkedIn tidak menerbitkan refresh token untuk program standar,
+// jadi putaran ini murni pemindaian + penandaan: akun mendekati
+// kedaluwarsa ditandai 'expiring'; yang sudah lewat jadwal menjadi
+// 'error' linkedin_token_expired agar dihubungkan ulang (lihat
+// src/linkedin-token-lifecycle.ts). Tanpa panggilan API provider.
+// Jalan run-once: `pnpm --filter @sahabat-kreator/worker
+// linkedin:token-lifecycle` (skrip scripts/linkedin-token-lifecycle.ts).
+let linkedinTokenLifecycleRunning = false;
+async function linkedinTokenLifecycleTick(): Promise<void> {
+  if (linkedinTokenLifecycleRunning) return;
+  linkedinTokenLifecycleRunning = true;
+  try {
+    const result = await runLinkedInTokenLifecycle({ db });
+    if (result.scanned > 0) {
+      console.log(
+        `[worker] lifecycle token LinkedIn: ${result.scanned} akun terpindai — warned=${result.warned} authError=${result.authErrored} failed=${result.failed}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] lifecycle token LinkedIn gagal (akan dicoba lagi):", err);
+  } finally {
+    linkedinTokenLifecycleRunning = false;
+  }
+}
+const linkedinTokenLifecycleTimer = setInterval(
+  () => void linkedinTokenLifecycleTick(),
+  TOKEN_LIFECYCLE_INTERVAL_MS,
+);
+void linkedinTokenLifecycleTick();
+
+// ---------------------------------------------------------------------------
 // Poller pengiriman pesan outbound (Telegram + Meta).
 //
 // DIPINDAHKAN dari proses API ke worker (rekomendasi analisis). Selama
@@ -1487,6 +1520,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(tokenLifecycleTimer);
   clearInterval(threadsTokenLifecycleTimer);
   clearInterval(tiktokTokenLifecycleTimer);
+  clearInterval(linkedinTokenLifecycleTimer);
   // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang
   // berjalan memakai `db`, dan memutus pool di bawahnya mengubah
   // pengiriman yang sedang berlangsung menjadi kegagalan palsu yang

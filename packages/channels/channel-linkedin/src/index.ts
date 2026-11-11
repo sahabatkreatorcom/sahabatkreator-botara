@@ -76,11 +76,33 @@ export function linkedinErrorCode(err: unknown): string {
 export interface LinkedInClientOptions {
   /** Base URL API; default https://api.linkedin.com. Override hanya untuk uji mock. */
   baseUrl?: string | undefined;
+  /**
+   * Base URL host OAuth LinkedIn; default https://www.linkedin.com.
+   * Endpoint token OAuth (`/oauth/v2/accessToken`) hidup di host
+   * www, BUKAN di host API — keduanya memang terpisah secara resmi.
+   */
+  oauthBaseUrl?: string | undefined;
   fetchImpl?: typeof fetch | undefined;
   /** Timeout panggilan REST (metadata); default 15 detik. */
   timeoutMs?: number | undefined;
   /** Timeout unggah biner (video besar); default 180 detik. */
   uploadTimeoutMs?: number | undefined;
+}
+
+/** Hasil exchange code OAuth LinkedIn. */
+export interface LinkedInOAuthTokenResult {
+  accessToken: string;
+  /** Umur token dari provider (±60 hari = 5184000 detik); null bila tak dilaporkan. */
+  expiresInSeconds: number | null;
+}
+
+/** Profil OIDC pemilik token (`GET /v2/userinfo`). */
+export interface LinkedInUserInfo {
+  /** `sub` — Member ID stabil; menjadi external_id akun channel. */
+  sub: string;
+  name: string | null;
+  /** URL foto profil dari klaim `picture`; null bila tak ada. */
+  pictureUrl: string | null;
 }
 
 interface LinkedInErrorBody {
@@ -103,8 +125,12 @@ interface InitializeVideoResponse {
   };
 }
 
+/** Host OAuth LinkedIn bawaan (token endpoint hidup di sini). */
+export const DEFAULT_LINKEDIN_OAUTH_BASE = "https://www.linkedin.com";
+
 export class LinkedInClient {
   private readonly baseUrl: string;
+  private readonly oauthBaseUrl: string;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly uploadTimeoutMs: number;
@@ -114,9 +140,103 @@ export class LinkedInClient {
       /\/+$/,
       "",
     );
+    this.oauthBaseUrl = (
+      options.oauthBaseUrl ?? DEFAULT_LINKEDIN_OAUTH_BASE
+    ).replace(/\/+$/, "");
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 15_000;
     this.uploadTimeoutMs = options.uploadTimeoutMs ?? 180_000;
+  }
+
+  // -------------------------------------------------------------------------
+  // OAuth connect (gelombang Semua OAuth)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Tukar authorization code → access token:
+   * `POST {oauthBase}/oauth/v2/accessToken` (form: grant_type=
+   * authorization_code, code, redirect_uri IDENTIK dengan dialog,
+   * client_id, client_secret). LinkedIn umumnya TIDAK menerbitkan
+   * refresh token untuk program standar (Sign In + Share) — hasil
+   * memang hanya access token ±60 hari; lifecycle worker karenanya
+   * bersifat tandai-reconnect, bukan refresh (lihat core linkedin).
+   * client_secret TIDAK PERNAH masuk error yang dibangun.
+   */
+  async exchangeLinkedInCode(input: {
+    clientId: string;
+    clientSecret: string;
+    code: string;
+    redirectUri: string;
+  }): Promise<LinkedInOAuthTokenResult> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.oauthBaseUrl}/oauth/v2/accessToken`, {
+        method: "POST",
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          grant_type: "authorization_code",
+          code: input.code,
+          redirect_uri: input.redirectUri,
+          client_id: input.clientId,
+          client_secret: input.clientSecret,
+        }).toString(),
+      });
+    } catch {
+      throw new LinkedInApiError(0, "network_error");
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await response.json()) as Record<string, unknown>;
+    } catch {
+      /* body bukan JSON — error generik di bawah */
+    }
+    const accessToken =
+      typeof body.access_token === "string" ? body.access_token : null;
+    if (!response.ok || !accessToken) {
+      const description =
+        typeof body.error_description === "string"
+          ? body.error_description.slice(0, 200)
+          : `linkedin_oauth_error_${response.status}`;
+      throw new LinkedInApiError(response.status, description);
+    }
+    return {
+      accessToken,
+      expiresInSeconds:
+        typeof body.expires_in === "number" ? body.expires_in : null,
+    };
+  }
+
+  /**
+   * Profil OIDC pemilik token (`GET /v2/userinfo`, Bearer):
+   * `sub` = external_id, `name` = nama tampil, `picture` = URL foto
+   * profil. Endpoint OIDC ini tidak memakai header versi REST.
+   */
+  async getLinkedInUserInfo(accessToken: string): Promise<LinkedInUserInfo> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/v2/userinfo`, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+    } catch {
+      throw new LinkedInApiError(0, "network_error");
+    }
+    if (!response.ok) throw await this.parseError(response);
+    const body = (await response.json().catch(() => ({}))) as {
+      sub?: unknown;
+      name?: unknown;
+      picture?: unknown;
+    };
+    if (typeof body.sub !== "string" || !body.sub) {
+      throw new LinkedInApiError(200, "missing_profile_sub");
+    }
+    return {
+      sub: body.sub,
+      name: typeof body.name === "string" ? body.name : null,
+      pictureUrl: typeof body.picture === "string" ? body.picture : null,
+    };
   }
 
   private restHeaders(accessToken: string): Record<string, string> {
