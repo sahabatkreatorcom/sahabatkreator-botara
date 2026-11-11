@@ -575,5 +575,68 @@ await clearPlatformSetting(db, { key: "linkedin_client_secret", updatedByUserId:
 clearPlatformSettingsCache();
 console.log("[10] LinkedIn: panel menang atas env; secret hanya envelope v1; status bebas nilai; client ID publik, secret tak tampil: OK");
 
+// ---------- 11. Kredensial aplikasi Pinterest: panel → env ----------
+const PINTEREST_ENV_ID = "pinterest-id-env";
+const PINTEREST_ENV_SECRET = "pinterest-secret-env";
+const PINTEREST_PANEL_ID = "pinterest-id-panel";
+const PINTEREST_PANEL_SECRET = "pinterest-secret-panel";
+const pinterestOpts = {
+  masterSecret: MASTER,
+  env: {
+    pinterest_app_id: PINTEREST_ENV_ID,
+    pinterest_app_secret: PINTEREST_ENV_SECRET,
+  },
+};
+
+// Env saja → env untuk kedua kunci; app ID tampil di konfigurasi
+// publik, app secret TIDAK punya tempat di sana sama sekali.
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "pinterest_app_id", pinterestOpts), PINTEREST_ENV_ID);
+assert.equal(await getProviderSecret(db, "pinterest_app_secret", pinterestOpts), PINTEREST_ENV_SECRET);
+let pinterestPublic = await getPlatformPublicConfig(db, pinterestOpts);
+assert.equal(pinterestPublic.pinterest_app_id, PINTEREST_ENV_ID);
+assert.ok(!("pinterest_app_secret" in pinterestPublic));
+
+// Panel → MENANG atas env untuk kedua kunci.
+await setPlatformSetting(
+  db,
+  { key: "pinterest_app_id", value: PINTEREST_PANEL_ID, updatedByUserId: ADMIN_USER },
+  pinterestOpts,
+);
+await setPlatformSetting(
+  db,
+  { key: "pinterest_app_secret", value: PINTEREST_PANEL_SECRET, updatedByUserId: ADMIN_USER },
+  pinterestOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "pinterest_app_id", pinterestOpts), PINTEREST_PANEL_ID);
+assert.equal(await getProviderSecret(db, "pinterest_app_secret", pinterestOpts), PINTEREST_PANEL_SECRET);
+pinterestPublic = await getPlatformPublicConfig(db, pinterestOpts);
+assert.equal(pinterestPublic.pinterest_app_id, PINTEREST_PANEL_ID);
+
+// Secret tersimpan HANYA sebagai envelope terenkripsi; daftar status
+// bebas nilai untuk kedua kunci.
+const pinterestRaw = await client.query<{ value_encrypted: string }>(
+  `SELECT value_encrypted FROM platform_settings WHERE key = 'pinterest_app_secret'`,
+);
+assert.equal(pinterestRaw.rows.length, 1);
+assert.ok(pinterestRaw.rows[0].value_encrypted.startsWith("v1:"));
+assert.ok(!pinterestRaw.rows[0].value_encrypted.includes(PINTEREST_PANEL_SECRET));
+const pinterestStatuses = await listPlatformSettingStatuses(db, pinterestOpts);
+assert.ok(!JSON.stringify(pinterestStatuses).includes(PINTEREST_PANEL_SECRET));
+assert.ok(!JSON.stringify(pinterestStatuses).includes(PINTEREST_ENV_SECRET));
+assert.equal(
+  pinterestStatuses.find((s) => s.key === "pinterest_app_id")?.source,
+  "panel",
+);
+assert.equal(
+  pinterestStatuses.find((s) => s.key === "pinterest_app_secret")?.source,
+  "panel",
+);
+await clearPlatformSetting(db, { key: "pinterest_app_id", updatedByUserId: ADMIN_USER });
+await clearPlatformSetting(db, { key: "pinterest_app_secret", updatedByUserId: ADMIN_USER });
+clearPlatformSettingsCache();
+console.log("[11] Pinterest: panel menang atas env; secret hanya envelope v1; status bebas nilai; app ID publik, secret tak tampil: OK");
+
 await client.close();
 console.log("verify platform-settings (PGlite): SEMUA LULUS");

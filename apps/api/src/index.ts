@@ -122,6 +122,11 @@ const platformOptions: PlatformSettingsOptions = {
     // connect/OAuth LinkedIn (gelombang Semua OAuth).
     linkedin_client_id: env.LINKEDIN_CLIENT_ID,
     linkedin_client_secret: env.LINKEDIN_CLIENT_SECRET,
+    // Kredensial aplikasi Pinterest (Pinterest Developers): env
+    // hanya fallback; sumber utama Panel Admin. Konsumen: alur
+    // connect/OAuth Pinterest (gelombang Semua OAuth).
+    pinterest_app_id: env.PINTEREST_APP_ID,
+    pinterest_app_secret: env.PINTEREST_APP_SECRET,
     // Fase 11B: email Resend — env hanya fallback; sumber utama Panel
     // Admin (resend_api_key rahasia + identitas pengirim publik).
     resend_api_key: env.RESEND_API_KEY,

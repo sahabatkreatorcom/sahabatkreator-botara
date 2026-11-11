@@ -102,6 +102,16 @@ export const PLATFORM_SETTING_KEYS = [
   // getProviderSecret seperti kunci lain.
   "linkedin_client_id",
   "linkedin_client_secret",
+  // Kredensial APLIKASI Pinterest milik platform (gelombang Semua
+  // OAuth, pola linkedin/threads/tiktok): aplikasi di Pinterest
+  // Developers. pinterest_app_id identifier publik (lihat
+  // PLATFORM_PUBLIC_CONFIG_KEYS); pinterest_app_secret rahasia
+  // seperti meta_app_secret. Konsumennya adalah alur connect/OAuth
+  // Pinterest + lifecycle refresh token di worker (token endpoint
+  // v5 memakai pasangan ini sebagai Basic auth), dibaca lewat
+  // getProviderSecret seperti kunci lain.
+  "pinterest_app_id",
+  "pinterest_app_secret",
   // Fase 11B: email transaksional Resend (keputusan user 2026-11-02).
   // resend_api_key = rahasia (tidak pernah keluar dari modul ini);
   // resend_from_email / resend_from_name = identitas pengirim, BUKAN
@@ -171,6 +181,10 @@ export const PLATFORM_PUBLIC_CONFIG_KEYS = [
   // Key TikTok (tampil di URL dialog OAuth LinkedIn). Client
   // SECRET-nya TIDAK ikut: rahasia penuh seperti meta_app_secret.
   "linkedin_client_id",
+  // App ID aplikasi Pinterest — identifier publik seperti Client ID
+  // LinkedIn (tampil di URL dialog OAuth Pinterest). App SECRET-nya
+  // TIDAK ikut: rahasia penuh seperti meta_app_secret.
+  "pinterest_app_id",
   // Fase 11B: identitas pengirim email (nama + alamat tampil di setiap
   // email yang diterima orang — memang publik menurut sifatnya).
   "resend_from_email",
@@ -221,6 +235,7 @@ export async function getPlatformPublicConfig(
     threadsAppId,
     tiktokClientKey,
     linkedinClientId,
+    pinterestAppId,
     resendFromEmail,
     resendFromName,
     googleClientId,
@@ -237,6 +252,7 @@ export async function getPlatformPublicConfig(
     getProviderSecret(db, "threads_app_id", opts),
     getProviderSecret(db, "tiktok_client_key", opts),
     getProviderSecret(db, "linkedin_client_id", opts),
+    getProviderSecret(db, "pinterest_app_id", opts),
     getProviderSecret(db, "resend_from_email", opts),
     getProviderSecret(db, "resend_from_name", opts),
     getProviderSecret(db, "google_oauth_client_id", opts),
@@ -257,6 +273,7 @@ export async function getPlatformPublicConfig(
     threads_app_id: threadsAppId,
     tiktok_client_key: tiktokClientKey,
     linkedin_client_id: linkedinClientId,
+    pinterest_app_id: pinterestAppId,
     resend_from_email: resendFromEmail,
     resend_from_name: resendFromName,
     google_oauth_client_id: googleClientId,

@@ -61,6 +61,14 @@ export const PlatformSettingKeySchema = z.enum([
   // token per akun tenant.
   "linkedin_client_id",
   "linkedin_client_secret",
+  // Kredensial APLIKASI Pinterest milik platform (Pinterest
+  // Developers), pola yang sama: `pinterest_app_id` identifier PUBLIK
+  // (nilainya ditampilkan panel lewat PlatformPinterestInfo);
+  // `pinterest_app_secret` RAHASIA (pola meta_app_secret: hanya
+  // status yang dipertukarkan). Untuk connect/OAuth Pinterest
+  // (gelombang Semua OAuth); penerbitan memakai token per akun tenant.
+  "pinterest_app_id",
+  "pinterest_app_secret",
   // Fase 11B: email transaksional via Resend (keputusan user 2026-11-02).
   // `resend_api_key` adalah RAHASIA (pola kunci lain: status saja yang
   // dipertukarkan). `resend_from_email` / `resend_from_name` adalah
@@ -177,6 +185,17 @@ export const PlatformLinkedInInfoSchema = z.object({
 export type PlatformLinkedInInfo = z.infer<typeof PlatformLinkedInInfoSchema>;
 
 /**
+ * Info Pinterest BUKAN rahasia: App ID aplikasi Pinterest efektif
+ * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya —
+ * identifier publik, pola PlatformLinkedInInfo. App Secret TIDAK
+ * PERNAH muncul di kontrak mana pun.
+ */
+export const PlatformPinterestInfoSchema = z.object({
+  appId: z.string().nullable(),
+});
+export type PlatformPinterestInfo = z.infer<typeof PlatformPinterestInfoSchema>;
+
+/**
  * Info email BUKAN rahasia (Fase 11B): identitas pengirim Resend efektif
  * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya. Kunci
  * API Resend sendiri rahasia dan tidak pernah muncul di kontrak mana pun
@@ -230,6 +249,7 @@ export const PlatformSettingsResponseSchema = z.object({
   threads: PlatformThreadsInfoSchema,
   tiktok: PlatformTikTokInfoSchema,
   linkedin: PlatformLinkedInInfoSchema,
+  pinterest: PlatformPinterestInfoSchema,
   email: PlatformEmailInfoSchema,
   google: PlatformGoogleInfoSchema,
   contentSchedule: PlatformContentScheduleInfoSchema,

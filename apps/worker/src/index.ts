@@ -250,6 +250,16 @@ const platformSettingsOptions: PlatformSettingsOptions = {
     // env tetap dipetakan agar objek opsi proses ini lengkap.
     linkedin_client_id: env.LINKEDIN_CLIENT_ID,
     linkedin_client_secret: env.LINKEDIN_CLIENT_SECRET,
+    // Kredensial aplikasi Pinterest (gelombang Semua OAuth): dipakai
+    // lifecycle refresh token Pinterest sebagai Basic auth token
+    // endpoint v5 — panel menang, env fallback, sama seperti API.
+    pinterest_app_id: env.PINTEREST_APP_ID,
+    pinterest_app_secret: env.PINTEREST_APP_SECRET,
+    // Kredensial aplikasi TikTok (gelombang Semua OAuth): dipakai
+    // lifecycle refresh token TikTok (grant refresh_token butuh
+    // client_key + client_secret) — panel menang, env fallback.
+    tiktok_client_key: env.TIKTOK_CLIENT_KEY,
+    tiktok_client_secret: env.TIKTOK_CLIENT_SECRET,
     // Lifecycle token Meta (0010): kredensial aplikasi untuk refresh
     // `tbft` — panel menang, env fallback, sama seperti API.
     meta_app_id: env.META_APP_ID,

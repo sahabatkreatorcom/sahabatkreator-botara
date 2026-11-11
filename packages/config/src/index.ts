@@ -144,6 +144,20 @@ const EnvSchema = z.object({
    */
   PINTEREST_API_BASE: z.string().url().optional(),
   /**
+   * Kredensial APLIKASI Pinterest milik PLATFORM (Pinterest
+   * Developers) — istilah resmi Pinterest: App ID (identifier publik
+   * aplikasi) dan App Secret (RAHASIA). Keduanya FALLBACK env saja
+   * (instruksi pemilik 2026-11-12); sumber utama adalah Panel Admin
+   * (kunci `pinterest_app_id` / `pinterest_app_secret` di
+   * platform_settings, resolusi panel → env lewat resolver core).
+   * Dipakai alur connect/OAuth Pinterest (gelombang Semua OAuth) —
+   * token endpoint v5 memakai pasangan ini sebagai Basic auth, juga
+   * untuk grant refresh_token di worker; penerbitan memakai token
+   * per akun tenant.
+   */
+  PINTEREST_APP_ID: z.string().min(1).optional(),
+  PINTEREST_APP_SECRET: z.string().min(1).optional(),
+  /**
    * Base URL TikTok API (Content Posting API). Default
    * https://open.tiktokapis.com; override hanya untuk uji mock —
    * pola yang sama dengan PINTEREST_API_BASE. Kredensial per akun

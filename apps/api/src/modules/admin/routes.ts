@@ -103,6 +103,10 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   // client secret rahasia mengikuti batas kunci rahasia lain.
   linkedin_client_id: 128,
   linkedin_client_secret: 512,
+  // Aplikasi Pinterest: app ID publik pendek (ditampilkan panel),
+  // app secret rahasia mengikuti batas kunci rahasia lain.
+  pinterest_app_id: 128,
+  pinterest_app_secret: 512,
   // Fase 11B: kunci Resend rahasia; identitas pengirim publik (alamat
   // email + nama tampil) — panjang mengikuti sifat nilainya.
   resend_api_key: 512,
@@ -145,6 +149,9 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
  * `linkedin_client_secret` sama: token endpoint LinkedIn hanya
  * memvalidasi pasangan klien saat ada authorization code yang
  * ditukar — tidak ada panggilan validasi klien yang berdiri sendiri.
+ * `pinterest_app_secret` sama: token endpoint Pinterest v5 hanya
+ * memvalidasi pasangan aplikasi saat ada authorization code /
+ * refresh token yang ditukar.
  */
 const TESTABLE_KEYS: ReadonlySet<PlatformSettingKey> = new Set([
   "openrouter_api_key",
@@ -263,6 +270,12 @@ export function createAdminRoutes(
       // keluar — pola yang sama seperti kunci rahasia lain.
       linkedin: {
         clientId: publicConfig.linkedin_client_id,
+      },
+      // Aplikasi Pinterest (Pinterest Developers): hanya App ID yang
+      // ditampilkan (publik); App Secret tidak pernah keluar — pola
+      // yang sama seperti kunci rahasia lain.
+      pinterest: {
+        appId: publicConfig.pinterest_app_id,
       },
       // Fase 11B: identitas pengirim email efektif (panel → env) —
       // publik menurut sifatnya, ditampilkan untuk verifikasi pemilik.
