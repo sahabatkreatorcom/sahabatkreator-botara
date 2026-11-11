@@ -558,6 +558,7 @@ export {
   GOOGLE_OAUTH_SCOPES,
   YOUTUBE_UPLOAD_SCOPE,
   YOUTUBE_READONLY_SCOPE,
+  GOOGLE_BUSINESS_MANAGE_SCOPE,
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
   type GoogleBases,
   type GoogleDeps,
@@ -579,6 +580,17 @@ export {
   type YouTubeChannelIdentity,
   type YouTubePublishAccess,
 } from "./youtube";
+export {
+  // Google Business (Gelombang 3): sinkronisasi akun lokasi dari
+  // koneksi Google + gerbang akses publikasi (scope business.manage).
+  fetchGoogleBusinessLocations,
+  syncGoogleBusinessLocationAccounts,
+  getGoogleBusinessPublishAccess,
+  GOOGLE_BUSINESS_DEFAULT_BASE,
+  GOOGLE_ACCOUNT_MANAGEMENT_DEFAULT_BASE,
+  type GoogleBusinessLocationIdentity,
+  type GoogleBusinessPublishAccess,
+} from "./google-business";
 export {
   createApiKey,
   listApiKeys,

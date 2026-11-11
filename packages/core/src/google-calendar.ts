@@ -58,16 +58,25 @@ export const YOUTUBE_UPLOAD_SCOPE =
 /** Scope baca channel YouTube (Gelombang 2) — untuk channel ID/judul. */
 export const YOUTUBE_READONLY_SCOPE =
   "https://www.googleapis.com/auth/youtube.readonly";
+/**
+ * Scope Business Profile (Gelombang 3) — membaca akun/lokasi dan
+ * membuat postingan lokal Google Business. Tanpa scope ini daftar
+ * lokasi tenant tidak bisa diketahui dan publikasi GBP menjawab
+ * `google_business_scope_missing`.
+ */
+export const GOOGLE_BUSINESS_MANAGE_SCOPE =
+  "https://www.googleapis.com/auth/business.manage";
 
 /**
  * Scope yang diminta: tulis event + baca kalender/freebusy + email akun
- * + YouTube (Gelombang 2). SATU koneksi Google per tenant melayani
- * Calendar DAN YouTube — tidak ada jalur OAuth kedua; consent yang
- * sama (access_type=offline + include_granted_scopes) menerbitkan
- * refresh token yang mencakup semuanya. Koneksi lama yang terhubung
- * sebelum scope YouTube ditambahkan TIDAK memilikinya: penerbitan
- * YouTube menjawab `youtube_scope_missing` sampai pemilik menghubungkan
- * ulang Google (consent inkremental menambahkan scope baru).
+ * + YouTube (Gelombang 2) + Google Business (Gelombang 3). SATU koneksi
+ * Google per tenant melayani Calendar, YouTube, DAN Business Profile —
+ * tidak ada jalur OAuth kedua; consent yang sama (access_type=offline +
+ * include_granted_scopes) menerbitkan refresh token yang mencakup
+ * semuanya. Koneksi lama yang terhubung sebelum scope baru ditambahkan
+ * TIDAK memilikinya: penerbitan platform terkait menjawab
+ * `*_scope_missing` sampai pemilik menghubungkan ulang Google (consent
+ * inkremental menambahkan scope baru).
  */
 export const GOOGLE_OAUTH_SCOPES = [
   "openid",
@@ -76,6 +85,7 @@ export const GOOGLE_OAUTH_SCOPES = [
   "https://www.googleapis.com/auth/calendar.readonly",
   YOUTUBE_UPLOAD_SCOPE,
   YOUTUBE_READONLY_SCOPE,
+  GOOGLE_BUSINESS_MANAGE_SCOPE,
 ].join(" ");
 
 export const APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE =
@@ -89,6 +99,19 @@ export interface GoogleBases {
   apiBase?: string;
   tokenBase?: string;
   authBase?: string;
+  /**
+   * Base Business Information API (daftar lokasi) — host-nya BUKAN
+   * www.googleapis.com seperti Calendar/YouTube, jadi ia punya
+   * override sendiri (Gelombang 3). Default
+   * https://mybusiness.googleapis.com.
+   */
+  businessBase?: string;
+  /**
+   * Base Account Management API (daftar akun Business Profile)
+   * (Gelombang 3). Default
+   * https://mybusinessaccountmanagement.googleapis.com.
+   */
+  accountManagementBase?: string;
 }
 
 export interface GoogleDeps {

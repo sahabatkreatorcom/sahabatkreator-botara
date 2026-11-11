@@ -45,6 +45,7 @@ import {
   replaceAppointmentAvailability,
   resolveGoogleOAuthClient,
   saveGoogleConnection,
+  syncGoogleBusinessLocationAccounts,
   syncYouTubeChannelAccount,
   setGoogleConnectionCalendar,
   updateAppointmentService,
@@ -777,6 +778,20 @@ export function createAppointmentsRoutes(
       await syncYouTubeChannelAccount(bundle.db, state.tenantId, googleDeps);
     } catch {
       /* abaikan — sinkron YouTube bukan syarat koneksi Google */
+    }
+    // Gelombang 3: consent yang sama kini juga membawa scope
+    // business.manage — petakan lokasi Business Profile tenant ke
+    // akun lokasi google_business agar lokasi muncul sebagai sasaran
+    // content schedule. FAIL-SOFT sepenuhnya, sama seperti YouTube:
+    // sinkron lokasi tidak boleh menggagalkan koneksi Calendar.
+    try {
+      await syncGoogleBusinessLocationAccounts(
+        bundle.db,
+        state.tenantId,
+        googleDeps,
+      );
+    } catch {
+      /* abaikan — sinkron Google Business bukan syarat koneksi Google */
     }
     return c.redirect(`${webBase}/appointments?google=connected`, 302);
   });
