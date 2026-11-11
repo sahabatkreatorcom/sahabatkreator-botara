@@ -92,6 +92,16 @@ export const PLATFORM_SETTING_KEYS = [
   // kelak, dibaca lewat getProviderSecret seperti kunci lain.
   "tiktok_client_key",
   "tiktok_client_secret",
+  // Kredensial APLIKASI LinkedIn milik platform (gelombang Semua
+  // OAuth, pola threads/tiktok): aplikasi di LinkedIn Developer
+  // Portal dengan produk Sign In with LinkedIn + Share on LinkedIn.
+  // linkedin_client_id identifier publik (lihat
+  // PLATFORM_PUBLIC_CONFIG_KEYS); linkedin_client_secret rahasia
+  // seperti meta_app_secret. Konsumennya adalah alur connect/OAuth
+  // LinkedIn + lifecycle token di worker, dibaca lewat
+  // getProviderSecret seperti kunci lain.
+  "linkedin_client_id",
+  "linkedin_client_secret",
   // Fase 11B: email transaksional Resend (keputusan user 2026-11-02).
   // resend_api_key = rahasia (tidak pernah keluar dari modul ini);
   // resend_from_email / resend_from_name = identitas pengirim, BUKAN
@@ -157,6 +167,10 @@ export const PLATFORM_PUBLIC_CONFIG_KEYS = [
   // resmi TikTok; tampil di URL dialog Login Kit). Client SECRET-nya
   // TIDAK ikut: rahasia penuh seperti meta_app_secret.
   "tiktok_client_key",
+  // Client ID aplikasi LinkedIn — identifier publik seperti Client
+  // Key TikTok (tampil di URL dialog OAuth LinkedIn). Client
+  // SECRET-nya TIDAK ikut: rahasia penuh seperti meta_app_secret.
+  "linkedin_client_id",
   // Fase 11B: identitas pengirim email (nama + alamat tampil di setiap
   // email yang diterima orang — memang publik menurut sifatnya).
   "resend_from_email",
@@ -206,6 +220,7 @@ export async function getPlatformPublicConfig(
     waConfigId,
     threadsAppId,
     tiktokClientKey,
+    linkedinClientId,
     resendFromEmail,
     resendFromName,
     googleClientId,
@@ -221,6 +236,7 @@ export async function getPlatformPublicConfig(
     getProviderSecret(db, "meta_wa_config_id", opts),
     getProviderSecret(db, "threads_app_id", opts),
     getProviderSecret(db, "tiktok_client_key", opts),
+    getProviderSecret(db, "linkedin_client_id", opts),
     getProviderSecret(db, "resend_from_email", opts),
     getProviderSecret(db, "resend_from_name", opts),
     getProviderSecret(db, "google_oauth_client_id", opts),
@@ -240,6 +256,7 @@ export async function getPlatformPublicConfig(
     meta_wa_config_id: waConfigId,
     threads_app_id: threadsAppId,
     tiktok_client_key: tiktokClientKey,
+    linkedin_client_id: linkedinClientId,
     resend_from_email: resendFromEmail,
     resend_from_name: resendFromName,
     google_oauth_client_id: googleClientId,

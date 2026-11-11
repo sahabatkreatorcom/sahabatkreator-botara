@@ -124,6 +124,19 @@ const EnvSchema = z.object({
    */
   LINKEDIN_API_BASE: z.string().url().optional(),
   /**
+   * Kredensial APLIKASI LinkedIn milik PLATFORM (LinkedIn Developer
+   * Portal — produk Sign In with LinkedIn + Share on LinkedIn) —
+   * istilah resmi LinkedIn: Client ID (identifier publik aplikasi)
+   * dan Client Secret (RAHASIA). Keduanya FALLBACK env saja
+   * (instruksi pemilik 2026-11-12); sumber utama adalah Panel Admin
+   * (kunci `linkedin_client_id` / `linkedin_client_secret` di
+   * platform_settings, resolusi panel → env lewat resolver core).
+   * Dipakai alur connect/OAuth LinkedIn (gelombang Semua OAuth);
+   * penerbitan memakai token per akun tenant.
+   */
+  LINKEDIN_CLIENT_ID: z.string().min(1).optional(),
+  LINKEDIN_CLIENT_SECRET: z.string().min(1).optional(),
+  /**
    * Base URL Pinterest API v5. Default https://api.pinterest.com;
    * override hanya untuk uji mock — pola yang sama dengan
    * LINKEDIN_API_BASE. Kredensial per akun (access token OAuth)

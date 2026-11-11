@@ -11,6 +11,7 @@ import type {
   PlatformR2Info,
   PlatformThreadsInfo,
   PlatformTikTokInfo,
+  PlatformLinkedInInfo,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
@@ -99,6 +100,9 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   // Aplikasi TikTok (TikTok for Developers) — bagian tersendiri.
   tiktok_client_key: "admin.tiktokClientKeyLabel",
   tiktok_client_secret: "admin.tiktokClientSecretLabel",
+  // Aplikasi LinkedIn (LinkedIn Developer Portal) — bagian tersendiri.
+  linkedin_client_id: "admin.linkedinClientIdLabel",
+  linkedin_client_secret: "admin.linkedinClientSecretLabel",
   resend_api_key: "admin.resendApiKeyLabel",
   resend_from_email: "admin.resendFromEmailLabel",
   resend_from_name: "admin.resendFromNameLabel",
@@ -128,6 +132,8 @@ export function AdminPage({ t, locale }: AdminPageProps) {
     useState<PlatformThreadsInfo | null>(null);
   const [tiktokInfo, setTiktokInfo] =
     useState<PlatformTikTokInfo | null>(null);
+  const [linkedinInfo, setLinkedinInfo] =
+    useState<PlatformLinkedInInfo | null>(null);
   const [emailInfo, setEmailInfo] = useState<PlatformEmailInfo | null>(null);
   const [googleInfo, setGoogleInfo] = useState<PlatformGoogleInfo | null>(
     null,
@@ -151,6 +157,7 @@ export function AdminPage({ t, locale }: AdminPageProps) {
       setMetaInfo(body.meta);
       setThreadsInfo(body.threads);
       setTiktokInfo(body.tiktok);
+      setLinkedinInfo(body.linkedin);
       setEmailInfo(body.email);
       setGoogleInfo(body.google);
       setContentScheduleInfo(body.contentSchedule);
@@ -568,6 +575,56 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             locale={locale}
             settingKey="tiktok_client_secret"
             status={byKey("tiktok_client_secret")}
+            onStatusChanged={onStatusChanged}
+          />
+        </div>
+      </section>
+
+      {/*
+        Kredensial APLIKASI LinkedIn (LinkedIn Developer Portal) —
+        bagian tersendiri: client ID pengenal publik (teks biasa,
+        nilai efektif ditampilkan), client secret baris password yang
+        tidak pernah dirender. Konsumennya adalah alur connect/OAuth
+        LinkedIn gelombang Semua OAuth (Sign In with LinkedIn +
+        Share on LinkedIn) — token LinkedIn TIDAK bisa di-refresh,
+        jadi connect ulang adalah bagian dari siklus hidupnya.
+      */}
+      <section className="mt-8">
+        <h2 className="text-base font-semibold text-ink">
+          {t("admin.linkedinTitle")}
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          {t("admin.linkedinBody")}
+        </p>
+        {linkedinInfo ? (
+          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.linkedinClientIdLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {linkedinInfo.clientId ?? "—"}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+        <div className="mt-4 space-y-3">
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="linkedin_client_id"
+            status={byKey("linkedin_client_id")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="linkedin_client_secret"
+            status={byKey("linkedin_client_secret")}
             onStatusChanged={onStatusChanged}
           />
         </div>

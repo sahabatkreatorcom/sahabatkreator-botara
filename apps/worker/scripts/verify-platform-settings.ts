@@ -512,5 +512,68 @@ await clearPlatformSetting(db, { key: "tiktok_client_secret", updatedByUserId: A
 clearPlatformSettingsCache();
 console.log("[9] TikTok: panel menang atas env; secret hanya envelope v1; status bebas nilai; client key publik, secret tak tampil: OK");
 
+// ---------- 10. Kredensial aplikasi LinkedIn: panel → env ----------
+const LINKEDIN_ENV_ID = "linkedin-id-env";
+const LINKEDIN_ENV_SECRET = "linkedin-secret-env";
+const LINKEDIN_PANEL_ID = "linkedin-id-panel";
+const LINKEDIN_PANEL_SECRET = "linkedin-secret-panel";
+const linkedinOpts = {
+  masterSecret: MASTER,
+  env: {
+    linkedin_client_id: LINKEDIN_ENV_ID,
+    linkedin_client_secret: LINKEDIN_ENV_SECRET,
+  },
+};
+
+// Env saja → env untuk kedua kunci; client ID tampil di konfigurasi
+// publik, client secret TIDAK punya tempat di sana sama sekali.
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "linkedin_client_id", linkedinOpts), LINKEDIN_ENV_ID);
+assert.equal(await getProviderSecret(db, "linkedin_client_secret", linkedinOpts), LINKEDIN_ENV_SECRET);
+let linkedinPublic = await getPlatformPublicConfig(db, linkedinOpts);
+assert.equal(linkedinPublic.linkedin_client_id, LINKEDIN_ENV_ID);
+assert.ok(!("linkedin_client_secret" in linkedinPublic));
+
+// Panel → MENANG atas env untuk kedua kunci.
+await setPlatformSetting(
+  db,
+  { key: "linkedin_client_id", value: LINKEDIN_PANEL_ID, updatedByUserId: ADMIN_USER },
+  linkedinOpts,
+);
+await setPlatformSetting(
+  db,
+  { key: "linkedin_client_secret", value: LINKEDIN_PANEL_SECRET, updatedByUserId: ADMIN_USER },
+  linkedinOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "linkedin_client_id", linkedinOpts), LINKEDIN_PANEL_ID);
+assert.equal(await getProviderSecret(db, "linkedin_client_secret", linkedinOpts), LINKEDIN_PANEL_SECRET);
+linkedinPublic = await getPlatformPublicConfig(db, linkedinOpts);
+assert.equal(linkedinPublic.linkedin_client_id, LINKEDIN_PANEL_ID);
+
+// Secret tersimpan HANYA sebagai envelope terenkripsi; daftar status
+// bebas nilai untuk kedua kunci.
+const linkedinRaw = await client.query<{ value_encrypted: string }>(
+  `SELECT value_encrypted FROM platform_settings WHERE key = 'linkedin_client_secret'`,
+);
+assert.equal(linkedinRaw.rows.length, 1);
+assert.ok(linkedinRaw.rows[0].value_encrypted.startsWith("v1:"));
+assert.ok(!linkedinRaw.rows[0].value_encrypted.includes(LINKEDIN_PANEL_SECRET));
+const linkedinStatuses = await listPlatformSettingStatuses(db, linkedinOpts);
+assert.ok(!JSON.stringify(linkedinStatuses).includes(LINKEDIN_PANEL_SECRET));
+assert.ok(!JSON.stringify(linkedinStatuses).includes(LINKEDIN_ENV_SECRET));
+assert.equal(
+  linkedinStatuses.find((s) => s.key === "linkedin_client_id")?.source,
+  "panel",
+);
+assert.equal(
+  linkedinStatuses.find((s) => s.key === "linkedin_client_secret")?.source,
+  "panel",
+);
+await clearPlatformSetting(db, { key: "linkedin_client_id", updatedByUserId: ADMIN_USER });
+await clearPlatformSetting(db, { key: "linkedin_client_secret", updatedByUserId: ADMIN_USER });
+clearPlatformSettingsCache();
+console.log("[10] LinkedIn: panel menang atas env; secret hanya envelope v1; status bebas nilai; client ID publik, secret tak tampil: OK");
+
 await client.close();
 console.log("verify platform-settings (PGlite): SEMUA LULUS");

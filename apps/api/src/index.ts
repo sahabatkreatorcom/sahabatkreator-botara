@@ -117,6 +117,11 @@ const platformOptions: PlatformSettingsOptions = {
     // konsumen — disiapkan untuk alur connect/OAuth TikTok.
     tiktok_client_key: env.TIKTOK_CLIENT_KEY,
     tiktok_client_secret: env.TIKTOK_CLIENT_SECRET,
+    // Kredensial aplikasi LinkedIn (LinkedIn Developer Portal): env
+    // hanya fallback; sumber utama Panel Admin. Konsumen: alur
+    // connect/OAuth LinkedIn (gelombang Semua OAuth).
+    linkedin_client_id: env.LINKEDIN_CLIENT_ID,
+    linkedin_client_secret: env.LINKEDIN_CLIENT_SECRET,
     // Fase 11B: email Resend — env hanya fallback; sumber utama Panel
     // Admin (resend_api_key rahasia + identitas pengirim publik).
     resend_api_key: env.RESEND_API_KEY,

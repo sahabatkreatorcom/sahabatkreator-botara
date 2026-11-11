@@ -52,6 +52,15 @@ export const PlatformSettingKeySchema = z.enum([
   // memakai token per akun tenant.
   "tiktok_client_key",
   "tiktok_client_secret",
+  // Kredensial APLIKASI LinkedIn milik platform (LinkedIn Developer
+  // Portal), pola threads_app_id/tiktok_client_key: `linkedin_client_id`
+  // adalah identifier PUBLIK (nilainya ditampilkan panel lewat
+  // PlatformLinkedInInfo); `linkedin_client_secret` RAHASIA (pola
+  // meta_app_secret: hanya status yang dipertukarkan). Untuk
+  // connect/OAuth LinkedIn (gelombang Semua OAuth); penerbitan memakai
+  // token per akun tenant.
+  "linkedin_client_id",
+  "linkedin_client_secret",
   // Fase 11B: email transaksional via Resend (keputusan user 2026-11-02).
   // `resend_api_key` adalah RAHASIA (pola kunci lain: status saja yang
   // dipertukarkan). `resend_from_email` / `resend_from_name` adalah
@@ -157,6 +166,17 @@ export const PlatformTikTokInfoSchema = z.object({
 export type PlatformTikTokInfo = z.infer<typeof PlatformTikTokInfoSchema>;
 
 /**
+ * Info LinkedIn BUKAN rahasia: Client ID aplikasi LinkedIn efektif
+ * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya —
+ * identifier publik, pola PlatformTikTokInfo. Client Secret TIDAK
+ * PERNAH muncul di kontrak mana pun.
+ */
+export const PlatformLinkedInInfoSchema = z.object({
+  clientId: z.string().nullable(),
+});
+export type PlatformLinkedInInfo = z.infer<typeof PlatformLinkedInInfoSchema>;
+
+/**
  * Info email BUKAN rahasia (Fase 11B): identitas pengirim Resend efektif
  * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya. Kunci
  * API Resend sendiri rahasia dan tidak pernah muncul di kontrak mana pun
@@ -209,6 +229,7 @@ export const PlatformSettingsResponseSchema = z.object({
   meta: PlatformMetaInfoSchema,
   threads: PlatformThreadsInfoSchema,
   tiktok: PlatformTikTokInfoSchema,
+  linkedin: PlatformLinkedInInfoSchema,
   email: PlatformEmailInfoSchema,
   google: PlatformGoogleInfoSchema,
   contentSchedule: PlatformContentScheduleInfoSchema,

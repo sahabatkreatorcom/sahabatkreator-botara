@@ -99,6 +99,10 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   // client secret rahasia mengikuti batas kunci rahasia lain.
   tiktok_client_key: 128,
   tiktok_client_secret: 512,
+  // Aplikasi LinkedIn: client ID publik pendek (ditampilkan panel),
+  // client secret rahasia mengikuti batas kunci rahasia lain.
+  linkedin_client_id: 128,
+  linkedin_client_secret: 512,
   // Fase 11B: kunci Resend rahasia; identitas pengirim publik (alamat
   // email + nama tampil) — panjang mengikuti sifat nilainya.
   resend_api_key: 512,
@@ -138,6 +142,9 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
  * meta_app_secret (dan alur OAuth Threads-nya sendiri belum dibuka).
  * `tiktok_client_secret` sama: tidak ada panggilan validasi mandiri
  * TikTok untuk client secret, dan OAuth TikTok belum dibuka.
+ * `linkedin_client_secret` sama: token endpoint LinkedIn hanya
+ * memvalidasi pasangan klien saat ada authorization code yang
+ * ditukar — tidak ada panggilan validasi klien yang berdiri sendiri.
  */
 const TESTABLE_KEYS: ReadonlySet<PlatformSettingKey> = new Set([
   "openrouter_api_key",
@@ -250,6 +257,12 @@ export function createAdminRoutes(
       // pernah keluar — pola yang sama seperti kunci rahasia lain.
       tiktok: {
         clientKey: publicConfig.tiktok_client_key,
+      },
+      // Aplikasi LinkedIn (LinkedIn Developer Portal): hanya Client
+      // ID yang ditampilkan (publik); Client Secret tidak pernah
+      // keluar — pola yang sama seperti kunci rahasia lain.
+      linkedin: {
+        clientId: publicConfig.linkedin_client_id,
       },
       // Fase 11B: identitas pengirim email efektif (panel → env) —
       // publik menurut sifatnya, ditampilkan untuk verifikasi pemilik.

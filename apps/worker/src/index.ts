@@ -244,6 +244,12 @@ const platformSettingsOptions: PlatformSettingsOptions = {
     // me-resolve klien yang sama seperti API.
     google_oauth_client_id: env.GOOGLE_OAUTH_CLIENT_ID,
     google_oauth_client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+    // Kredensial aplikasi LinkedIn (gelombang Semua OAuth): lifecycle
+    // token LinkedIn tidak me-refresh (LinkedIn tidak menerbitkan
+    // refresh token untuk program standar), tetapi resolusi panel →
+    // env tetap dipetakan agar objek opsi proses ini lengkap.
+    linkedin_client_id: env.LINKEDIN_CLIENT_ID,
+    linkedin_client_secret: env.LINKEDIN_CLIENT_SECRET,
     // Lifecycle token Meta (0010): kredensial aplikasi untuk refresh
     // `tbft` — panel menang, env fallback, sama seperti API.
     meta_app_id: env.META_APP_ID,
