@@ -22,6 +22,17 @@ export const ChannelProviderSchema = z.enum([
    * linimasa akun itu sendiri.
    */
   "threads",
+  /**
+   * Bluesky (Gelombang 1.5) — provider KHUSUS content schedule, sama
+   * seperti Threads: identitasnya memakai enum bersama agar akun
+   * (`external_id` = DID, `public_handle` = handle), sasaran post, dan
+   * capability berbagi satu sumber, tetapi ia BUKAN channel inbox:
+   * tidak ada webhook pesan, percakapan dua arah, broadcast, atau
+   * jalur connect channel generik untuknya. Satu-satunya percakapan
+   * yang boleh lahir adalah sasaran sintetis `kind='channel'` untuk
+   * linimasa akun itu sendiri.
+   */
+  "bluesky",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 

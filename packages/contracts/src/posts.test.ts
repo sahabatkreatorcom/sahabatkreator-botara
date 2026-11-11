@@ -28,11 +28,27 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("provider-ngawur")).toBeUndefined();
   });
 
-  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta sejauh ini)", () => {
+  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky sejauh ini)", () => {
     const supported = Object.entries(POST_PROVIDER_CAPABILITIES)
       .filter(([, capability]) => capability.publishSupported)
       .map(([provider]) => provider);
-    expect(supported).toEqual(["telegram", "instagram", "messenger", "threads"]);
+    expect(supported).toEqual([
+      "telegram",
+      "instagram",
+      "messenger",
+      "threads",
+      "bluesky",
+    ]);
+  });
+
+  it("bluesky: teks 300, gambar maks 4, video ditunda, dokumen tidak didukung", () => {
+    const bluesky = getPostProviderCapability("bluesky")!;
+    expect(bluesky.maxCaption).toBe(300);
+    expect(bluesky.maxMedia).toBe(4);
+    expect(bluesky.mediaRequired).toBe(false);
+    expect(bluesky.supportsAlbum).toBe(true);
+    expect(bluesky.supportsVideo).toBe(false);
+    expect(bluesky.supportsDocuments).toBe(false);
   });
 
   it("telegram mempertahankan batas Fase 23: caption 1024, album 10, dokumen tidak boleh di album", () => {

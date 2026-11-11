@@ -30,6 +30,9 @@ export const PROVIDER_NAMES: Record<ChannelProvider, string> = {
   // Nama tampil saja: Threads tetap tidak masuk SUPPORTED_PROVIDERS
   // karena ia bukan channel broadcast/inbox.
   threads: "Threads",
+  // Nama tampil saja: Bluesky juga khusus content schedule, bukan
+  // channel broadcast/inbox.
+  bluesky: "Bluesky",
 };
 
 export const SUPPORTED_PROVIDERS: ReadonlySet<ChannelProvider> = new Set([

@@ -27,7 +27,13 @@ export type ChannelProvider =
    * jalur pengiriman pesan mana pun. Nilai ini ada agar akun/sasaran
    * linimasanya memakai identitas provider yang sama dengan kontrak.
    */
-  | "threads";
+  | "threads"
+  /**
+   * Khusus content schedule (Gelombang 1.5): Bluesky (AT Protocol)
+   * sama seperti Threads — tidak mengimplementasikan ChannelAdapter
+   * inbox dan tidak boleh dipilih jalur pengiriman pesan mana pun.
+   */
+  | "bluesky";
 
 export interface ChannelAccountRef {
   id: string;
@@ -178,5 +184,10 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
     provider: "threads",
     freeFormWindowHours: null,
     notes: "Bukan channel inbox: khusus publikasi content schedule; tidak ada jendela pesan atau pengiriman DM.",
+  },
+  bluesky: {
+    provider: "bluesky",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule (AT Protocol); tidak ada jendela pesan atau pengiriman DM.",
   },
 };

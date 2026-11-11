@@ -193,6 +193,28 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
   },
+  bluesky: {
+    // Bluesky / AT Protocol (Gelombang 1.5): teks maks 300 grapheme.
+    // Validasi repo memakai panjang string JS yang selalu >= jumlah
+    // grapheme, jadi penolakan caption berada di sisi aman (caption
+    // emoji padat bisa ditolak lebih awal, tidak pernah lolos
+    // kelebihan). Gambar maks 4 sebagai embed `app.bsky.embed.images`
+    // — album dalam arti embed multi-gambar, bukan container. Video
+    // DITUNDA dengan sengaja: unggah video Bluesky bukan `uploadBlob`
+    // ke PDS melainkan layanan video terpisah
+    // (`app.bsky.video.uploadVideo` + polling job + token layanan),
+    // subsistem sendiri yang tidak berbagi pola media biner repo.
+    // Dokumen dan first comment tidak dikenal `app.bsky.feed.post`.
+    publishSupported: true,
+    mediaRequired: false,
+    maxCaption: 300,
+    maxMedia: 4,
+    supportsAlbum: true,
+    supportsVideo: false,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
     // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.

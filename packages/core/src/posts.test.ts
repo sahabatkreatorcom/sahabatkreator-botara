@@ -43,6 +43,7 @@ const CH_ACCOUNT = "8a000000-0000-4000-8000-000000000023";
 const FB_ACCOUNT = "8a010000-0000-4000-8000-000000000023";
 const IG_ACCOUNT = "8a020000-0000-4000-8000-000000000023";
 const THREADS_ACCOUNT = "8a030000-0000-4000-8000-000000000023";
+const BLUESKY_ACCOUNT = "8a040000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
@@ -86,6 +87,12 @@ beforeAll(async () => {
     [THREADS_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'bluesky', 'did:plc:promo123', 'Bluesky Promo', 'connected', 'v1:bluesky-app-password', 'promo.bsky.social')`,
+    [BLUESKY_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
     [CONTACT, TEST_TENANT_ID],
   );
@@ -123,7 +130,11 @@ describe("target", () => {
   it("hanya percakapan kind=channel pada akun terhubung yang bisa dituju", async () => {
     const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
     expect(targets.map((t) => t.conversationId)).toContain(CONV_CHANNEL);
-    expect(targets[0]?.providerChatId).toBe("-1009876543210");
+    // Jangan mengasumsikan posisi indeks: daftar diurutkan judul, dan
+    // sasaran linimasa lain (Meta/Threads/Bluesky) ikut termaterialisasi.
+    expect(
+      targets.find((t) => t.conversationId === CONV_CHANNEL)?.providerChatId,
+    ).toBe("-1009876543210");
   });
 
   it("intipan provider untuk registry adapter: telegram, dan null untuk post yang tidak ada", async () => {
@@ -218,6 +229,46 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
     });
     expect(scheduled.post.status).toBe("scheduled");
     expect(scheduled.post.target.provider).toBe("threads");
+  });
+
+  it("akun Bluesky menjadi sasaran publikasi (DID); teks saja terjadwal, caption dibatasi 300, dokumen ditolak", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const bluesky = targets.find((target) => target.provider === "bluesky");
+    expect(bluesky?.channelAccountId).toBe(BLUESKY_ACCOUNT);
+    expect(bluesky?.providerChatId).toBe("did:plc:promo123");
+
+    const post = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: bluesky!.conversationId,
+      title: "Bluesky teks",
+      caption: "y".repeat(400),
+      mediaIds: [],
+    });
+    expect(post.caption).toHaveLength(300);
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.target.provider).toBe("bluesky");
+
+    const docPost = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: bluesky!.conversationId,
+      title: "Bluesky dokumen",
+      caption: "Lampiran dokumen",
+      mediaIds: [MEDIA_DOC],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: docPost.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

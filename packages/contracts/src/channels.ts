@@ -85,6 +85,13 @@ export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
  * OAuth aplikasi Threads yang terpisah (dimock pada Gelombang 1).
  * Route channel menjawabnya `CHANNEL_NOT_AVAILABLE_YET`, bukan
  * mengalirkannya ke connect Meta graph.facebook.com.
+ *
+ * Hal yang sama berlaku untuk `provider: "bluesky"` (Gelombang 1.5):
+ * identitas akun linimasa (DID + handle) valid pada skema akun/sasaran,
+ * tetapi provisioning-nya — pemilik membuat app password di pengaturan
+ * Bluesky lalu akun didaftarkan dengan kredensial itu — belum dibuka
+ * lewat endpoint generik ini dan dijawab `CHANNEL_NOT_AVAILABLE_YET`
+ * yang sama.
  */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,
