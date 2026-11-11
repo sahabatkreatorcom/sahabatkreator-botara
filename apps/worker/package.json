@@ -47,6 +47,7 @@
     "verify:bluesky-post": "tsx scripts/verify-bluesky-post.ts",
     "verify:youtube-post": "tsx scripts/verify-youtube-post.ts",
     "verify:meta-token-lifecycle": "tsx scripts/verify-meta-token-lifecycle.ts",
+    "verify:threads-token-lifecycle": "tsx scripts/verify-threads-token-lifecycle.ts",
     "purge:channels": "tsx scripts/purge-trashed-channels.ts",
     "prune:logs": "tsx scripts/prune-integration-logs.ts",
     "prune:media": "tsx scripts/prune-media.ts",

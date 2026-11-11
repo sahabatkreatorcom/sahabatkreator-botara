@@ -99,23 +99,37 @@ hanya bisa diajukan dari akun pemilik:
 
 3. **Threads** — dibutuhkan: aplikasi Threads milik pemilik yang
    terpisah dari aplikasi Facebook/Instagram, review/izin
-   `threads_content_publish`, akun Threads contoh, Threads user ID +
-   user access token hasil OAuth nyata, dan infrastruktur URL media
-   publik yang sama seperti Instagram untuk postingan bergambar/video.
-   Untuk apa: adapter membuat container di `graph.threads.net/v1.0`,
-   menunggu statusnya, lalu memanggil `threads_publish`; teks dapat
-   terbit tanpa media, sedangkan media tanpa URL publik gagal aman
-   dengan `threads_public_media_url_unavailable`. Sudah dimock:
-   provider `threads` ditambahkan end-to-end sebatas akun/sasaran
-   linimasa + capability + adapter (migrasi 0014), OAuth/connect
-   generik sengaja belum dibuka dan Threads didokumentasikan bukan
-   channel inbox; seluruh protokol container diverifikasi melawan
-   fake Threads API (`verify:threads-post`). Per 2026-11-12, App ID &
-   App Secret aplikasi Threads kini bisa diisi di Panel Admin (grup
-   Meta → sub-blok Threads; fallback env `THREADS_APP_ID` /
-   `THREADS_APP_SECRET`) — kredensial itu akan dipakai alur connect
-   Threads kelak; provisioning/connect-nya sendiri tetap belum dibuka
-   dan tetap pengembangan lanjutan, bukan tindakan pemilik di sini.
+   `threads_content_publish`, akun Threads contoh, dan infrastruktur
+   URL media publik yang sama seperti Instagram untuk postingan
+   bergambar/video. Untuk apa: adapter membuat container di
+   `graph.threads.net/v1.0`, menunggu statusnya, lalu memanggil
+   `threads_publish`; teks dapat terbit tanpa media, sedangkan media
+   tanpa URL publik gagal aman dengan
+   `threads_public_media_url_unavailable`. Sudah dibangun (di luar
+   mock): provider `threads` end-to-end sebatas akun/sasaran linimasa
+   + capability + adapter (migrasi 0014) dan seluruh protokol
+   container diverifikasi melawan fake Threads API
+   (`verify:threads-post`); Threads didokumentasikan bukan channel
+   inbox. Per 2026-11-12: (i) App ID & App Secret aplikasi Threads
+   bisa diisi di Panel Admin (grup Meta → sub-blok Threads; fallback
+   env `THREADS_APP_ID` / `THREADS_APP_SECRET`); (ii) alur
+   connect/OAuth Threads SUDAH DIBANGUN memakai kredensial itu —
+   tombol "Hubungkan dengan Threads" di halaman Channels menjalankan
+   authorize resmi (scope `threads_basic` +
+   `threads_content_publish`) → token berumur panjang
+   (`th_exchange_token`) tersimpan terenkripsi sebagai akun channel,
+   dan token disegarkan otomatis oleh worker lifecycle
+   (`th_refresh_token`, migrasi 0021) sebelum kedaluwarsa ±60 hari;
+   seluruh alur diverifikasi melawan fake Threads OAuth + Graph
+   (`verify:threads-oauth`, `verify:threads-token-lifecycle`). Yang
+   TERSISA untuk pemilik: (a) membuat aplikasi Threads di portal
+   Meta/Threads dan mengisi App ID + App Secret-nya di Panel Admin;
+   (b) menempel Redirect URI `https://botara.my.id/api/threads/oauth/callback`
+   persis di pengaturan aplikasi Threads (URI yang sama juga tampil
+   di langkah Hubungkan Threads halaman Channels); (c) mengajukan
+   App Review izin `threads_content_publish` agar akun di luar
+   penguji aplikasi bisa terbit untuk publik; (d) menghubungkan satu
+   akun Threads contoh lewat tombol itu untuk uji live pertama.
 
 ## Gelombang 1.5 — Bluesky
 

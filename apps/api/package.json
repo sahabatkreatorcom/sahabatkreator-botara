@@ -11,6 +11,7 @@
     "verify:http": "tsx scripts/verify-http.ts",
     "verify:oauth-kv": "tsx scripts/verify-oauth-kv.ts",
     "verify:meta-discovery": "tsx scripts/verify-meta-discovery.ts",
+    "verify:threads-oauth": "tsx scripts/verify-threads-oauth.ts",
     "backfill:reply-snapshots": "tsx scripts/backfill-reply-snapshots.ts",
     "backfill:usage-meta": "tsx scripts/backfill-usage-meta.ts",
     "backfill:kb-embeddings": "tsx scripts/backfill-kb-embeddings.ts"
@@ -33,6 +34,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.14",
     "@types/node": "^22.10.2",
     "tsup": "^8.3.5",
     "tsx": "^4.19.2",
