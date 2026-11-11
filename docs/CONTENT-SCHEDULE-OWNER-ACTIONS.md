@@ -243,6 +243,57 @@ hanya bisa diajukan dari akun pemilik:
    Google; jenis postingan EVENT/OFFER belum dibangun (STANDARD
    saja); satu lokasi dikelola satu koneksi Google tenant.
 
-## Gelombang berikutnya
+## Gelombang 4 — TikTok (gelombang terakhir)
 
-_(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_
+1. **TikTok** — dibutuhkan: (a) aplikasi TikTok milik pemilik
+   (TikTok for Developers) dengan produk Login Kit + Content
+   Posting API aktif dan client key/secret aplikasi itu; (b)
+   pengajuan **AUDIT Content Posting API** dari akun pemilik —
+   prasyarat ini sudah dicatat sejak Gelombang 0 karena prosesnya
+   paling lama: TANPA audit lolos, TikTok hanya mengizinkan
+   postingan API berprivasi `SELF_ONLY` (hanya terlihat kreator
+   sendiri), dan adapter memang berjalan dengan bawaan itu; (c)
+   OAuth akun TikTok contoh dengan scope `user.info.basic` +
+   `video.publish` agar open_id + access token terekam sebagai
+   akun channel `tiktok`; (d) SETELAH audit lolos, naikkan env
+   platform `TIKTOK_PRIVACY_LEVEL` dari `SELF_ONLY` ke level yang
+   dikehendaki (`PUBLIC_TO_EVERYONE` dsb.) — adapter memvalidasi
+   level itu terhadap `privacy_level_options` akun dan menolak
+   dengan `tiktok_privacy_option_mismatch` bila akun belum
+   mengizinkannya. Untuk apa: adapter menerbitkan direct post
+   video — periksa `creator_info` → init unggah `FILE_UPLOAD` →
+   unggah biner per potongan dari object store privat → polling
+   status sampai `PUBLISH_COMPLETE`; judul postingan adalah
+   caption post (maks 2200). Sudah dimock: provider `tiktok`
+   ditambahkan end-to-end sebatas akun/sasaran linimasa +
+   capability + adapter (migrasi 0020), dan seluruh protokol
+   (creator_info → init → potongan Content-Range → polling,
+   gerbang privasi sebelum init, pemetaan error termasuk kuota
+   posting harian `spam_risk_too_many_posts`) diverifikasi melawan
+   fake Content Posting API (`verify:tiktok-post`, 16 PASS)
+   dengan access token uji; TIDAK dibutuhkan URL media publik
+   (video diunggah sebagai biner). Catatan batas: **mode foto
+   TIDAK dibangun** — foto Content Posting API hanya menerima
+   `PULL_FROM_URL` dari URL pada domain yang diverifikasi
+   kepemilikannya di portal TikTok; menyalakannya kelak
+   membutuhkan verifikasi domain milik pemilik itu + infrastruktur
+   URL publik (alasan yang sama seperti IG/Pinterest); access
+   token TikTok berumur ±24 jam dan penyegaran otomatis BELUM
+   dibangun (repo belum punya kolom refresh token generik di luar
+   lifecycle token Meta) — token kedaluwarsa menjawab
+   `tiktok_unauthorized` dan akun perlu dihubungkan ulang, atau
+   pemilik meminta pengembangan lanjutan penyegaran memakai
+   refresh token OAuth TikTok (±365 hari); bila scope yang
+   diberikan ternyata `video.upload` (bukan `video.publish`),
+   video mendarat sebagai draf di inbox kreator
+   (`SEND_TO_USER_INBOX`) untuk ditinjau manual, bukan terbit
+   langsung; provisioning TikTok belum dibuka di endpoint connect
+   generik (dijawab `CHANNEL_NOT_AVAILABLE_YET`) — pendaftaran
+   akun nyata menunggu alur OAuth TikTok khusus atau penyemaian
+   akun oleh operator.
+
+---
+
+_Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
+content schedule). Entri baru hanya ditambahkan bila ada
+pengembangan lanjutan di luar roadmap._
