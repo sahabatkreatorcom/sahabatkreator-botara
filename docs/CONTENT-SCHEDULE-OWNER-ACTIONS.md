@@ -155,6 +155,94 @@ hanya bisa diajukan dari akun pemilik:
    gagal dengan `youtube_upload_incomplete` dan dijadwalkan ulang
    manual).
 
+## Gelombang 3 — LinkedIn, Pinterest, Google Business
+
+1. **LinkedIn** — dibutuhkan: (a) aplikasi LinkedIn milik pemilik
+   (LinkedIn Developer) dengan produk Sign In with LinkedIn (OpenID)
+   + Share on LinkedIn aktif; (b) OAuth pemilik akun LinkedIn pribadi
+   dengan scope `openid profile w_member_social` agar member ID +
+   access token terekam sebagai akun channel `linkedin`; (c) akun
+   LinkedIn pribadi contoh untuk publikasi nyata pertama. Untuk apa:
+   adapter menerbitkan ke PROFIL PRIBADI (`urn:li:person:{member ID}`)
+   lewat Posts API — unggah media Images/Videos API lalu
+   `POST /rest/posts` dengan versi REST ter-pin
+   (`LINKEDIN_API_VERSION` di paket channel-linkedin; LinkedIn
+   menghentikan versi setelah ±1 tahun, jadi menaikkan konstanta itu
+   adalah perawatan berkala pemilik platform). Sudah dimock:
+   provider `linkedin` ditambahkan end-to-end sebatas akun/sasaran
+   linimasa + capability + adapter (migrasi 0017), dan seluruh alur
+   unggah gambar/video + pembuatan post diverifikasi melawan fake
+   LinkedIn API (`verify:linkedin-post`, 16 PASS) dengan access token
+   uji; TIDAK dibutuhkan URL media publik (media diunggah sebagai
+   biner). Catatan batas: **Company Page BUKAN sasaran gelombang
+   ini** — menerbitkan sebagai Page membutuhkan persetujuan program
+   Community Management LinkedIn yang terpisah dan ketat; ajukan
+   program itu dari akun pemilik bila Page perusahaan menjadi
+   kebutuhan nyata (pengembangan lanjutan, bukan pembangunan
+   setengah-setengah di gelombang ini). Provisioning LinkedIn juga
+   belum dibuka di endpoint connect generik (dijawab
+   `CHANNEL_NOT_AVAILABLE_YET`) — pendaftaran akun nyata menunggu
+   alur OAuth LinkedIn khusus atau penyemaian akun oleh operator.
+
+2. **Pinterest** — dibutuhkan: (a) aplikasi Pinterest milik pemilik
+   (Pinterest Developers) yang naik dari akses trial ke persetujuan
+   akses PENUH (Pin creation pada akses trial hanya menjangkau akun
+   sandbox/terbatas); (b) OAuth pemilik akun Pinterest dengan scope
+   `boards:read` + `pins:read,pins:write` agar user ID + access
+   token terekam sebagai akun channel `pinterest`; (c) akun
+   Pinterest contoh yang SUDAH punya minimal satu board publik —
+   board PERTAMA akun adalah tujuan bawaan Pin (akun tanpa board
+   gagal aman `pinterest_board_missing`); (d) untuk gambar berformat
+   selain JPEG/PNG (mis. GIF), infrastruktur URL media publik yang
+   sama seperti Instagram (`POST_MEDIA_PUBLIC_BASE_URL`) karena
+   format itu hanya bisa dikirim sebagai `image_url`. Untuk apa:
+   adapter membuat Pin API v5 (judul dari `title` post maks 100,
+   deskripsi dari caption maks 800, tautan tujuan dari URL pertama
+   caption) ke board pertama akun. Sudah dimock: provider
+   `pinterest` ditambahkan end-to-end sebatas akun/sasaran linimasa
+   + capability + adapter (migrasi 0018), dan pembuatan Pin kedua
+   jalur media diverifikasi melawan fake API v5
+   (`verify:pinterest-post`, 12 PASS) dengan access token uji;
+   gambar JPEG/PNG TIDAK butuh URL publik (dikirim `image_base64`
+   dari biner privat). Catatan batas: Pin video DITUNDA (butuh
+   subsistem pendaftaran media asinkron API v5 — unggah multipart +
+   polling status media; alasan yang sama seperti video Bluesky);
+   pemilihan board per postingan belum dibangun (satu keputusan
+   bawaan: board pertama); provisioning Pinterest belum dibuka di
+   endpoint connect generik (`CHANNEL_NOT_AVAILABLE_YET`).
+
+3. **Google Business Profile** — dibutuhkan: (a) pengajuan akses
+   Business Profile API dari proyek Google Cloud milik pemilik
+   disetujui Google — **kuota API bernilai 0 sampai disetujui** dan
+   selama itu publikasi nyata menjawab
+   `google_business_permission_denied`; prasyarat ini sudah tercatat
+   sejak Gelombang 0 dan merupakan gerbang terpanjang gelombang
+   ini; (b) verifikasi aplikasi OAuth Google mencakup scope
+   `business.manage` yang kini ikut diminta consent Google yang
+   sama; (c) akun Google pemilik yang mengelola lokasi bisnis
+   contoh, lalu menghubungkan ulang Google dari dashboard (consent
+   inkremental menambahkan scope business ke koneksi yang sudah
+   ada — callback otomatis menyinkronkan semua lokasi akun itu
+   menjadi akun lokasi `google_business`, satu sasaran per lokasi);
+   (d) infrastruktur URL media publik (`POST_MEDIA_PUBLIC_BASE_URL`,
+   sama seperti Instagram) bila postingan lokal harus membawa foto —
+   API postingan lokal hanya menerima `sourceUrl` publik, bukan
+   biner; postingan teks terbit tanpa kebutuhan ini. Untuk apa:
+   adapter membuat postingan lokal STANDARD per lokasi
+   (`POST /v4/{location}/localPosts`, summary maks 1500, CTA
+   LEARN_MORE dari URL pertama caption). Sudah dimock: provider
+   `google_business` ditambahkan end-to-end sebatas akun/sasaran
+   linimasa + capability + adapter (migrasi 0019), scope
+   ditambahkan ke consent Google yang ada, sinkronisasi lokasi +
+   gerbang scope diuji di core (`google-business.test.ts`, fetch
+   fake, 6 test), dan protokol localPosts diverifikasi melawan
+   fake Business Profile API (`verify:google-business-post`,
+   10 PASS) dengan access token uji. Catatan batas: provisioning
+   GBP BUKAN connect channel generik (dijawab
+   `CHANNEL_NOT_AVAILABLE_YET`) — jalurnya adalah menghubungkan
+   Google; jenis postingan EVENT/OFFER belum dibangun (STANDARD
+   saja); satu lokasi dikelola satu koneksi Google tenant.
+
 ## Gelombang berikutnya
 
 _(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_
