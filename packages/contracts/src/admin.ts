@@ -34,6 +34,15 @@ export const PlatformSettingKeySchema = z.enum([
   "meta_app_id",
   "meta_ig_config_id",
   "meta_wa_config_id",
+  // Kredensial APLIKASI Threads milik platform — aplikasi TERPISAH
+  // dari Meta App utama, dengan OAuth & review-nya sendiri.
+  // `threads_app_id` identifier PUBLIK (nilainya ditampilkan panel
+  // lewat PlatformThreadsInfo, pola meta_app_id); `threads_app_secret`
+  // RAHASIA (pola meta_app_secret: hanya status yang dipertukarkan).
+  // Untuk connect/OAuth Threads kelak; penerbitan saat ini memakai
+  // token per akun tenant.
+  "threads_app_id",
+  "threads_app_secret",
   // Fase 11B: email transaksional via Resend (keputusan user 2026-11-02).
   // `resend_api_key` adalah RAHASIA (pola kunci lain: status saja yang
   // dipertukarkan). `resend_from_email` / `resend_from_name` adalah
@@ -117,6 +126,17 @@ export const PlatformMetaInfoSchema = z.object({
 export type PlatformMetaInfo = z.infer<typeof PlatformMetaInfoSchema>;
 
 /**
+ * Info Threads BUKAN rahasia: App ID aplikasi Threads efektif
+ * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya —
+ * identifier publik, pola PlatformMetaInfo. App Secret TIDAK PERNAH
+ * muncul di kontrak mana pun.
+ */
+export const PlatformThreadsInfoSchema = z.object({
+  appId: z.string().nullable(),
+});
+export type PlatformThreadsInfo = z.infer<typeof PlatformThreadsInfoSchema>;
+
+/**
  * Info email BUKAN rahasia (Fase 11B): identitas pengirim Resend efektif
  * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya. Kunci
  * API Resend sendiri rahasia dan tidak pernah muncul di kontrak mana pun
@@ -167,6 +187,7 @@ export const PlatformSettingsResponseSchema = z.object({
   settings: z.array(PlatformSettingStatusSchema),
   r2: PlatformR2InfoSchema,
   meta: PlatformMetaInfoSchema,
+  threads: PlatformThreadsInfoSchema,
   email: PlatformEmailInfoSchema,
   google: PlatformGoogleInfoSchema,
   contentSchedule: PlatformContentScheduleInfoSchema,

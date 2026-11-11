@@ -95,6 +95,19 @@ const EnvSchema = z.object({
    */
   THREADS_API_BASE: z.string().url().optional(),
   /**
+   * Kredensial APLIKASI Threads milik PLATFORM — aplikasi Threads
+   * TERPISAH dari Meta App utama (permukaan & review-nya sendiri).
+   * App ID adalah identifier publik; App Secret RAHASIA. Keduanya
+   * FALLBACK env saja (instruksi pemilik 2026-11-12); sumber utama
+   * adalah Panel Admin (kunci `threads_app_id` / `threads_app_secret`
+   * di platform_settings, resolusi panel → env lewat resolver core).
+   * Dipakai alur connect/OAuth Threads kelak — saat ini belum ada
+   * konsumennya (provisioning Threads belum dibuka; penerbitan
+   * memakai token per akun tenant seperti sebelumnya).
+   */
+  THREADS_APP_ID: z.string().min(1).optional(),
+  THREADS_APP_SECRET: z.string().min(1).optional(),
+  /**
    * Base URL entryway Bluesky (AT Protocol). Default
    * https://bsky.social — entryway meneruskan panggilan XRPC ke PDS
    * akun; override hanya untuk uji mock atau PDS mandiri — pola yang

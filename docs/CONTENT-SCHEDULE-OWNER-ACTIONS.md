@@ -110,7 +110,12 @@ hanya bisa diajukan dari akun pemilik:
    linimasa + capability + adapter (migrasi 0014), OAuth/connect
    generik sengaja belum dibuka dan Threads didokumentasikan bukan
    channel inbox; seluruh protokol container diverifikasi melawan
-   fake Threads API (`verify:threads-post`).
+   fake Threads API (`verify:threads-post`). Per 2026-11-12, App ID &
+   App Secret aplikasi Threads kini bisa diisi di Panel Admin (grup
+   Meta → sub-blok Threads; fallback env `THREADS_APP_ID` /
+   `THREADS_APP_SECRET`) — kredensial itu akan dipakai alur connect
+   Threads kelak; provisioning/connect-nya sendiri tetap belum dibuka
+   dan tetap pengembangan lanjutan, bukan tindakan pemilik di sini.
 
 ## Gelombang 1.5 — Bluesky
 

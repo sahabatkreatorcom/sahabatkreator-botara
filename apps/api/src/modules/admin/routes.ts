@@ -91,6 +91,10 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   meta_app_id: 128,
   meta_ig_config_id: 128,
   meta_wa_config_id: 128,
+  // Aplikasi Threads: app id publik pendek (ditampilkan panel),
+  // app secret rahasia mengikuti batas kunci rahasia lain.
+  threads_app_id: 128,
+  threads_app_secret: 512,
   // Fase 11B: kunci Resend rahasia; identitas pengirim publik (alamat
   // email + nama tampil) — panjang mengikuti sifat nilainya.
   resend_api_key: 512,
@@ -126,6 +130,8 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
  * klien saat ada authorization code / refresh token yang ditukar —
  * tidak ada panggilan validasi klien yang berdiri sendiri. Kebenarannya
  * terbukti dari dialog Hubungkan Google tenant yang berhasil/gagal.
+ * `threads_app_secret` juga tidak diuji — alasan yang sama seperti
+ * meta_app_secret (dan alur OAuth Threads-nya sendiri belum dibuka).
  */
 const TESTABLE_KEYS: ReadonlySet<PlatformSettingKey> = new Set([
   "openrouter_api_key",
@@ -226,6 +232,12 @@ export function createAdminRoutes(
         igConfigId: publicConfig.meta_ig_config_id,
         waConfigId: publicConfig.meta_wa_config_id,
         oauthRedirectUri: options.metaOAuthRedirectUri ?? "",
+      },
+      // Aplikasi Threads (terpisah dari Meta App): hanya App ID yang
+      // ditampilkan (publik); App Secret tidak pernah keluar — pola
+      // yang sama seperti meta_app_secret di grup Meta.
+      threads: {
+        appId: publicConfig.threads_app_id,
       },
       // Fase 11B: identitas pengirim email efektif (panel → env) —
       // publik menurut sifatnya, ditampilkan untuk verifikasi pemilik.

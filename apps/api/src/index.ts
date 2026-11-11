@@ -106,6 +106,11 @@ const platformOptions: PlatformSettingsOptions = {
     meta_app_id: env.META_APP_ID,
     meta_ig_config_id: env.META_IG_CONFIG_ID,
     meta_wa_config_id: env.META_WA_CONFIG_ID,
+    // Kredensial aplikasi Threads (aplikasi terpisah dari Meta App):
+    // env hanya fallback; sumber utama Panel Admin grup Meta. Belum
+    // ada konsumen — disiapkan untuk alur connect/OAuth Threads.
+    threads_app_id: env.THREADS_APP_ID,
+    threads_app_secret: env.THREADS_APP_SECRET,
     // Fase 11B: email Resend — env hanya fallback; sumber utama Panel
     // Admin (resend_api_key rahasia + identitas pengirim publik).
     resend_api_key: env.RESEND_API_KEY,

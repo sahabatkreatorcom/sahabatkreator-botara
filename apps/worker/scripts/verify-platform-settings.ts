@@ -17,6 +17,8 @@
  *  7. Identitas R2 (account id, endpoint, bucket): panel → env →
  *     bawaan kode yang identik dengan perilaku sebelum panel ada;
  *     endpoint kosong diturunkan dari account id efektif.
+ *  8. Kredensial aplikasi Threads: panel menang atas env, secret
+ *     hanya envelope terenkripsi, app id publik & secret tak tampil.
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:platform-settings
  * (Nilai dummy di skrip ini adalah fixture uji yang jelas-jelas palsu.)
@@ -381,6 +383,69 @@ assert.deepEqual(await resolveR2Identity(db, r2EnvOpts), {
   bucket: "bucket-dari-env",
 });
 console.log("[7e] nilai tidak sah diabaikan → fallback; cabut panel → env/bawaan lagi: OK");
+
+// ---------- 8. Kredensial aplikasi Threads: panel → env ----------
+const THREADS_ENV_ID = "threads-app-env";
+const THREADS_ENV_SECRET = "threads-secret-env";
+const THREADS_PANEL_ID = "threads-app-panel";
+const THREADS_PANEL_SECRET = "threads-secret-panel";
+const threadsOpts = {
+  masterSecret: MASTER,
+  env: {
+    threads_app_id: THREADS_ENV_ID,
+    threads_app_secret: THREADS_ENV_SECRET,
+  },
+};
+
+// Env saja → env untuk kedua kunci; app id tampil di konfigurasi
+// publik, secret TIDAK punya tempat di sana sama sekali.
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "threads_app_id", threadsOpts), THREADS_ENV_ID);
+assert.equal(await getProviderSecret(db, "threads_app_secret", threadsOpts), THREADS_ENV_SECRET);
+let threadsPublic = await getPlatformPublicConfig(db, threadsOpts);
+assert.equal(threadsPublic.threads_app_id, THREADS_ENV_ID);
+assert.ok(!("threads_app_secret" in threadsPublic));
+
+// Panel → MENANG atas env untuk kedua kunci.
+await setPlatformSetting(
+  db,
+  { key: "threads_app_id", value: THREADS_PANEL_ID, updatedByUserId: ADMIN_USER },
+  threadsOpts,
+);
+await setPlatformSetting(
+  db,
+  { key: "threads_app_secret", value: THREADS_PANEL_SECRET, updatedByUserId: ADMIN_USER },
+  threadsOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "threads_app_id", threadsOpts), THREADS_PANEL_ID);
+assert.equal(await getProviderSecret(db, "threads_app_secret", threadsOpts), THREADS_PANEL_SECRET);
+threadsPublic = await getPlatformPublicConfig(db, threadsOpts);
+assert.equal(threadsPublic.threads_app_id, THREADS_PANEL_ID);
+
+// Secret tersimpan HANYA sebagai envelope terenkripsi; daftar status
+// bebas nilai untuk kedua kunci.
+const threadsRaw = await client.query<{ value_encrypted: string }>(
+  `SELECT value_encrypted FROM platform_settings WHERE key = 'threads_app_secret'`,
+);
+assert.equal(threadsRaw.rows.length, 1);
+assert.ok(threadsRaw.rows[0].value_encrypted.startsWith("v1:"));
+assert.ok(!threadsRaw.rows[0].value_encrypted.includes(THREADS_PANEL_SECRET));
+const threadsStatuses = await listPlatformSettingStatuses(db, threadsOpts);
+assert.ok(!JSON.stringify(threadsStatuses).includes(THREADS_PANEL_SECRET));
+assert.ok(!JSON.stringify(threadsStatuses).includes(THREADS_ENV_SECRET));
+assert.equal(
+  threadsStatuses.find((s) => s.key === "threads_app_id")?.source,
+  "panel",
+);
+assert.equal(
+  threadsStatuses.find((s) => s.key === "threads_app_secret")?.source,
+  "panel",
+);
+await clearPlatformSetting(db, { key: "threads_app_id", updatedByUserId: ADMIN_USER });
+await clearPlatformSetting(db, { key: "threads_app_secret", updatedByUserId: ADMIN_USER });
+clearPlatformSettingsCache();
+console.log("[8] Threads: panel menang atas env; secret hanya envelope v1; status bebas nilai; app id publik, secret tak tampil: OK");
 
 await client.close();
 console.log("verify platform-settings (PGlite): SEMUA LULUS");

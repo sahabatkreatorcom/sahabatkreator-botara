@@ -9,6 +9,7 @@ import type {
   PlatformSettingStatus,
   PlatformSettingTestResult,
   PlatformR2Info,
+  PlatformThreadsInfo,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
@@ -91,6 +92,9 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   meta_app_id: "admin.metaAppIdLabel",
   meta_ig_config_id: "admin.metaIgConfigIdLabel",
   meta_wa_config_id: "admin.metaWaConfigIdLabel",
+  // Aplikasi Threads (terpisah dari Meta App utama) — sub-blok di grup Meta.
+  threads_app_id: "admin.threadsAppIdLabel",
+  threads_app_secret: "admin.threadsAppSecretLabel",
   resend_api_key: "admin.resendApiKeyLabel",
   resend_from_email: "admin.resendFromEmailLabel",
   resend_from_name: "admin.resendFromNameLabel",
@@ -116,6 +120,8 @@ export function AdminPage({ t, locale }: AdminPageProps) {
   const [statuses, setStatuses] = useState<PlatformSettingStatus[]>([]);
   const [r2Info, setR2Info] = useState<PlatformR2Info | null>(null);
   const [metaInfo, setMetaInfo] = useState<PlatformMetaInfo | null>(null);
+  const [threadsInfo, setThreadsInfo] =
+    useState<PlatformThreadsInfo | null>(null);
   const [emailInfo, setEmailInfo] = useState<PlatformEmailInfo | null>(null);
   const [googleInfo, setGoogleInfo] = useState<PlatformGoogleInfo | null>(
     null,
@@ -137,6 +143,7 @@ export function AdminPage({ t, locale }: AdminPageProps) {
       setStatuses(body.settings);
       setR2Info(body.r2);
       setMetaInfo(body.meta);
+      setThreadsInfo(body.threads);
       setEmailInfo(body.email);
       setGoogleInfo(body.google);
       setContentScheduleInfo(body.contentSchedule);
@@ -463,6 +470,50 @@ export function AdminPage({ t, locale }: AdminPageProps) {
               onStatusChanged(next);
               void load();
             }}
+          />
+        </div>
+
+        {/*
+          Kredensial APLIKASI Threads — aplikasi TERPISAH dari Meta App
+          utama (ditambahkan 2026-11-12 karena pemilik tidak menemukan
+          formnya). Pola mengikuti Meta: app id publik (teks biasa,
+          nilai efektif ditampilkan), app secret baris password yang
+          tidak pernah dirender. BELUM ada konsumen — disiapkan untuk
+          alur connect/OAuth Threads; penerbitan memakai token akun.
+        */}
+        <p className="mt-6 max-w-2xl text-sm text-muted">
+          {t("admin.threadsBody")}
+        </p>
+        {threadsInfo ? (
+          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.threadsAppIdLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {threadsInfo.appId ?? "—"}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+        <div className="mt-4 space-y-3">
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="threads_app_id"
+            status={byKey("threads_app_id")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="threads_app_secret"
+            status={byKey("threads_app_secret")}
+            onStatusChanged={onStatusChanged}
           />
         </div>
       </section>
