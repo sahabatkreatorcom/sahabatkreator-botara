@@ -1,0 +1,22 @@
+-- 0018_pinterest_provider.sql
+--
+-- Provider Pinterest untuk content schedule (Gelombang 3).
+--
+-- Pinterest ditambahkan ke enum `channel_provider` agar akun
+-- Pinterest, identitasnya, dan sasaran post memakai model
+-- `channel_accounts` / percakapan `kind='channel'` yang sama seperti
+-- provider content schedule sebelumnya. Ini BUKAN penambahan channel
+-- inbox: tidak ada tabel, webhook, atau jalur pesan baru. Nilai enum
+-- saja sudah cukup karena seluruh data akun yang dibutuhkan adapter
+-- muat di kolom yang ada: external_id = Pinterest user ID,
+-- public_handle = username akun, dan access_token_encrypted =
+-- access token OAuth API v5 terenkripsi, mengikuti pola kredensial
+-- channel yang sudah ada.
+--
+-- Board tujuan Pin SENGAJA tidak menjadi kolom baru: satu post =
+-- satu Pin pada board PERTAMA akun (adapter membaca daftar board
+-- saat publikasi), konsisten dengan keputusan "parameter platform
+-- dibawakan" lain di roadmap ini (kategori bawaan YouTube).
+-- Pemilihan board per postingan adalah pengembangan lanjutan.
+
+ALTER TYPE "public"."channel_provider" ADD VALUE IF NOT EXISTS 'pinterest';

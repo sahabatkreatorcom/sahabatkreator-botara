@@ -127,6 +127,13 @@
       "when": 1793870118813,
       "tag": "0017_linkedin_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1793870118814,
+      "tag": "0018_pinterest_provider",
+      "breakpoints": true
     }
   ]
 }

@@ -105,6 +105,13 @@ export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
  * pada skema akun/sasaran, tetapi provisioning-nya adalah OAuth
  * aplikasi LinkedIn milik pemilik — belum dibuka lewat endpoint
  * generik ini dan dijawab `CHANNEL_NOT_AVAILABLE_YET` yang sama.
+ *
+ * Dan untuk `provider: "pinterest"` (Gelombang 3): identitas akun
+ * linimasa (Pinterest user ID + access token OAuth API v5) valid
+ * pada skema akun/sasaran, tetapi provisioning-nya adalah OAuth
+ * aplikasi Pinterest milik pemilik (akses trial → persetujuan akses
+ * penuh) — belum dibuka lewat endpoint generik ini dan dijawab
+ * `CHANNEL_NOT_AVAILABLE_YET` yang sama.
  */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,

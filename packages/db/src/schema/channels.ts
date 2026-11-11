@@ -47,6 +47,12 @@ export const channelProviderEnum = pgEnum("channel_provider", [
   // subjek urn:li:person) + access token OAuth terenkripsi — sasaran
   // profil pribadi, BUKAN Company Page.
   "linkedin",
+  // Gelombang 3: akun Pinterest khusus content schedule (bukan inbox).
+  // Nilai enum ditambahkan oleh migrasi 0018; urutan lama tidak diubah.
+  // Baris akunnya membawa identitas akun (external_id = Pinterest
+  // user ID) + access token OAuth API v5 terenkripsi; board tujuan
+  // Pin adalah board pertama akun (dibaca adapter saat publikasi).
+  "pinterest",
 ]);
 
 export const channelAccountStatusEnum = pgEnum("channel_account_status", [

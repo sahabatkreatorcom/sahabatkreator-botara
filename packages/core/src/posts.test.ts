@@ -46,11 +46,13 @@ const THREADS_ACCOUNT = "8a030000-0000-4000-8000-000000000023";
 const BLUESKY_ACCOUNT = "8a040000-0000-4000-8000-000000000023";
 const YOUTUBE_ACCOUNT = "8a050000-0000-4000-8000-000000000023";
 const LINKEDIN_ACCOUNT = "8a060000-0000-4000-8000-000000000023";
+const PINTEREST_ACCOUNT = "8a070000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
 const USER_ID = "8a300000-0000-4000-8000-000000000023";
 const MEDIA_PHOTO = "8a400000-0000-4000-8000-000000000023";
+const MEDIA_PHOTO_2 = "8a410000-0000-4000-8000-000000000023";
 const MEDIA_DOC = "8a500000-0000-4000-8000-000000000023";
 const MEDIA_VIDEO = "8b600000-0000-4000-8000-000000000023";
 
@@ -108,6 +110,12 @@ beforeAll(async () => {
     [LINKEDIN_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'pinterest', 'pin_user_123', 'Pinterest Promo', 'connected', 'v1:pinterest-token', 'pinterestpromo')`,
+    [PINTEREST_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
     [CONTACT, TEST_TENANT_ID],
   );
@@ -122,8 +130,9 @@ beforeAll(async () => {
     `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
      VALUES ($1, $2, 't/photo.jpg', 'photo.jpg', 'image/jpeg', 2048),
             ($3, $2, 't/doc.pdf', 'doc.pdf', 'application/pdf', 4096),
-            ($4, $2, 't/video.mp4', 'video.mp4', 'video/mp4', 8192)`,
-    [MEDIA_PHOTO, TEST_TENANT_ID, MEDIA_DOC, MEDIA_VIDEO],
+            ($4, $2, 't/video.mp4', 'video.mp4', 'video/mp4', 8192),
+            ($5, $2, 't/photo2.jpg', 'photo2.jpg', 'image/jpeg', 1024)`,
+    [MEDIA_PHOTO, TEST_TENANT_ID, MEDIA_DOC, MEDIA_VIDEO, MEDIA_PHOTO_2],
   );
 });
 
@@ -411,6 +420,93 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
         postId: docPost.id,
       }),
     ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+  });
+
+  it("akun Pinterest menjadi sasaran publikasi (user ID); wajib satu gambar, judul dibatasi 100, video ditolak", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const pinterest = targets.find((target) => target.provider === "pinterest");
+    expect(pinterest?.channelAccountId).toBe(PINTEREST_ACCOUNT);
+    expect(pinterest?.providerChatId).toBe("pin_user_123");
+
+    const pin = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: pinterest!.conversationId,
+      title: "Pin Produk Baru",
+      caption: "Deskripsi pin minggu ini",
+      mediaIds: [MEDIA_PHOTO],
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: pin.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.target.provider).toBe("pinterest");
+
+    const textOnly = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: pinterest!.conversationId,
+      title: "Pin tanpa gambar",
+      caption: "Tidak akan terjadwal",
+      mediaIds: [],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: textOnly.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_REQUIRED" });
+
+    const twoMedia = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: pinterest!.conversationId,
+      title: "Pin dua gambar",
+      caption: "Satu Pin hanya membawa satu media",
+      mediaIds: [MEDIA_PHOTO, MEDIA_PHOTO_2],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: twoMedia.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_TOO_MANY" });
+
+    const video = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: pinterest!.conversationId,
+      title: "Pin video",
+      caption: "Video Pin ditunda gelombang ini",
+      mediaIds: [MEDIA_VIDEO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: video.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+
+    const longTitle = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: pinterest!.conversationId,
+      title: "j".repeat(101),
+      caption: "Judul Pin kepanjangan",
+      mediaIds: [MEDIA_PHOTO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: longTitle.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_TITLE_TOO_LONG" });
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

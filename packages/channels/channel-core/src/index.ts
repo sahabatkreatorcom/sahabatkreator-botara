@@ -49,7 +49,14 @@ export type ChannelProvider =
    * Company Page bukan sasaran provider ini (program Community
    * Management terpisah).
    */
-  | "linkedin";
+  | "linkedin"
+  /**
+   * Khusus content schedule (Gelombang 3): Pinterest (API v5, Pin
+   * gambar ke board akun) sama seperti provider content schedule
+   * lain — tidak mengimplementasikan ChannelAdapter inbox; access
+   * token OAuth-nya tersimpan terenkripsi di baris akun channel ini.
+   */
+  | "pinterest";
 
 export interface ChannelAccountRef {
   id: string;
@@ -215,5 +222,10 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
     provider: "linkedin",
     freeFormWindowHours: null,
     notes: "Bukan channel inbox: khusus publikasi content schedule (Posts API ke profil pribadi anggota); tidak ada jendela pesan atau pengiriman DM.",
+  },
+  pinterest: {
+    provider: "pinterest",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule (Pin API v5 ke board akun); tidak ada jendela pesan atau pengiriman DM.",
   },
 };

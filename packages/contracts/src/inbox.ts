@@ -60,6 +60,17 @@ export const ChannelProviderSchema = z.enum([
    * akun channel, mengikuti pola kredensial channel yang ada.
    */
   "linkedin",
+  /**
+   * Pinterest (Gelombang 3) — provider KHUSUS content schedule, sama
+   * seperti Threads/Bluesky/YouTube/LinkedIn: identitasnya memakai
+   * enum bersama agar akun (`external_id` = Pinterest user ID),
+   * sasaran post, dan capability berbagi satu sumber, tetapi ia
+   * BUKAN channel inbox: tidak ada webhook pesan, percakapan dua
+   * arah, broadcast, atau jalur connect channel generik untuknya.
+   * Satu post = satu Pin (API v5) pada board pertama akun; access
+   * token OAuth tersimpan terenkripsi pada akun channel.
+   */
+  "pinterest",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 

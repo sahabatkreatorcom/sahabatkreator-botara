@@ -281,6 +281,33 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
   },
+  pinterest: {
+    // Pinterest API v5 (Gelombang 3): satu post = satu Pin pada
+    // board pertama akun. Pin WAJIB media (mediaRequired) dan hanya
+    // membawa SATU media (maxMedia 1 — tidak ada album Pin).
+    // Pemetaan field: `title` post menjadi judul Pin (maks 100,
+    // ditegakkan lewat maxTitle) dan `caption` menjadi deskripsi Pin
+    // (maks 800). Gambar JPEG/PNG diunggah sebagai `image_base64`
+    // dari biner object store privat (tanpa URL publik); format
+    // gambar lain (GIF) memakai `image_url` dari resolver publik
+    // pola Instagram dan gagal aman tanpa URL publik. Video
+    // DITUNDA dengan sengaja: Pin video menuntut subsistem
+    // pendaftaran media asinkron API v5 (unggah multipart ke
+    // penyimpanan Pinterest + polling status media) yang tidak
+    // berbagi pola media biner repo — alasan yang sama seperti
+    // video Bluesky di Gelombang 1.5.
+    publishSupported: true,
+    mediaRequired: true,
+    maxCaption: 800,
+    maxTitle: 100,
+    maxMedia: 1,
+    supportsAlbum: false,
+    supportsPhotos: true,
+    supportsVideo: false,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
     // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.
