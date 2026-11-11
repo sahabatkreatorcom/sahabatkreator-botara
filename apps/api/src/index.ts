@@ -113,6 +113,13 @@ const platformOptions: PlatformSettingsOptions = {
     // + client_secret rahasia).
     google_oauth_client_id: env.GOOGLE_OAUTH_CLIENT_ID,
     google_oauth_client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+    // Instruksi pemilik 2026-11-12: sisa kredensial/pengaturan platform
+    // ikut dikelola Panel Admin — env hanya fallback per kunci.
+    meta_webhook_verify_token: env.META_WEBHOOK_VERIFY_TOKEN,
+    openrouter_embedding_model: env.OPENROUTER_EMBEDDING_MODEL,
+    post_media_public_base_url: env.POST_MEDIA_PUBLIC_BASE_URL,
+    youtube_privacy_status: env.YOUTUBE_PRIVACY_STATUS,
+    tiktok_privacy_level: env.TIKTOK_PRIVACY_LEVEL,
   },
 };
 
@@ -346,7 +353,17 @@ routes.route(
     telegramApiBase: env.TELEGRAM_API_BASE,
     publicBaseUrl: env.BETTER_AUTH_URL,
     metaApiBase: env.META_API_BASE,
-    metaWebhookVerifyToken: env.META_WEBHOOK_VERIFY_TOKEN,
+    // Token verifikasi efektif (Panel Admin → env) agar info webhook
+    // yang dilihat owner/admin workspace selalu token yang berlaku —
+    // pola yang sama seperti metaAppSecretConfigured di bawah.
+    metaWebhookVerifyToken: async () => {
+      if (!authBundle) return env.META_WEBHOOK_VERIFY_TOKEN ?? null;
+      return getProviderSecret(
+        authBundle.db,
+        "meta_webhook_verify_token",
+        platformOptions,
+      );
+    },
     // Fase 7A.1: penanda "app secret terkonfigurasi" menyelesaikan nilai
     // efektif panel → env (bukan env semata) — boolean saja yang keluar.
     metaAppSecretConfigured: async () => {

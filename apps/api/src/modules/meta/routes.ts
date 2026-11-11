@@ -21,9 +21,10 @@ import { processMetaWebhookPayload } from "./process";
  *   POST /meta/webhook   event messaging bertanda tangan
  *
  * Kepercayaan berlapis (berbeda dari Telegram yang per-akun):
- * 1. Handshake: `hub.verify_token` harus sama persis dengan env
- *    `META_WEBHOOK_VERIFY_TOKEN` (nilai yang KITA tentukan dan ditempel
- *    pemilik platform ke Meta App). Selain itu 403.
+ * 1. Handshake: `hub.verify_token` harus sama persis dengan token
+ *    verifikasi efektif (nilai yang KITA tentukan dan ditempel pemilik
+ *    platform ke Meta App; diselesaikan Panel Admin → env
+ *    `META_WEBHOOK_VERIFY_TOKEN` per request). Selain itu 403.
  * 2. Event: header `X-Hub-Signature-256` = HMAC-SHA256(raw body, App
  *    Secret Meta). Secret diselesaikan panel → env (Fase 7A.1, resolver
  *    Panel Admin 6C: panel menang, env `META_APP_SECRET` fallback, cache
@@ -63,7 +64,13 @@ export interface MetaModuleOptions {
    * tidak diberikan (pemanggil langsung/uji lama).
    */
   appSecret?: string;
-  /** Verify token handshake (env META_WEBHOOK_VERIFY_TOKEN). */
+  /**
+   * Verify token handshake statis (env META_WEBHOOK_VERIFY_TOKEN) —
+   * hanya dipakai bila `platform` tidak diberikan (pemanggil
+   * langsung/uji lama). Dengan `platform`, token diselesaikan per
+   * request lewat resolver Panel Admin (panel `meta_webhook_verify_token`
+   * → env → statis ini), persis pola app secret Fase 7A.1.
+   */
   verifyToken?: string;
   /** Material kunci dekripsi kredensial channel (env CHANNEL_TOKEN_SECRET). */
   channelTokenSecret?: string;
@@ -99,7 +106,18 @@ export function createMetaRoutes(
   };
 
   app.get("/meta/webhook", async (c) => {
-    if (!opts.verifyToken) {
+    // Token efektif per request (instruksi pemilik 2026-11-12): resolver
+    // Panel Admin → env dengan cache ±60 dtk, pola yang sama seperti
+    // app secret di POST — perubahan panel berlaku TANPA restart.
+    const verifyToken =
+      opts.platform && bundle
+        ? ((await getProviderSecret(
+            bundle.db,
+            "meta_webhook_verify_token",
+            opts.platform,
+          )) ?? opts.verifyToken)
+        : opts.verifyToken;
+    if (!verifyToken) {
       await logIntegration({
         direction: "in",
         provider: "meta",
@@ -121,7 +139,7 @@ export function createMetaRoutes(
     // panjang), lalu dibandingkan konstanta-waktu — token verify ini
     // rahasia statis jangka panjang, jadi banding biasa === bocor panjang
     // prefix lewat pengukuran waktu.
-    const expectedDigest = createHash("sha256").update(opts.verifyToken).digest();
+    const expectedDigest = createHash("sha256").update(verifyToken).digest();
     const presentedDigest = createHash("sha256").update(token ?? "").digest();
     if (
       mode === "subscribe" &&

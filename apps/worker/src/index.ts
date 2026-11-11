@@ -35,6 +35,9 @@ import {
   relayUnpublishedOutboxEvents,
   resolveEmbeddingProvider,
   resolveOpenRouterConfig,
+  resolvePostMediaPublicBaseUrl,
+  resolveTikTokPrivacyLevel,
+  resolveYouTubePrivacyStatus,
   respondToInboundMessage,
   syncBookingToGoogle,
   type CommentGraphActions,
@@ -244,6 +247,14 @@ const platformSettingsOptions: PlatformSettingsOptions = {
     // `tbft` — panel menang, env fallback, sama seperti API.
     meta_app_id: env.META_APP_ID,
     meta_app_secret: env.META_APP_SECRET,
+    // Instruksi pemilik 2026-11-12: model embedding + pengaturan
+    // content schedule ikut resolver panel — env hanya fallback,
+    // sama seperti API (dipakai resolusi embedding per job dan
+    // resolusi pengaturan publikasi per job post.publish di bawah).
+    openrouter_embedding_model: env.OPENROUTER_EMBEDDING_MODEL,
+    post_media_public_base_url: env.POST_MEDIA_PUBLIC_BASE_URL,
+    youtube_privacy_status: env.YOUTUBE_PRIVACY_STATUS,
+    tiktok_privacy_level: env.TIKTOK_PRIVACY_LEVEL,
   },
 };
 
@@ -305,6 +316,44 @@ async function resolveWorkerEmbeddingProvider(): Promise<EmbeddingProvider | nul
   } catch (err) {
     console.error("[worker] resolusi provider embedding gagal (diperlakukan nonaktif):", err);
     return null;
+  }
+}
+
+/**
+ * Pengaturan publikasi content schedule efektif per job post.publish
+ * (instruksi pemilik 2026-11-12): Panel Admin → env lewat resolver
+ * bertipe core, cache ±60 dtk — perubahan panel berlaku tanpa restart
+ * worker. Kegagalan resolusi TIDAK boleh mematikan publikasi (pola
+ * resolver embedding di atas): jatuh ke nilai env proses ini, yang
+ * juga membawa bawaan aman config bila env kosong.
+ */
+async function resolvePostPublishSettings(): Promise<{
+  publicMediaBaseUrl?: string;
+  youtubePrivacyStatus: string;
+  tiktokPrivacyLevel: string;
+}> {
+  try {
+    const [baseUrl, youtubePrivacyStatus, tiktokPrivacyLevel] =
+      await Promise.all([
+        resolvePostMediaPublicBaseUrl(db, platformSettingsOptions),
+        resolveYouTubePrivacyStatus(db, platformSettingsOptions),
+        resolveTikTokPrivacyLevel(db, platformSettingsOptions),
+      ]);
+    return {
+      publicMediaBaseUrl: baseUrl ?? undefined,
+      youtubePrivacyStatus,
+      tiktokPrivacyLevel,
+    };
+  } catch (err) {
+    console.error(
+      "[worker] resolusi pengaturan publikasi gagal (jatuh ke env):",
+      err,
+    );
+    return {
+      publicMediaBaseUrl: env.POST_MEDIA_PUBLIC_BASE_URL,
+      youtubePrivacyStatus: env.YOUTUBE_PRIVACY_STATUS,
+      tiktokPrivacyLevel: env.TIKTOK_PRIVACY_LEVEL,
+    };
   }
 }
 
@@ -489,6 +538,11 @@ const bullWorker = new Worker<MainJobData>(
       // `PublisherAdapter` provider sasaran (Gelombang 0) — handler ini
       // tidak lagi tahu platform apa yang sedang diterbitkan.
       const data = job.data as PostPublishJobData;
+      // Pengaturan publikasi di-resolve per job lewat Panel Admin →
+      // env (bukan statis saat boot) agar perubahan panel — mis.
+      // menaikkan privasi TikTok sesudah audit — berlaku tanpa
+      // restart worker.
+      const postSettings = await resolvePostPublishSettings();
       const result = await publishPost(
         db,
         {
@@ -503,14 +557,14 @@ const bullWorker = new Worker<MainJobData>(
           metaGraphApiVersion: META_GRAPH_API_VERSION,
           threadsApiBase: env.THREADS_API_BASE,
           blueskyApiBase: env.BLUESKY_API_BASE,
-          publicMediaBaseUrl: env.POST_MEDIA_PUBLIC_BASE_URL,
+          publicMediaBaseUrl: postSettings.publicMediaBaseUrl,
           google: googleDeps,
-          youtubePrivacyStatus: env.YOUTUBE_PRIVACY_STATUS,
+          youtubePrivacyStatus: postSettings.youtubePrivacyStatus,
           linkedinApiBase: env.LINKEDIN_API_BASE,
           pinterestApiBase: env.PINTEREST_API_BASE,
           googleBusinessApiBase: env.GOOGLE_BUSINESS_API_BASE,
           tiktokApiBase: env.TIKTOK_API_BASE,
-          tiktokPrivacyLevel: env.TIKTOK_PRIVACY_LEVEL,
+          tiktokPrivacyLevel: postSettings.tiktokPrivacyLevel,
           mediaStore,
         },
       );

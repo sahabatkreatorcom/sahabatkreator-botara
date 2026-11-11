@@ -13,6 +13,7 @@ import {
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
 import {
+  getProviderSecret,
   resolveOpenRouterConfig,
   type PlatformSettingsOptions,
 } from "./platform-settings";
@@ -78,10 +79,19 @@ export async function resolveEmbeddingProvider(
   }
   const orConfig = await resolveOpenRouterConfig(db, opts.platform);
   if (!orConfig) return null;
+  // Model embedding efektif: Panel Admin `openrouter_embedding_model`
+  // → env OPENROUTER_EMBEDDING_MODEL → default provider (instruksi
+  // pemilik 2026-11-12; pola yang sama seperti model chat). `modelEnv`
+  // tetap diterima untuk pemanggil lama dan menjadi fallback-nya.
+  const panelModel = await getProviderSecret(
+    db,
+    "openrouter_embedding_model",
+    opts.platform,
+  );
   return createEmbeddingProvider({
     provider: "openrouter",
     openrouterApiKey: orConfig.apiKey,
-    openrouterEmbeddingModel: opts.modelEnv,
+    openrouterEmbeddingModel: panelModel ?? opts.modelEnv,
   });
 }
 

@@ -336,11 +336,14 @@ export interface ChannelsModuleOptions {
   /** Base URL Graph API (env META_API_BASE; default graph.facebook.com). */
   metaApiBase?: string;
   /**
-   * Verify token webhook Meta (env META_WEBHOOK_VERIFY_TOKEN) — nilai
-   * yang KITA tentukan; dibagikan ke owner/admin lewat endpoint
-   * meta-webhook-info agar bisa ditempel ke dashboard Meta App.
+   * Verify token webhook Meta — nilai yang KITA tentukan; dibagikan ke
+   * owner/admin lewat endpoint meta-webhook-info agar bisa ditempel ke
+   * dashboard Meta App. Boleh berupa fungsi resolver async (instruksi
+   * pemilik 2026-11-12: efektif Panel Admin → env
+   * META_WEBHOOK_VERIFY_TOKEN) agar info webhook selalu menunjukkan
+   * token yang benar-benar berlaku, pola metaAppSecretConfigured.
    */
-  metaWebhookVerifyToken?: string;
+  metaWebhookVerifyToken?: string | (() => Promise<string | null>);
   /**
    * Apakah App Secret Meta sudah terkonfigurasi — boolean saja, nilainya
    * tidak pernah masuk modul ini. Boleh berupa fungsi resolver async
@@ -606,9 +609,13 @@ export function createChannelsRoutes(
       typeof opts.metaAppSecretConfigured === "function"
         ? await opts.metaAppSecretConfigured()
         : opts.metaAppSecretConfigured ?? false;
+    const verifyToken =
+      typeof opts.metaWebhookVerifyToken === "function"
+        ? await opts.metaWebhookVerifyToken()
+        : opts.metaWebhookVerifyToken ?? null;
     const body = MetaWebhookInfoResponseSchema.parse({
       webhookUrl: `${baseUrl}/api/meta/webhook`,
-      verifyToken: opts.metaWebhookVerifyToken ?? null,
+      verifyToken,
       appSecretConfigured,
     });
     return c.json(body);
