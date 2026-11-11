@@ -14,6 +14,7 @@ import { blueskyPostPublisher } from "./bluesky-post";
 import { youtubePostPublisher } from "./youtube-post";
 import { linkedinPostPublisher } from "./linkedin-post";
 import { pinterestPostPublisher } from "./pinterest-post";
+import { googleBusinessPostPublisher } from "./google-business-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -73,6 +74,13 @@ export interface PostPublisherOptions {
   linkedinApiBase?: string | undefined;
   /** Base URL Pinterest API v5 (env PINTEREST_API_BASE; default api.pinterest.com). */
   pinterestApiBase?: string | undefined;
+  /**
+   * Base URL Business Profile API (env GOOGLE_BUSINESS_API_BASE;
+   * default mybusiness.googleapis.com — host-nya terpisah dari
+   * `google.bases.apiBase` Calendar/YouTube). Kredensialnya tetap
+   * dari objek `google` di atas.
+   */
+  googleBusinessApiBase?: string | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
@@ -144,6 +152,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   youtubePostPublisher,
   linkedinPostPublisher,
   pinterestPostPublisher,
+  googleBusinessPostPublisher,
 ];
 
 export function getPostPublisher(

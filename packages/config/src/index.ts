@@ -286,6 +286,14 @@ const EnvSchema = z.object({
   GOOGLE_TOKEN_BASE: z.string().url().optional(),
   GOOGLE_AUTH_BASE: z.string().url().optional(),
   /**
+   * Base URL Business Profile API untuk postingan lokal Google
+   * Business (Gelombang 3). Host-nya BUKAN www.googleapis.com —
+   * default https://mybusiness.googleapis.com; override hanya untuk
+   * uji mock, pola yang sama dengan GOOGLE_API_BASE. Kredensial
+   * tetap lewat koneksi Google tenant, bukan env.
+   */
+  GOOGLE_BUSINESS_API_BASE: z.string().url().optional(),
+  /**
    * Status privasi video YouTube hasil content schedule (Gelombang 2).
    * Bawaan `private` DISENGAJA: untuk aplikasi Google yang belum
    * terverifikasi, video yang diunggah lewat API memang dikunci
