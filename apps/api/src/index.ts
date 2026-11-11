@@ -43,6 +43,7 @@ import { createWebchatRoutes } from "./modules/webchat/routes";
 import { createTelegramRoutes } from "./modules/telegram/routes";
 import { createMetaRoutes } from "./modules/meta/routes";
 import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
+import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
 import { createMediaRoutes } from "./modules/media/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
@@ -540,6 +541,22 @@ routes.route(
     // Login menjawab "Invalid Scopes" dan mematikan onboarding
     // Messenger. Lihat docs/APP-REVIEW.md §0.
     engagementScopes: env.META_ENGAGEMENT_SCOPES,
+  }),
+);
+// Modul Threads OAuth Connect (integrasi Threads) — "Hubungkan dengan
+// Threads": start ber-state sekali pakai + callback tunggal publik
+// /threads/oauth/callback + info ketersediaan. Kredensial aplikasi
+// dari Panel Admin (threads_app_id/secret; env hanya fallback) —
+// diselesaikan per request oleh modul lewat platformOptions.
+routes.route(
+  "/",
+  createThreadsOAuthRoutes(authBundle, {
+    platform: platformOptions,
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    threadsApiBase: env.THREADS_API_BASE,
+    publicBaseUrl: env.BETTER_AUTH_URL,
+    redisUrl: env.REDIS_URL,
+    stateSecret: env.BETTER_AUTH_SECRET,
   }),
 );
 

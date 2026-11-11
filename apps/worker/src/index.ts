@@ -46,6 +46,7 @@ import {
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
 import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
+import { runThreadsTokenLifecycle } from "./threads-token-lifecycle";
 import { startMediaIngestLoop } from "./media-ingest";
 import { MEDIA_GC_INTERVAL_MS, startMediaGcLoop } from "./media-gc";
 import {
@@ -1297,6 +1298,42 @@ const tokenLifecycleTimer = setInterval(
 void tokenLifecycleTick();
 
 // ---------------------------------------------------------------------------
+// Lifecycle token Threads (integrasi Threads): putaran sejajar Meta di
+// atas — pindai akun Threads aktif yang token berumur panjangnya
+// mendekati kedaluwarsa (≤7 hari) dan segarkan via grant
+// `th_refresh_token` (tanpa app secret; lihat
+// src/threads-token-lifecycle.ts). Tick terpisah dengan penjaga
+// anti-tumpang-tindih sendiri, interval yang sama (boot + tiap 6 jam).
+// Jalan run-once: `pnpm --filter @sahabat-kreator/worker
+// threads:token-lifecycle` (skrip scripts/threads-token-lifecycle.ts).
+let threadsTokenLifecycleRunning = false;
+async function threadsTokenLifecycleTick(): Promise<void> {
+  if (threadsTokenLifecycleRunning) return;
+  threadsTokenLifecycleRunning = true;
+  try {
+    const result = await runThreadsTokenLifecycle({
+      db,
+      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+      threadsApiBase: env.THREADS_API_BASE,
+    });
+    if (result.scanned > 0) {
+      console.log(
+        `[worker] lifecycle token Threads: ${result.scanned} akun terpindai — refresh=${result.refreshed} warned=${result.warned} authError=${result.authErrored} failed=${result.failed}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] lifecycle token Threads gagal (akan dicoba lagi):", err);
+  } finally {
+    threadsTokenLifecycleRunning = false;
+  }
+}
+const threadsTokenLifecycleTimer = setInterval(
+  () => void threadsTokenLifecycleTick(),
+  TOKEN_LIFECYCLE_INTERVAL_MS,
+);
+void threadsTokenLifecycleTick();
+
+// ---------------------------------------------------------------------------
 // Poller pengiriman pesan outbound (Telegram + Meta).
 //
 // DIPINDAHKAN dari proses API ke worker (rekomendasi analisis). Selama
@@ -1394,6 +1431,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(authSessionPruneTimer);
   clearInterval(broadcastReconcileTimer);
   clearInterval(tokenLifecycleTimer);
+  clearInterval(threadsTokenLifecycleTimer);
   // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang
   // berjalan memakai `db`, dan memutus pool di bawahnya mengubah
   // pengiriman yang sedang berlangsung menjadi kegagalan palsu yang

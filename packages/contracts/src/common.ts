@@ -26,6 +26,15 @@ export const ErrorCodeSchema = z.enum([
   "META_OAUTH_ASSET_NOT_CONNECTABLE",
   "META_OAUTH_EXCHANGE_FAILED",
   "META_OAUTH_CANCELLED",
+  // Integrasi Threads: koneksi Threads via OAuth ("Hubungkan dengan
+  // Threads") — keluarga kode sendiri karena aplikasi & callback-nya
+  // terpisah dari Meta App. Kode-kode ini juga menjadi nilai penanda
+  // redirect callback (?threads_oauth_error=<KODE>).
+  "THREADS_OAUTH_NOT_CONFIGURED",
+  "THREADS_OAUTH_STATE_INVALID",
+  "THREADS_OAUTH_EXCHANGE_FAILED",
+  "THREADS_OAUTH_CANCELLED",
+  "THREADS_ACCOUNT_ALREADY_CONNECTED",
   "CHANNEL_DELETE_CONFIRMATION_MISMATCH",
   "CHANNEL_ALREADY_TRASHED",
   "CHANNEL_NOT_TRASHED",
