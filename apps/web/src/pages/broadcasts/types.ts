@@ -33,6 +33,9 @@ export const PROVIDER_NAMES: Record<ChannelProvider, string> = {
   // Nama tampil saja: Bluesky juga khusus content schedule, bukan
   // channel broadcast/inbox.
   bluesky: "Bluesky",
+  // Nama tampil saja: YouTube juga khusus content schedule, bukan
+  // channel broadcast/inbox.
+  youtube: "YouTube",
 };
 
 export const SUPPORTED_PROVIDERS: ReadonlySet<ChannelProvider> = new Set([

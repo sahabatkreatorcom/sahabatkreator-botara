@@ -33,7 +33,14 @@ export type ChannelProvider =
    * sama seperti Threads — tidak mengimplementasikan ChannelAdapter
    * inbox dan tidak boleh dipilih jalur pengiriman pesan mana pun.
    */
-  | "bluesky";
+  | "bluesky"
+  /**
+   * Khusus content schedule (Gelombang 2): YouTube (Data API v3)
+   * sama seperti Threads/Bluesky — tidak mengimplementasikan
+   * ChannelAdapter inbox; kredensialnya hidup di koneksi Google
+   * tenant, bukan di baris akun channel ini.
+   */
+  | "youtube";
 
 export interface ChannelAccountRef {
   id: string;
@@ -189,5 +196,10 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
     provider: "bluesky",
     freeFormWindowHours: null,
     notes: "Bukan channel inbox: khusus publikasi content schedule (AT Protocol); tidak ada jendela pesan atau pengiriman DM.",
+  },
+  youtube: {
+    provider: "youtube",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule (unggah video YouTube Data API v3); tidak ada jendela pesan atau pengiriman DM.",
   },
 };

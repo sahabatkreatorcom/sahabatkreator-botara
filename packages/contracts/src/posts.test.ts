@@ -28,7 +28,7 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("provider-ngawur")).toBeUndefined();
   });
 
-  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky sejauh ini)", () => {
+  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube sejauh ini)", () => {
     const supported = Object.entries(POST_PROVIDER_CAPABILITIES)
       .filter(([, capability]) => capability.publishSupported)
       .map(([provider]) => provider);
@@ -38,7 +38,22 @@ describe("capability post per provider", () => {
       "messenger",
       "threads",
       "bluesky",
+      "youtube",
     ]);
+  });
+
+  it("youtube: wajib tepat satu video, deskripsi 5000, judul platform 100", () => {
+    const youtube = getPostProviderCapability("youtube")!;
+    expect(youtube.mediaRequired).toBe(true);
+    expect(youtube.maxMedia).toBe(1);
+    expect(youtube.maxCaption).toBe(5000);
+    expect(youtube.maxTitle).toBe(100);
+    expect(youtube.supportsVideo).toBe(true);
+    expect(youtube.supportsPhotos).toBe(false);
+    expect(youtube.supportsAlbum).toBe(false);
+    expect(youtube.supportsDocuments).toBe(false);
+    // Provider lain tidak memakai judul platform.
+    expect(getPostProviderCapability("telegram")?.maxTitle).toBeNull();
   });
 
   it("bluesky: teks 300, gambar maks 4, video ditunda, dokumen tidak didukung", () => {

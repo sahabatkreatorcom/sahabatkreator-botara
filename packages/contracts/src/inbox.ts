@@ -33,6 +33,19 @@ export const ChannelProviderSchema = z.enum([
    * linimasa akun itu sendiri.
    */
   "bluesky",
+  /**
+   * YouTube (Gelombang 2) — provider KHUSUS content schedule, sama
+   * seperti Threads/Bluesky: identitasnya memakai enum bersama agar
+   * akun (`external_id` = channel ID `UC…`), sasaran post, dan
+   * capability berbagi satu sumber, tetapi ia BUKAN channel inbox:
+   * tidak ada webhook pesan, percakapan dua arah, broadcast, atau
+   * jalur connect channel generik untuknya. Kredensialnya BUKAN token
+   * pada akun channel — ia adalah koneksi Google tenant yang sudah
+   * ada (Fase 13G, dipakai Google Calendar); akun channel youtube
+   * hanya membawa identitas channel, dan adapter menukar refresh
+   * token koneksi Google menjadi access token saat menerbitkan.
+   */
+  "youtube",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 

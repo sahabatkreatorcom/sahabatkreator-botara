@@ -36,6 +36,11 @@ export const channelProviderEnum = pgEnum("channel_provider", [
   // Gelombang 1.5: akun Bluesky khusus content schedule (bukan inbox).
   // Nilai enum ditambahkan oleh migrasi 0015; urutan lama tidak diubah.
   "bluesky",
+  // Gelombang 2: akun YouTube khusus content schedule (bukan inbox).
+  // Nilai enum ditambahkan oleh migrasi 0016; urutan lama tidak diubah.
+  // Baris akunnya hanya membawa identitas channel (external_id =
+  // channel ID); kredensial penerbitan hidup di koneksi Google tenant.
+  "youtube",
 ]);
 
 export const channelAccountStatusEnum = pgEnum("channel_account_status", [

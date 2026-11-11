@@ -92,6 +92,13 @@ export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
  * Bluesky lalu akun didaftarkan dengan kredensial itu — belum dibuka
  * lewat endpoint generik ini dan dijawab `CHANNEL_NOT_AVAILABLE_YET`
  * yang sama.
+ *
+ * Dan untuk `provider: "youtube"` (Gelombang 2): provisioning-nya
+ * BUKAN connect channel sama sekali — tenant menghubungkan Google
+ * (modul janji temu, Fase 13G) dengan scope YouTube tambahan, lalu
+ * akun channel youtube disinkronkan dari koneksi Google itu oleh core
+ * (`syncYouTubeChannelAccount`). Endpoint generik ini menjawabnya
+ * `CHANNEL_NOT_AVAILABLE_YET` yang sama.
  */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,

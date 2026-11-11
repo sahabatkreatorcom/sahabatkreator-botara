@@ -121,8 +121,17 @@ export const PostProviderCapabilitySchema = z.object({
   /** true = postingan tanpa media tidak pernah boleh terbit (Instagram). */
   mediaRequired: z.boolean(),
   maxCaption: z.number().int().positive(),
+  /**
+   * Batas kolom `title` post BILA provider memetakannya ke judul
+   * terpisah milik platform (YouTube: judul video maks 100). null =
+   * provider tidak memakai judul platform — `title` post tetap label
+   * internal kalender dan tidak dibatasi capability.
+   */
+  maxTitle: z.number().int().positive().nullable(),
   maxMedia: z.number().int().positive(),
   supportsAlbum: z.boolean(),
+  /** Foto/gambar sebagai lampiran (YouTube menolaknya — video saja). */
+  supportsPhotos: z.boolean(),
   supportsVideo: z.boolean(),
   /** Dokumen sebagai lampiran TUNGGAL. */
   supportsDocuments: z.boolean(),
@@ -142,8 +151,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: true,
     mediaRequired: false,
     maxCaption: POST_CAPTION_MAX,
+    maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: true,
+    supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: true,
     supportsAlbumDocuments: false,
@@ -156,8 +167,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: true,
     mediaRequired: true,
     maxCaption: 2200,
+    maxTitle: null,
     maxMedia: 10,
     supportsAlbum: true,
+    supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
@@ -171,8 +184,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: true,
     mediaRequired: false,
     maxCaption: 63206,
+    maxTitle: null,
     maxMedia: 10,
     supportsAlbum: true,
+    supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
@@ -186,8 +201,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: true,
     mediaRequired: false,
     maxCaption: 500,
+    maxTitle: null,
     maxMedia: 10,
     supportsAlbum: true,
+    supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
@@ -208,9 +225,34 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: true,
     mediaRequired: false,
     maxCaption: 300,
+    maxTitle: null,
     maxMedia: 4,
     supportsAlbum: true,
+    supportsPhotos: true,
     supportsVideo: false,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
+  youtube: {
+    // YouTube Data API v3 (Gelombang 2): HANYA unggah video
+    // (videos.insert) — tidak ada postingan teks/foto di API publik
+    // (Community Posts tidak dibuka untuk API pihak ketiga), jadi
+    // mediaRequired + video saja + tepat satu media. Pemetaan field:
+    // `title` post menjadi judul video (maks 100, ditegakkan lewat
+    // maxTitle) dan `caption` menjadi deskripsi (maks 5000 — YouTube
+    // menghitung byte UTF-8; panjang string JS selalu <= jumlah byte,
+    // jadi penolakan di core berada di sisi aman). Video di bawah
+    // 60 detik otomatis menjadi Shorts oleh YouTube; tidak ada jalur
+    // API terpisah dan tidak ada yang perlu dibedakan di sini.
+    publishSupported: true,
+    mediaRequired: true,
+    maxCaption: 5000,
+    maxTitle: 100,
+    maxMedia: 1,
+    supportsAlbum: false,
+    supportsPhotos: false,
+    supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
@@ -221,8 +263,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: false,
     mediaRequired: false,
     maxCaption: POST_CAPTION_MAX,
+    maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: false,
+    supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: true,
     supportsAlbumDocuments: false,
@@ -233,8 +277,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     publishSupported: false,
     mediaRequired: false,
     maxCaption: POST_CAPTION_MAX,
+    maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: false,
+    supportsPhotos: false,
     supportsVideo: false,
     supportsDocuments: false,
     supportsAlbumDocuments: false,

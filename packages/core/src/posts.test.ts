@@ -44,12 +44,14 @@ const FB_ACCOUNT = "8a010000-0000-4000-8000-000000000023";
 const IG_ACCOUNT = "8a020000-0000-4000-8000-000000000023";
 const THREADS_ACCOUNT = "8a030000-0000-4000-8000-000000000023";
 const BLUESKY_ACCOUNT = "8a040000-0000-4000-8000-000000000023";
+const YOUTUBE_ACCOUNT = "8a050000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
 const USER_ID = "8a300000-0000-4000-8000-000000000023";
 const MEDIA_PHOTO = "8a400000-0000-4000-8000-000000000023";
 const MEDIA_DOC = "8a500000-0000-4000-8000-000000000023";
+const MEDIA_VIDEO = "8b600000-0000-4000-8000-000000000023";
 
 let ctx: TestDb;
 
@@ -93,6 +95,12 @@ beforeAll(async () => {
     [BLUESKY_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'youtube', 'UCpromo123456', 'Kanal Promo', 'connected', NULL, 'kanalpromo')`,
+    [YOUTUBE_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
     [CONTACT, TEST_TENANT_ID],
   );
@@ -106,8 +114,9 @@ beforeAll(async () => {
   await q(
     `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
      VALUES ($1, $2, 't/photo.jpg', 'photo.jpg', 'image/jpeg', 2048),
-            ($3, $2, 't/doc.pdf', 'doc.pdf', 'application/pdf', 4096)`,
-    [MEDIA_PHOTO, TEST_TENANT_ID, MEDIA_DOC],
+            ($3, $2, 't/doc.pdf', 'doc.pdf', 'application/pdf', 4096),
+            ($4, $2, 't/video.mp4', 'video.mp4', 'video/mp4', 8192)`,
+    [MEDIA_PHOTO, TEST_TENANT_ID, MEDIA_DOC, MEDIA_VIDEO],
   );
 });
 
@@ -269,6 +278,77 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
         postId: docPost.id,
       }),
     ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+  });
+
+  it("akun YouTube menjadi sasaran publikasi (channel ID); wajib video, foto ditolak, judul dibatasi 100", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const youtube = targets.find((target) => target.provider === "youtube");
+    expect(youtube?.channelAccountId).toBe(YOUTUBE_ACCOUNT);
+    expect(youtube?.providerChatId).toBe("UCpromo123456");
+
+    const video = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube!.conversationId,
+      title: "Review Produk Baru",
+      caption: "Deskripsi video minggu ini",
+      mediaIds: [MEDIA_VIDEO],
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: video.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.target.provider).toBe("youtube");
+
+    const noMedia = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube!.conversationId,
+      title: "Tanpa video",
+      caption: "Tidak akan terjadwal",
+      mediaIds: [],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: noMedia.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_REQUIRED" });
+
+    const photo = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube!.conversationId,
+      title: "Foto saja",
+      caption: "YouTube tidak menerima foto",
+      mediaIds: [MEDIA_PHOTO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: photo.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+
+    const longTitle = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube!.conversationId,
+      title: "j".repeat(101),
+      caption: "Judulnya kepanjangan untuk YouTube",
+      mediaIds: [MEDIA_VIDEO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: longTitle.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_TITLE_TOO_LONG" });
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

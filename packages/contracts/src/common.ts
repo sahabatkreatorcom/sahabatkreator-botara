@@ -161,6 +161,8 @@ export const ErrorCodeSchema = z.enum([
   "POST_EMPTY",
   // Gelombang 0: validasi format per capability provider (core/posts).
   "POST_CAPTION_TOO_LONG",
+  // Gelombang 2: judul post melebihi batas judul platform (YouTube).
+  "POST_TITLE_TOO_LONG",
   "POST_MEDIA_REQUIRED",
   "POST_MEDIA_TOO_MANY",
   "POST_MEDIA_KIND_UNSUPPORTED",

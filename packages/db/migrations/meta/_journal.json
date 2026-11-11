@@ -113,6 +113,13 @@
       "when": 1793870118811,
       "tag": "0015_bluesky_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1793870118812,
+      "tag": "0016_youtube_provider",
+      "breakpoints": true
     }
   ]
 }

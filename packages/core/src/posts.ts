@@ -65,6 +65,7 @@ export type PostErrorCode =
   | "POST_NOT_PUBLISHING"
   | "POST_EMPTY"
   | "POST_CAPTION_TOO_LONG"
+  | "POST_TITLE_TOO_LONG"
   | "POST_MEDIA_REQUIRED"
   | "POST_MEDIA_TOO_MANY"
   | "POST_MEDIA_KIND_UNSUPPORTED";
@@ -184,21 +185,25 @@ async function loadMedia(
  * Provider linimasa yang akun terhubungnya SENDIRI adalah sasarannya.
  * Berbeda dari Telegram — yang sasaran channel-nya baru diketahui saat
  * bot ditambahkan ke sebuah channel oleh admin — Page, akun IG
- * Business, akun Threads, dan akun Bluesky sudah membawa alamat
- * terbitnya sejak connect: `external_id` akun adalah Page ID / IG user
- * ID / Threads user ID / DID Bluesky. Karena itu tidak ada tabel
- * sasaran baru: sasaran dimaterialisasi sebagai percakapan
- * `kind='channel'` dengan `provider_chat_id = external_id`, persis
- * bentuk yang sudah dipakai state machine post. Untuk Threads dan
- * Bluesky ini murni sasaran publikasi — provider itu tidak menjadi
- * channel inbox hanya karena sasarannya memakai baris percakapan
- * channel.
+ * Business, akun Threads, akun Bluesky, dan channel YouTube sudah
+ * membawa alamat terbitnya sejak connect: `external_id` akun adalah
+ * Page ID / IG user ID / Threads user ID / DID Bluesky / channel ID
+ * YouTube. Karena itu tidak ada tabel sasaran baru: sasaran
+ * dimaterialisasi sebagai percakapan `kind='channel'` dengan
+ * `provider_chat_id = external_id`, persis bentuk yang sudah dipakai
+ * state machine post. Untuk Threads, Bluesky, dan YouTube ini murni
+ * sasaran publikasi — provider itu tidak menjadi channel inbox hanya
+ * karena sasarannya memakai baris percakapan channel. Khusus YouTube,
+ * baris akunnya sendiri disinkronkan dari koneksi Google tenant oleh
+ * `syncYouTubeChannelAccount` (core/youtube) — kredensial penerbitan
+ * tetap hidup di koneksi Google, bukan di akun channel.
  */
 const TIMELINE_ACCOUNT_PROVIDERS = [
   "messenger",
   "instagram",
   "threads",
   "bluesky",
+  "youtube",
 ] as const;
 
 /**
@@ -319,7 +324,7 @@ async function ensureTimelineTargets(
  * Channel yang bisa dituju: percakapan `kind='channel'` pada akun yang
  * masih terhubung. Percakapan channel Telegram dibuat saat bot
  * ditambahkan sebagai admin (webhook `my_chat_member` / `channel_post`);
- * sasaran Page/IG/Threads/Bluesky dimaterialisasi dari akun terhubung oleh
+ * sasaran Page/IG/Threads/Bluesky/YouTube dimaterialisasi dari akun terhubung oleh
  * `ensureTimelineTargets` di atas. Daftar kosong berarti belum ada
  * channel/akun linimasa yang terhubung, dan UI menampilkan instruksi
  * alih-alih pemilih kosong.
@@ -849,6 +854,17 @@ function assertPostContentSchedulable(existing: PostRecord): void {
   if (existing.caption.length > capability.maxCaption) {
     throw new PostDomainError("POST_CAPTION_TOO_LONG");
   }
+  if (
+    capability.maxTitle !== null &&
+    existing.title.trim().length > capability.maxTitle
+  ) {
+    // Provider yang memetakan `title` post ke judul platform (YouTube:
+    // judul video maks 100) — judul adalah field wajib yang tidak
+    // dipotong diam-diam saat pembuatan seperti caption, jadi kelebihan
+    // harus tertangkap di sini sebelum antre, bukan ditolak YouTube
+    // saat jam tayang.
+    throw new PostDomainError("POST_TITLE_TOO_LONG");
+  }
   if (capability.mediaRequired && existing.media.length === 0) {
     throw new PostDomainError("POST_MEDIA_REQUIRED");
   }
@@ -856,6 +872,8 @@ function assertPostContentSchedulable(existing: PostRecord): void {
     throw new PostDomainError("POST_MEDIA_TOO_MANY");
   }
   if (
+    (!capability.supportsPhotos &&
+      existing.media.some((item) => item.kind === "photo")) ||
     (!capability.supportsVideo &&
       existing.media.some((item) => item.kind === "video")) ||
     (!capability.supportsDocuments &&
@@ -1158,6 +1176,8 @@ export async function cancelPost(
 export interface PostPublishPayload {
   postId: string;
   channelAccountId: string;
+  /** Judul post — label kalender umum; YouTube memetakannya ke judul video. */
+  title: string;
   caption: string;
   chatId: string;
   encryptedToken: string | null;
@@ -1218,6 +1238,7 @@ export async function getPostForPublish(
   return withTenantDb(db, input.tenantId, async (tx) => {
     const [row] = await tx
       .select({
+        title: posts.title,
         caption: posts.caption,
         channelAccountId: posts.channelAccountId,
         chatId: conversations.providerChatId,
@@ -1249,6 +1270,7 @@ export async function getPostForPublish(
     return {
       postId: input.postId,
       channelAccountId: row.channelAccountId,
+      title: row.title,
       caption: row.caption,
       chatId: row.chatId,
       encryptedToken: row.encryptedToken,
