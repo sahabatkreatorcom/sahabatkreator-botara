@@ -36,6 +36,9 @@ export const PROVIDER_NAMES: Record<ChannelProvider, string> = {
   // Nama tampil saja: YouTube juga khusus content schedule, bukan
   // channel broadcast/inbox.
   youtube: "YouTube",
+  // Nama tampil saja: LinkedIn juga khusus content schedule, bukan
+  // channel broadcast/inbox.
+  linkedin: "LinkedIn",
 };
 
 export const SUPPORTED_PROVIDERS: ReadonlySet<ChannelProvider> = new Set([

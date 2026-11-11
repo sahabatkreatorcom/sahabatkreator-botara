@@ -41,6 +41,12 @@ export const channelProviderEnum = pgEnum("channel_provider", [
   // Baris akunnya hanya membawa identitas channel (external_id =
   // channel ID); kredensial penerbitan hidup di koneksi Google tenant.
   "youtube",
+  // Gelombang 3: akun LinkedIn khusus content schedule (bukan inbox).
+  // Nilai enum ditambahkan oleh migrasi 0017; urutan lama tidak diubah.
+  // Baris akunnya membawa identitas anggota (external_id = member ID,
+  // subjek urn:li:person) + access token OAuth terenkripsi — sasaran
+  // profil pribadi, BUKAN Company Page.
+  "linkedin",
 ]);
 
 export const channelAccountStatusEnum = pgEnum("channel_account_status", [

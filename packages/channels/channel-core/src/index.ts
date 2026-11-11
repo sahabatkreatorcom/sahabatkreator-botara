@@ -40,7 +40,16 @@ export type ChannelProvider =
    * ChannelAdapter inbox; kredensialnya hidup di koneksi Google
    * tenant, bukan di baris akun channel ini.
    */
-  | "youtube";
+  | "youtube"
+  /**
+   * Khusus content schedule (Gelombang 3): LinkedIn (Posts API,
+   * profil pribadi anggota) sama seperti Threads/Bluesky/YouTube —
+   * tidak mengimplementasikan ChannelAdapter inbox; access token
+   * OAuth-nya tersimpan terenkripsi di baris akun channel ini.
+   * Company Page bukan sasaran provider ini (program Community
+   * Management terpisah).
+   */
+  | "linkedin";
 
 export interface ChannelAccountRef {
   id: string;
@@ -201,5 +210,10 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
     provider: "youtube",
     freeFormWindowHours: null,
     notes: "Bukan channel inbox: khusus publikasi content schedule (unggah video YouTube Data API v3); tidak ada jendela pesan atau pengiriman DM.",
+  },
+  linkedin: {
+    provider: "linkedin",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule (Posts API ke profil pribadi anggota); tidak ada jendela pesan atau pengiriman DM.",
   },
 };

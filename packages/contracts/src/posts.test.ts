@@ -28,7 +28,7 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("provider-ngawur")).toBeUndefined();
   });
 
-  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube sejauh ini)", () => {
+  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube + linkedin sejauh ini)", () => {
     const supported = Object.entries(POST_PROVIDER_CAPABILITIES)
       .filter(([, capability]) => capability.publishSupported)
       .map(([provider]) => provider);
@@ -39,7 +39,20 @@ describe("capability post per provider", () => {
       "threads",
       "bluesky",
       "youtube",
+      "linkedin",
     ]);
+  });
+
+  it("linkedin: profil pribadi — teks 3000, gambar/video didukung, dokumen tidak", () => {
+    const linkedin = getPostProviderCapability("linkedin")!;
+    expect(linkedin.publishSupported).toBe(true);
+    expect(linkedin.mediaRequired).toBe(false);
+    expect(linkedin.maxCaption).toBe(3000);
+    expect(linkedin.maxTitle).toBeNull();
+    expect(linkedin.supportsPhotos).toBe(true);
+    expect(linkedin.supportsVideo).toBe(true);
+    expect(linkedin.supportsAlbum).toBe(true);
+    expect(linkedin.supportsDocuments).toBe(false);
   });
 
   it("youtube: wajib tepat satu video, deskripsi 5000, judul platform 100", () => {

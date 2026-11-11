@@ -185,16 +185,17 @@ async function loadMedia(
  * Provider linimasa yang akun terhubungnya SENDIRI adalah sasarannya.
  * Berbeda dari Telegram — yang sasaran channel-nya baru diketahui saat
  * bot ditambahkan ke sebuah channel oleh admin — Page, akun IG
- * Business, akun Threads, akun Bluesky, dan channel YouTube sudah
- * membawa alamat terbitnya sejak connect: `external_id` akun adalah
- * Page ID / IG user ID / Threads user ID / DID Bluesky / channel ID
- * YouTube. Karena itu tidak ada tabel sasaran baru: sasaran
- * dimaterialisasi sebagai percakapan `kind='channel'` dengan
- * `provider_chat_id = external_id`, persis bentuk yang sudah dipakai
- * state machine post. Untuk Threads, Bluesky, dan YouTube ini murni
- * sasaran publikasi — provider itu tidak menjadi channel inbox hanya
- * karena sasarannya memakai baris percakapan channel. Khusus YouTube,
- * baris akunnya sendiri disinkronkan dari koneksi Google tenant oleh
+ * Business, akun Threads, akun Bluesky, channel YouTube, dan profil
+ * LinkedIn sudah membawa alamat terbitnya sejak connect: `external_id`
+ * akun adalah Page ID / IG user ID / Threads user ID / DID Bluesky /
+ * channel ID YouTube / member ID LinkedIn. Karena itu tidak ada tabel
+ * sasaran baru: sasaran dimaterialisasi sebagai percakapan
+ * `kind='channel'` dengan `provider_chat_id = external_id`, persis
+ * bentuk yang sudah dipakai state machine post. Untuk Threads,
+ * Bluesky, YouTube, dan LinkedIn ini murni sasaran publikasi —
+ * provider itu tidak menjadi channel inbox hanya karena sasarannya
+ * memakai baris percakapan channel. Khusus YouTube, baris akunnya
+ * sendiri disinkronkan dari koneksi Google tenant oleh
  * `syncYouTubeChannelAccount` (core/youtube) — kredensial penerbitan
  * tetap hidup di koneksi Google, bukan di akun channel.
  */
@@ -204,6 +205,7 @@ const TIMELINE_ACCOUNT_PROVIDERS = [
   "threads",
   "bluesky",
   "youtube",
+  "linkedin",
 ] as const;
 
 /**
@@ -324,7 +326,7 @@ async function ensureTimelineTargets(
  * Channel yang bisa dituju: percakapan `kind='channel'` pada akun yang
  * masih terhubung. Percakapan channel Telegram dibuat saat bot
  * ditambahkan sebagai admin (webhook `my_chat_member` / `channel_post`);
- * sasaran Page/IG/Threads/Bluesky/YouTube dimaterialisasi dari akun terhubung oleh
+ * sasaran Page/IG/Threads/Bluesky/YouTube/LinkedIn dimaterialisasi dari akun terhubung oleh
  * `ensureTimelineTargets` di atas. Daftar kosong berarti belum ada
  * channel/akun linimasa yang terhubung, dan UI menampilkan instruksi
  * alih-alih pemilih kosong.

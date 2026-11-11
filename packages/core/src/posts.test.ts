@@ -45,6 +45,7 @@ const IG_ACCOUNT = "8a020000-0000-4000-8000-000000000023";
 const THREADS_ACCOUNT = "8a030000-0000-4000-8000-000000000023";
 const BLUESKY_ACCOUNT = "8a040000-0000-4000-8000-000000000023";
 const YOUTUBE_ACCOUNT = "8a050000-0000-4000-8000-000000000023";
+const LINKEDIN_ACCOUNT = "8a060000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
@@ -99,6 +100,12 @@ beforeAll(async () => {
        (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
      VALUES ($1, $2, 'youtube', 'UCpromo123456', 'Kanal Promo', 'connected', NULL, 'kanalpromo')`,
     [YOUTUBE_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'linkedin', 'member123abc', 'Profil Promo', 'connected', 'v1:linkedin-token', 'profilpromo')`,
+    [LINKEDIN_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
@@ -349,6 +356,61 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
         postId: longTitle.id,
       }),
     ).rejects.toMatchObject({ code: "POST_TITLE_TOO_LONG" });
+  });
+
+  it("akun LinkedIn menjadi sasaran publikasi (member ID); teks terjadwal, caption dibatasi 3000, dokumen ditolak", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const linkedin = targets.find((target) => target.provider === "linkedin");
+    expect(linkedin?.channelAccountId).toBe(LINKEDIN_ACCOUNT);
+    expect(linkedin?.providerChatId).toBe("member123abc");
+
+    const post = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: linkedin!.conversationId,
+      title: "LinkedIn teks",
+      caption: "z".repeat(3200),
+      mediaIds: [],
+    });
+    expect(post.caption).toHaveLength(3000);
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.target.provider).toBe("linkedin");
+
+    const video = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: linkedin!.conversationId,
+      title: "LinkedIn video",
+      caption: "Video profil minggu ini",
+      mediaIds: [MEDIA_VIDEO],
+    });
+    const scheduledVideo = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: video.id,
+    });
+    expect(scheduledVideo.post.status).toBe("scheduled");
+
+    const docPost = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: linkedin!.conversationId,
+      title: "LinkedIn dokumen",
+      caption: "Lampiran dokumen",
+      mediaIds: [MEDIA_DOC],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: docPost.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

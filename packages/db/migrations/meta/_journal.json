@@ -120,6 +120,13 @@
       "when": 1793870118812,
       "tag": "0016_youtube_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1793870118813,
+      "tag": "0017_linkedin_provider",
+      "breakpoints": true
     }
   ]
 }

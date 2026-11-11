@@ -99,6 +99,12 @@ export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
  * akun channel youtube disinkronkan dari koneksi Google itu oleh core
  * (`syncYouTubeChannelAccount`). Endpoint generik ini menjawabnya
  * `CHANNEL_NOT_AVAILABLE_YET` yang sama.
+ *
+ * Dan untuk `provider: "linkedin"` (Gelombang 3): identitas akun
+ * linimasa (member ID + access token OAuth `w_member_social`) valid
+ * pada skema akun/sasaran, tetapi provisioning-nya adalah OAuth
+ * aplikasi LinkedIn milik pemilik — belum dibuka lewat endpoint
+ * generik ini dan dijawab `CHANNEL_NOT_AVAILABLE_YET` yang sama.
  */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,

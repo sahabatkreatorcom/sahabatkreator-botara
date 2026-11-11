@@ -46,6 +46,20 @@ export const ChannelProviderSchema = z.enum([
    * token koneksi Google menjadi access token saat menerbitkan.
    */
   "youtube",
+  /**
+   * LinkedIn (Gelombang 3) — provider KHUSUS content schedule, sama
+   * seperti Threads/Bluesky/YouTube: identitasnya memakai enum bersama
+   * agar akun (`external_id` = member ID, subjek
+   * `urn:li:person:{id}`), sasaran post, dan capability berbagi satu
+   * sumber, tetapi ia BUKAN channel inbox: tidak ada webhook pesan,
+   * percakapan dua arah, broadcast, atau jalur connect channel
+   * generik untuknya. Sasaran gelombang ini adalah PROFIL PRIBADI
+   * anggota (Posts API, scope `w_member_social`); Company Page BUKAN
+   * sasaran — Page membutuhkan program Community Management LinkedIn
+   * yang terpisah. Access token OAuth tersimpan terenkripsi pada
+   * akun channel, mengikuti pola kredensial channel yang ada.
+   */
+  "linkedin",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 

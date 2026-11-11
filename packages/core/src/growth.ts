@@ -170,6 +170,11 @@ export function buildGrowthTargetUrl(
       // tidak ada tautan DM/atribusi growth untuk akun linimasa ini.
       return null;
     }
+    case "linkedin": {
+      // LinkedIn khusus content schedule, bukan channel percakapan:
+      // tidak ada tautan DM/atribusi growth untuk akun linimasa ini.
+      return null;
+    }
   }
 }
 

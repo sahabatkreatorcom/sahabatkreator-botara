@@ -257,6 +257,30 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
   },
+  linkedin: {
+    // LinkedIn Posts API (Gelombang 3): sasaran PROFIL PRIBADI
+    // anggota (`urn:li:person:{id}`, scope `w_member_social`) — bukan
+    // Company Page, yang menunggu program Community Management
+    // terpisah. Teks (commentary) maks 3000 karakter; gambar tunggal
+    // atau multi-image (API mengizinkan s/d 20 gambar — repo membatasi
+    // ke POST_MEDIA_MAX bersama) dan tepat satu video didukung lewat
+    // unggah aset Images/Videos API. Campuran gambar+video dalam satu
+    // post TIDAK dirakit Posts API sebagai satu konten, jadi adapter
+    // menolaknya sebelum memanggil provider (pola Facebook). Dokumen
+    // (Documents API) tidak dinyalakan gelombang ini; first comment
+    // belum didukung model post.
+    publishSupported: true,
+    mediaRequired: false,
+    maxCaption: 3000,
+    maxTitle: null,
+    maxMedia: POST_MEDIA_MAX,
+    supportsAlbum: true,
+    supportsPhotos: true,
+    supportsVideo: true,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
     // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.
