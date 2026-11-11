@@ -1,0 +1,101 @@
+import type { Database } from "@sahabat-kreator/db";
+import {
+  getPostTargetProvider,
+  type MediaObjectStore,
+} from "@sahabat-kreator/core";
+import { telegramPostPublisher } from "./telegram-post";
+
+/**
+ * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
+ * satu interface penerbit per provider, dan registry yang memilihnya.
+ *
+ * Sebelum ini worker memanggil penerbit Telegram secara langsung:
+ * menambah platform berarti mengutak-atik handler job `post.publish`.
+ * Sekarang handler hanya memanggil `publishPost` di sini; platform baru
+ * = satu adapter baru + satu baris registry, tanpa menyentuh handler,
+ * core, maupun state machine.
+ *
+ * Kontrak adapter: menjalankan SELURUH alur publikasi untuk satu
+ * postingan (klaim atomik → muat → dekripsi kredensial → kirim → tandai),
+ * persis seperti yang dilakukan penerbit Telegram sejak Fase 23.
+ * Urutan itu tidak dinegosiasikan ulang per adapter — klaim atomik +
+ * pencocokan `scheduled_at` adalah satu-satunya penjaga anti kirim
+ * ganda, dan ia hidup di langkah pertama alur tersebut.
+ */
+
+export interface PostPublishJobInput {
+  tenantId: string;
+  postId: string;
+  /** ISO timestamp jam tayang yang disepakati saat penjadwalan. */
+  scheduledAt: string;
+}
+
+export interface PostPublisherOptions {
+  /** Material kunci enkripsi kredensial channel (env CHANNEL_TOKEN_SECRET). */
+  channelTokenSecret: string | undefined;
+  /** Penyimpanan objek media (volume/R2) — sama dengan yang dipakai GC. */
+  mediaStore: MediaObjectStore;
+  /** Base URL Bot API Telegram (env TELEGRAM_API_BASE; default api.telegram.org). */
+  telegramApiBase?: string | undefined;
+}
+
+export interface PublishPostResult {
+  published: boolean;
+  /** Alasan aman untuk log (tanpa token/URL). */
+  reason?: string;
+}
+
+export interface PostPublisherAdapter {
+  /** Nilai provider pada percakapan sasaran (mis. `telegram`). */
+  readonly provider: string;
+  publish(
+    db: Database,
+    input: PostPublishJobInput,
+    opts: PostPublisherOptions,
+  ): Promise<PublishPostResult>;
+}
+
+/** Registry adapter. Urutan tidak berarti; kunci pemilihan adalah provider. */
+const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [telegramPostPublisher];
+
+export function getPostPublisher(
+  provider: string,
+): PostPublisherAdapter | undefined {
+  return POST_PUBLISHERS.find((adapter) => adapter.provider === provider);
+}
+
+/**
+ * Pintu masuk handler job `post.publish`: pilih adapter dari provider
+ * sasaran postingan, lalu serahkan seluruh alur ke adapter itu.
+ *
+ * Provider dibaca lewat intipan read-only di core (`getPostTargetProvider`)
+ * — BUKAN klaim. Klaim tetap terjadi di dalam adapter, jadi postingan yang
+ * dibatalkan/dijadwal ulang di antara intipan dan klaim tetap aman.
+ */
+export async function publishPost(
+  db: Database,
+  input: PostPublishJobInput,
+  opts: PostPublisherOptions,
+): Promise<PublishPostResult> {
+  const provider = await getPostTargetProvider(db, {
+    tenantId: input.tenantId,
+    postId: input.postId,
+  });
+  if (!provider) {
+    console.error(`[post] ${input.postId} tidak ditemukan — job dilewati`);
+    return { published: false, reason: "not_found" };
+  }
+  const adapter = getPostPublisher(provider);
+  if (!adapter) {
+    // Tidak terjangkau selama `schedulePost` di core hanya mengizinkan
+    // provider yang punya adapter — penjadwalan provider lain ditolak
+    // di sana. Bila suatu hari sampai di sini, postingan DIBIARKAN pada
+    // statusnya: menandainya gagal dari dispatcher akan mengklaim
+    // kegagalan yang bukan milik alur adapter mana pun.
+    console.error(
+      `[post] ${input.postId} provider=${provider} belum punya PublisherAdapter — job dilewati`,
+    );
+    return { published: false, reason: "provider_unsupported" };
+  }
+  return adapter.publish(db, input, opts);
+}

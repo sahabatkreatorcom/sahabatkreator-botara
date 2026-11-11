@@ -6,16 +6,21 @@ import {
   markPostFailed,
   markPostPublished,
   recordIntegrationLog,
-  type MediaObjectStore,
 } from "@sahabat-kreator/core";
 import {
   TelegramApiError,
   TelegramBotApiClient,
   type TelegramPostFile,
 } from "@sahabat-kreator/channel-telegram";
+import type {
+  PostPublisherAdapter,
+  PostPublisherOptions,
+  PublishPostResult,
+} from "./post-publisher";
 
 /**
- * Penerbit postingan channel Telegram (Fase 23).
+ * Penerbit postingan channel Telegram (Fase 23) — adapter PERTAMA dari
+ * registry `PublisherAdapter` (`post-publisher.ts`, Gelombang 0).
  *
  * Berbeda dari `runner.ts` (poller pesan): tidak ada pemindaian antrean di
  * sini. Pemicunya adalah job BullMQ tertunda yang dibuat relay outbox dari
@@ -38,20 +43,14 @@ import {
  * bukan dua postingan di channel pelanggan.
  */
 
-export interface PublishPostOptions {
-  /** Material kunci enkripsi kredensial channel (env CHANNEL_TOKEN_SECRET). */
-  channelTokenSecret: string | undefined;
-  /** Base URL Bot API (env TELEGRAM_API_BASE; default api.telegram.org). */
-  telegramApiBase: string | undefined;
-  /** Penyimpanan objek media (volume/R2) — sama dengan yang dipakai GC. */
-  mediaStore: MediaObjectStore;
-}
+/**
+ * Opsi penerbit — sekarang milik bersama registry (`PostPublisherOptions`
+ * di `post-publisher.ts`); alias ini dipertahankan agar pemanggil lama
+ * tidak berubah.
+ */
+export type PublishPostOptions = PostPublisherOptions;
 
-export interface PublishPostResult {
-  published: boolean;
-  /** Alasan aman untuk log (tanpa token/URL). */
-  reason?: string;
-}
+export type { PublishPostResult };
 
 function errorCode(err: unknown): string {
   if (!(err instanceof TelegramApiError)) return "telegram_send_error";
@@ -171,3 +170,13 @@ export async function publishTelegramPost(
     return fail(code);
   }
 }
+
+/**
+ * Adapter Telegram untuk registry `PublisherAdapter`. Seluruh alurnya
+ * adalah `publishTelegramPost` di atas — ekstraksi Gelombang 0 tidak
+ * mengubah satu langkah pun dari alur Fase 23.
+ */
+export const telegramPostPublisher: PostPublisherAdapter = {
+  provider: "telegram",
+  publish: publishTelegramPost,
+};

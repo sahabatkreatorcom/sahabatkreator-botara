@@ -7,6 +7,7 @@ import {
   claimPostForPublish,
   createPost,
   getPost,
+  getPostTargetProvider,
   listPostTargets,
   markPostFailed,
   markPostPublished,
@@ -96,6 +97,22 @@ describe("target", () => {
     const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
     expect(targets.map((t) => t.conversationId)).toContain(CONV_CHANNEL);
     expect(targets[0]?.providerChatId).toBe("-1009876543210");
+  });
+
+  it("intipan provider untuk registry adapter: telegram, dan null untuk post yang tidak ada", async () => {
+    const post = await draft();
+    await expect(
+      getPostTargetProvider(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        postId: post.id,
+      }),
+    ).resolves.toBe("telegram");
+    await expect(
+      getPostTargetProvider(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        postId: "8a900000-0000-4000-8000-000000000023",
+      }),
+    ).resolves.toBeNull();
   });
 });
 

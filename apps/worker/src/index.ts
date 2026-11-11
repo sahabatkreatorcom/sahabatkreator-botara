@@ -50,7 +50,7 @@ import {
   startTelegramDeliveryPoller,
   type DeliveryPoller,
 } from "./delivery";
-import { publishTelegramPost } from "./delivery/telegram-post";
+import { publishPost } from "./delivery/post-publisher";
 import {
   AGENT_RESPOND_JOB,
   AUTOMATION_EVALUATE_JOB,
@@ -485,10 +485,11 @@ const bullWorker = new Worker<MainJobData>(
     }
     if (job.name === POST_PUBLISH_JOB) {
       // Fase 23: terbitkan SATU postingan channel. Klaim atomik, validasi
-      // ulang, dan penandaan status ada di core; worker hanya memegang
-      // pengiriman (token, berkas, Bot API).
+      // ulang, dan penandaan status ada di core; pengiriman diserahkan ke
+      // `PublisherAdapter` provider sasaran (Gelombang 0) — handler ini
+      // tidak lagi tahu platform apa yang sedang diterbitkan.
       const data = job.data as PostPublishJobData;
-      const result = await publishTelegramPost(
+      const result = await publishPost(
         db,
         {
           tenantId: data.tenantId,

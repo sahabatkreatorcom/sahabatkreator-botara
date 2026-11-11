@@ -711,6 +711,31 @@ export async function getPostForPublish(
   });
 }
 
+/**
+ * Intip provider sasaran sebuah postingan — read-only, BUKAN klaim.
+ *
+ * Dipakai worker (registry `PublisherAdapter`) untuk memilih adapter
+ * SEBELUM menjalankan alur publikasi. Membaca provider tidak mengubah
+ * jaminan apa pun: klaim atomik tetap terjadi di dalam adapter lewat
+ * `claimPostForPublish`, dan postingan yang sudah dibatalkan/dijadwal
+ * ulang tetap ditolak di sana. `null` = postingan tidak ada (atau bukan
+ * milik tenant ini, yang oleh RLS tampak sama).
+ */
+export async function getPostTargetProvider(
+  db: Database,
+  input: { tenantId: string; postId: string },
+): Promise<string | null> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const [row] = await tx
+      .select({ provider: conversations.provider })
+      .from(posts)
+      .innerJoin(conversations, eq(conversations.id, posts.conversationId))
+      .where(and(eq(posts.tenantId, input.tenantId), eq(posts.id, input.postId)))
+      .limit(1);
+    return row?.provider ?? null;
+  });
+}
+
 export async function markPostPublished(
   db: Database,
   input: { tenantId: string; postId: string; providerMessageId: string },

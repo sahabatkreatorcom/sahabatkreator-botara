@@ -915,6 +915,7 @@ export {
   cancelPost,
   claimPostForPublish,
   getPostForPublish,
+  getPostTargetProvider,
   markPostPublished,
   markPostFailed,
   type PostErrorCode,
