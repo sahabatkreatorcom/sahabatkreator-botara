@@ -69,6 +69,19 @@ hanya bisa diajukan dari akun pemilik:
    seluruh permukaan Graph itu dibangun dan diverifikasi melawan fake
    Graph API (`verify:meta-post`) dengan token uji; sasaran Page
    dimaterialisasi dari `channel_accounts` terhubung tanpa migrasi.
+   **Langkah webhook (eksplisit, selama ini hanya tersirat):**
+   isi **Meta App ID, App Secret, DAN Verify Token** di Panel Admin
+   (grup Meta) — ketiganya dibaca lewat resolver panel → env, jadi
+   tidak ada lagi edit env untuk ini. Setelah itu buka halaman
+   **Channels**: blok info webhook Meta di sana menampilkan
+   **Callback URL + Verify Token** yang harus ditempel pemilik ke
+   dashboard Meta App (pengaturan Webhooks untuk objek Page) dan
+   pemilik wajib **subscribe field `messages`** agar pesan masuk
+   diteruskan Meta. Tanpa App Secret + Verify Token terisi, blok
+   itu menampilkan "Webhook setup is not available yet" dan
+   webhook masuk DITOLAK (handshake verifikasi tidak bisa
+   dijawab) — jadi langkah ini prasyarat inbox Meta berfungsi,
+   bukan sekadar pelengkap App Review.
 
 2. **Instagram** — dibutuhkan: Meta App milik pemilik dengan izin
    `instagram_content_publish` lolos App Review, akun Instagram
@@ -277,24 +290,41 @@ hanya bisa diajukan dari akun pemilik:
    env `TIKTOK_PRIVACY_LEVEL` hanya fallback) — adapter memvalidasi
    level itu terhadap `privacy_level_options` akun dan menolak
    dengan `tiktok_privacy_option_mismatch` bila akun belum
-   mengizinkannya. Untuk apa: adapter menerbitkan direct post
-   video — periksa `creator_info` → init unggah `FILE_UPLOAD` →
-   unggah biner per potongan dari object store privat → polling
-   status sampai `PUBLISH_COMPLETE`; judul postingan adalah
-   caption post (maks 2200). Sudah dimock: provider `tiktok`
+   mengizinkannya; (e) khusus FOTO/CAROUSEL: **verifikasi
+   kepemilikan domain (atau prefix URL) dari base URL media
+   publik** di portal TikTok for Developers, dan isi base URL itu
+   di Panel Admin (grup Content schedule; env
+   `POST_MEDIA_PUBLIC_BASE_URL` hanya fallback) — foto hanya bisa
+   `PULL_FROM_URL` dari domain terverifikasi itu; tanpa
+   verifikasi, init foto ditolak provider dengan
+   `url_ownership_unverified`, dan tanpa base URL terisi adapter
+   gagal aman `tiktok_public_media_url_unavailable` sebelum
+   memanggil API. Untuk apa: adapter menerbitkan direct post
+   dalam dua bentuk — VIDEO: periksa `creator_info` → init
+   unggah `FILE_UPLOAD` → unggah biner per potongan dari object
+   store privat → polling status sampai `PUBLISH_COMPLETE`;
+   FOTO/CAROUSEL: `creator_info` yang sama → init ke
+   `/content/init/` (`media_type: PHOTO`, `post_mode:
+   DIRECT_POST`, `PULL_FROM_URL`) dengan `auto_add_music: true`
+   (musik rekomendasi otomatis, parameter resmi post_info foto)
+   → polling status yang sama. Judul postingan adalah caption
+   post (video maks 2200; foto: caption menjadi title maks 90 +
+   description maks 4000). Sudah dimock: provider `tiktok`
    ditambahkan end-to-end sebatas akun/sasaran linimasa +
    capability + adapter (migrasi 0020), dan seluruh protokol
-   (creator_info → init → potongan Content-Range → polling,
-   gerbang privasi sebelum init, pemetaan error termasuk kuota
-   posting harian `spam_risk_too_many_posts`) diverifikasi melawan
-   fake Content Posting API (`verify:tiktok-post`, 16 PASS)
-   dengan access token uji; TIDAK dibutuhkan URL media publik
-   (video diunggah sebagai biner). Catatan batas: **mode foto
-   TIDAK dibangun** — foto Content Posting API hanya menerima
-   `PULL_FROM_URL` dari URL pada domain yang diverifikasi
-   kepemilikannya di portal TikTok; menyalakannya kelak
-   membutuhkan verifikasi domain milik pemilik itu + infrastruktur
-   URL publik (alasan yang sama seperti IG/Pinterest); access
+   kedua jalur (creator_info → init → potongan Content-Range /
+   daftar URL foto → polling, gerbang privasi sebelum init,
+   pemetaan error termasuk kuota posting harian
+   `spam_risk_too_many_posts` dan `url_ownership_unverified`)
+   diverifikasi melawan fake Content Posting API
+   (`verify:tiktok-post`, 28 PASS) dengan access token uji;
+   video TIDAK membutuhkan URL media publik (diunggah sebagai
+   biner), foto MEMBUTUHKANNYA (butir e). Catatan batas: mode
+   foto/carousel **SUDAH dibangun** (pengembangan lanjutan
+   pasca-roadmap atas permintaan pemilik) — yang tersisa murni
+   tindakan pemilik pada butir (e) di atas; foto yang diterima
+   TikTok berformat JPEG/WebP (PNG ditolak platform, konversi
+   belum dibangun); access
    token TikTok berumur ±24 jam dan penyegaran otomatis BELUM
    dibangun (repo belum punya kolom refresh token generik di luar
    lifecycle token Meta) — token kedaluwarsa menjawab
@@ -302,7 +332,7 @@ hanya bisa diajukan dari akun pemilik:
    pemilik meminta pengembangan lanjutan penyegaran memakai
    refresh token OAuth TikTok (±365 hari); bila scope yang
    diberikan ternyata `video.upload` (bukan `video.publish`),
-   video mendarat sebagai draf di inbox kreator
+   konten mendarat sebagai draf di inbox kreator
    (`SEND_TO_USER_INBOX`) untuk ditinjau manual, bukan terbit
    langsung; provisioning TikTok belum dibuka di endpoint connect
    generik (dijawab `CHANNEL_NOT_AVAILABLE_YET`) — pendaftaran
