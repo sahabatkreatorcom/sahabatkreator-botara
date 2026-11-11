@@ -58,6 +58,7 @@ const MEDIA_PHOTO = "8a400000-0000-4000-8000-000000000023";
 const MEDIA_PHOTO_2 = "8a410000-0000-4000-8000-000000000023";
 const MEDIA_DOC = "8a500000-0000-4000-8000-000000000023";
 const MEDIA_VIDEO = "8b600000-0000-4000-8000-000000000023";
+const MEDIA_VIDEO_2 = "8b700000-0000-4000-8000-000000000023";
 
 let ctx: TestDb;
 
@@ -146,8 +147,16 @@ beforeAll(async () => {
      VALUES ($1, $2, 't/photo.jpg', 'photo.jpg', 'image/jpeg', 2048),
             ($3, $2, 't/doc.pdf', 'doc.pdf', 'application/pdf', 4096),
             ($4, $2, 't/video.mp4', 'video.mp4', 'video/mp4', 8192),
-            ($5, $2, 't/photo2.jpg', 'photo2.jpg', 'image/jpeg', 1024)`,
-    [MEDIA_PHOTO, TEST_TENANT_ID, MEDIA_DOC, MEDIA_VIDEO, MEDIA_PHOTO_2],
+            ($5, $2, 't/photo2.jpg', 'photo2.jpg', 'image/jpeg', 1024),
+            ($6, $2, 't/video2.mp4', 'video2.mp4', 'video/mp4', 8192)`,
+    [
+      MEDIA_PHOTO,
+      TEST_TENANT_ID,
+      MEDIA_DOC,
+      MEDIA_VIDEO,
+      MEDIA_PHOTO_2,
+      MEDIA_VIDEO_2,
+    ],
   );
 });
 
@@ -596,7 +605,7 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
     ).rejects.toMatchObject({ code: "POST_MEDIA_TOO_MANY" });
   });
 
-  it("akun TikTok menjadi sasaran publikasi (open_id); wajib tepat satu video, foto ditolak", async () => {
+  it("akun TikTok menjadi sasaran publikasi (open_id); video tunggal, foto & carousel foto terjadwal; campuran/multi-video/dokumen ditolak", async () => {
     const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
     const tiktok = targets.find((target) => target.provider === "tiktok");
     expect(tiktok?.channelAccountId).toBe(TIKTOK_ACCOUNT);
@@ -622,8 +631,8 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
       tenantId: TEST_TENANT_ID,
       userId: USER_ID,
       conversationId: tiktok!.conversationId,
-      title: "Tanpa video",
-      caption: "Direct post TikTok wajib video",
+      title: "Tanpa media",
+      caption: "Direct post TikTok wajib media",
       mediaIds: [],
     });
     await expect(
@@ -634,37 +643,87 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
       }),
     ).rejects.toMatchObject({ code: "POST_MEDIA_REQUIRED" });
 
+    // Foto tunggal dan carousel foto sekarang SAH untuk TikTok
+    // (jalur PULL_FROM_URL adapter; URL publik diselesaikan worker).
     const photo = await createPost(ctx.db, {
       tenantId: TEST_TENANT_ID,
       userId: USER_ID,
       conversationId: tiktok!.conversationId,
       title: "Foto TikTok",
-      caption: "Mode foto belum dinyalakan gelombang ini",
+      caption: "Foto produk terbaru #fyp",
       mediaIds: [MEDIA_PHOTO],
     });
-    await expect(
-      schedulePost(ctx.db, {
-        tenantId: TEST_TENANT_ID,
-        userId: USER_ID,
-        postId: photo.id,
-      }),
-    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+    const scheduledPhoto = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: photo.id,
+    });
+    expect(scheduledPhoto.post.status).toBe("scheduled");
 
-    const twoMedia = await createPost(ctx.db, {
+    const carousel = await createPost(ctx.db, {
       tenantId: TEST_TENANT_ID,
       userId: USER_ID,
       conversationId: tiktok!.conversationId,
-      title: "Dua media TikTok",
-      caption: "Satu direct post hanya membawa satu video",
+      title: "Carousel TikTok",
+      caption: "Geser untuk lihat semua varian",
+      mediaIds: [MEDIA_PHOTO, MEDIA_PHOTO_2],
+    });
+    const scheduledCarousel = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: carousel.id,
+    });
+    expect(scheduledCarousel.post.status).toBe("scheduled");
+
+    // Campuran foto+video: album TikTok khusus foto.
+    const mixed = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Campuran TikTok",
+      caption: "Foto dan video tidak bercampur di TikTok",
       mediaIds: [MEDIA_VIDEO, MEDIA_PHOTO],
     });
     await expect(
       schedulePost(ctx.db, {
         tenantId: TEST_TENANT_ID,
         userId: USER_ID,
-        postId: twoMedia.id,
+        postId: mixed.id,
       }),
-    ).rejects.toMatchObject({ code: "POST_MEDIA_TOO_MANY" });
+    ).rejects.toMatchObject({ code: "POST_MEDIA_ALBUM_UNSUPPORTED" });
+
+    // Dua video: video hanya sah sendirian, tepat satu.
+    const twoVideos = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Dua video TikTok",
+      caption: "Satu direct post hanya membawa satu video",
+      mediaIds: [MEDIA_VIDEO, MEDIA_VIDEO_2],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: twoVideos.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_ALBUM_UNSUPPORTED" });
+
+    const doc = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Dokumen TikTok",
+      caption: "Dokumen tidak dikenal Content Posting API",
+      mediaIds: [MEDIA_DOC],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: doc.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

@@ -46,17 +46,29 @@ describe("capability post per provider", () => {
     ]);
   });
 
-  it("tiktok: direct post wajib tepat satu video, caption (judul postingan) maks 2200, foto tidak dinyalakan", () => {
+  it("tiktok: direct post video tunggal ATAU foto/carousel khusus foto, caption maks 2200, dokumen tidak", () => {
     const tiktok = getPostProviderCapability("tiktok")!;
     expect(tiktok.publishSupported).toBe(true);
     expect(tiktok.mediaRequired).toBe(true);
     expect(tiktok.maxCaption).toBe(2200);
     expect(tiktok.maxTitle).toBeNull();
-    expect(tiktok.maxMedia).toBe(1);
-    expect(tiktok.supportsPhotos).toBe(false);
+    // Platform mengizinkan 35 foto; batas yang mengikat adalah
+    // POST_MEDIA_MAX bersama (10).
+    expect(tiktok.maxMedia).toBe(10);
+    expect(tiktok.supportsPhotos).toBe(true);
     expect(tiktok.supportsVideo).toBe(true);
-    expect(tiktok.supportsAlbum).toBe(false);
+    expect(tiktok.supportsAlbum).toBe(true);
+    // Album khusus foto: video tidak pernah masuk album/campuran.
+    expect(tiktok.supportsVideoAlbum).toBe(false);
     expect(tiktok.supportsDocuments).toBe(false);
+  });
+
+  it("album video hanya untuk provider yang platformnya merangkai video dalam album (telegram/instagram/threads)", () => {
+    expect(getPostProviderCapability("telegram")?.supportsVideoAlbum).toBe(true);
+    expect(getPostProviderCapability("instagram")?.supportsVideoAlbum).toBe(true);
+    expect(getPostProviderCapability("threads")?.supportsVideoAlbum).toBe(true);
+    expect(getPostProviderCapability("messenger")?.supportsVideoAlbum).toBe(false);
+    expect(getPostProviderCapability("linkedin")?.supportsVideoAlbum).toBe(false);
   });
 
   it("google_business: postingan lokal per lokasi — teks 1500, satu foto, tanpa video/album", () => {

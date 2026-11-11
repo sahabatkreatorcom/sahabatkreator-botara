@@ -130,6 +130,14 @@ export const PostProviderCapabilitySchema = z.object({
   maxTitle: z.number().int().positive().nullable(),
   maxMedia: z.number().int().positive(),
   supportsAlbum: z.boolean(),
+  /**
+   * Album (media > 1) boleh memuat video. false = album khusus foto:
+   * video hanya boleh terbit SENDIRIAN, tepat satu (TikTok, LinkedIn,
+   * Facebook Page). Core menolak album apa pun yang memuat video —
+   * termasuk campuran foto+video — sebelum jam tayang, bukan menunggu
+   * adapter/provider menolaknya di tengah malam.
+   */
+  supportsVideoAlbum: z.boolean(),
   /** Foto/gambar sebagai lampiran (YouTube menolaknya — video saja). */
   supportsPhotos: z.boolean(),
   supportsVideo: z.boolean(),
@@ -154,6 +162,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: true,
+    supportsVideoAlbum: true,
     supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: true,
@@ -170,6 +179,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: 10,
     supportsAlbum: true,
+    supportsVideoAlbum: true,
     supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
@@ -187,6 +197,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: 10,
     supportsAlbum: true,
+    supportsVideoAlbum: false,
     supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
@@ -204,6 +215,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: 10,
     supportsAlbum: true,
+    supportsVideoAlbum: true,
     supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
@@ -228,6 +240,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: 4,
     supportsAlbum: true,
+    supportsVideoAlbum: false,
     supportsPhotos: true,
     supportsVideo: false,
     supportsDocuments: false,
@@ -251,6 +264,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: 100,
     maxMedia: 1,
     supportsAlbum: false,
+    supportsVideoAlbum: false,
     supportsPhotos: false,
     supportsVideo: true,
     supportsDocuments: false,
@@ -275,6 +289,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: true,
+    supportsVideoAlbum: false,
     supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
@@ -302,6 +317,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: 100,
     maxMedia: 1,
     supportsAlbum: false,
+    supportsVideoAlbum: false,
     supportsPhotos: true,
     supportsVideo: false,
     supportsDocuments: false,
@@ -325,6 +341,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: 1,
     supportsAlbum: false,
+    supportsVideoAlbum: false,
     supportsPhotos: true,
     supportsVideo: false,
     supportsDocuments: false,
@@ -332,35 +349,45 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsFirstComment: false,
   },
   tiktok: {
-    // TikTok Content Posting API (Gelombang 4): direct post HANYA
-    // video — satu post = tepat satu video yang diunggah sebagai
-    // biner FILE_UPLOAD dari object store privat (init → unggah per
-    // potongan → polling status). Judul postingan TikTok ADALAH
-    // caption itu sendiri (`post_info.title`, maks 2200 termasuk
-    // tagar/mention — TikTok menghitung karakter Unicode; panjang
-    // string JS berada di sisi aman untuk teks non-astral dan
-    // adapter memotong sebagai pertahanan terakhir), jadi kolom
-    // `title` post TIDAK dipetakan ke platform (maxTitle null): ia
-    // tetap label internal kalender. Mode FOTO tidak dinyalakan:
-    // foto Content Posting API hanya menerima `PULL_FROM_URL` dari
-    // URL pada domain yang diverifikasi kepemilikannya di portal
-    // developer TikTok — bertabrakan dengan model media privat repo
-    // (tidak ada jalur unggah biner foto seperti video); dinyalakan
-    // kelak bila infrastruktur URL terverifikasi itu ada, alasan
-    // yang sama seperti video Bluesky/Pinterest ditunda. GERBANG
-    // AUDIT: sebelum aplikasi pemilik lolos audit TikTok, API hanya
-    // mengizinkan privasi `SELF_ONLY`; adapter membawa mode privasi
-    // terkonfigurasi dengan bawaan `SELF_ONLY` (env platform,
-    // divalidasi terhadap `privacy_level_options` akun sebelum
-    // unggah) dan postingan dari mode itu tercatat sebagai terbit
-    // privat — tidak pernah diklaim publik.
+    // TikTok Content Posting API (Gelombang 4 + pengembangan foto):
+    // direct post video DAN foto/carousel, dua jalur yang berbeda
+    // bentuk:
+    // - VIDEO: tepat satu video (supportsVideoAlbum false — video
+    //   tidak pernah masuk album dan tidak pernah bercampur foto),
+    //   diunggah sebagai biner FILE_UPLOAD dari object store privat
+    //   (init → unggah per potongan → polling status). Judul
+    //   postingan video TikTok ADALAH caption itu sendiri
+    //   (`post_info.title`, maks 2200 termasuk tagar/mention).
+    // - FOTO: satu foto atau carousel foto (album khusus foto)
+    //   lewat `/content/init/` dengan `PULL_FROM_URL` — TIDAK ada
+    //   jalur unggah biner untuk foto, jadi URL-nya berasal dari
+    //   resolver media publik (Panel Admin → env → null) dan domain
+    //   base URL itu WAJIB diverifikasi kepemilikannya di portal
+    //   developer TikTok, kalau tidak API menolak dengan
+    //   `url_ownership_unverified`. Platform mengizinkan s/d 35
+    //   foto per postingan; yang mengikat di sini adalah
+    //   POST_MEDIA_MAX bersama (10). Foto membawa `auto_add_music`
+    //   (musik rekomendasi otomatis — parameter resmi post_info
+    //   foto) dan caption dipetakan ke `description` (maks 4000)
+    //   sekaligus `title` foto (maks 90, dipotong adapter/klien
+    //   sebagai pertahanan terakhir).
+    // Kolom `title` post TIDAK dipetakan ke platform untuk kedua
+    // jalur (maxTitle null): ia tetap label internal kalender.
+    // GERBANG AUDIT: sebelum aplikasi pemilik lolos audit TikTok,
+    // API hanya mengizinkan privasi `SELF_ONLY`; adapter membawa
+    // mode privasi terkonfigurasi dengan bawaan `SELF_ONLY` (Panel
+    // Admin, fallback env, divalidasi terhadap
+    // `privacy_level_options` akun sebelum init) dan postingan
+    // dari mode itu tercatat sebagai terbit privat — tidak pernah
+    // diklaim publik.
     publishSupported: true,
     mediaRequired: true,
     maxCaption: 2200,
     maxTitle: null,
-    maxMedia: 1,
-    supportsAlbum: false,
-    supportsPhotos: false,
+    maxMedia: POST_MEDIA_MAX,
+    supportsAlbum: true,
+    supportsVideoAlbum: false,
+    supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
@@ -375,6 +402,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: false,
+    supportsVideoAlbum: false,
     supportsPhotos: true,
     supportsVideo: true,
     supportsDocuments: true,
@@ -389,6 +417,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     maxTitle: null,
     maxMedia: POST_MEDIA_MAX,
     supportsAlbum: false,
+    supportsVideoAlbum: false,
     supportsPhotos: false,
     supportsVideo: false,
     supportsDocuments: false,

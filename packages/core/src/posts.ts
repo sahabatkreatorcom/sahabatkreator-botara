@@ -897,6 +897,17 @@ function assertPostContentSchedulable(existing: PostRecord): void {
     if (!capability.supportsAlbum) {
       throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
     }
+    // Album khusus foto (TikTok/LinkedIn/Facebook Page): video apa
+    // pun di dalam kumpulan multi-media — dua video, atau campuran
+    // foto+video — ditolak di sini juga. Untuk provider itu video
+    // hanya sah sendirian, tepat satu; membiarkannya lolos berarti
+    // kegagalan pasti di adapter pada jam tayang.
+    if (
+      !capability.supportsVideoAlbum &&
+      existing.media.some((item) => item.kind === "video")
+    ) {
+      throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+    }
     if (
       !capability.supportsAlbumDocuments &&
       existing.media.some((item) => item.kind === "document")
