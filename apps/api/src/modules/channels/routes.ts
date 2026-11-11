@@ -19,6 +19,7 @@ import {
   disconnectChannelAccount,
   encryptChannelSecret,
   exportChannelAccount,
+  fetchAndStoreProfilePhotoFromUrl,
   fetchAndStoreTelegramProfilePhoto,
   generateChannelWebhookSecret,
   getChannelAccount,
@@ -46,6 +47,7 @@ import {
 import {
   MetaGraphClient,
   MetaGraphError,
+  ThreadsGraphClient,
 } from "@sahabat-kreator/channel-messenger";
 import {
   WhatsAppCloudClient,
@@ -282,6 +284,93 @@ function scheduleMetaPhotoBackfill(
 }
 
 /**
+ * Backfill malas foto provider OAuth non-Meta (gelombang SEMUA OAUTH)
+ * — pasangan dua backfill di atas untuk akun yang URL foto profilnya
+ * datang dari API platform: Threads (`threads_profile_picture_url`).
+ * Akun yang terhubung SEBELUM foto profil diambil saat connect (atau
+ * yang unduhan fotonya gagal/lambat saat connect) belum punya foto
+ * tersimpan; saat daftar channel dibaca, akun 'connected' tanpa foto
+ * memicu pengambilan async fire-and-forget memakai KREDENSIAL
+ * TERSIMPAN akun itu sendiri — foto muncul sendiri di pembacaan
+ * berikutnya, TANPA reconnect. Penjaga per proses sama: dedup
+ * in-flight per akun + cache negatif 15 menit; kegagalan diam.
+ *
+ * URL foto diselesaikan per provider oleh
+ * `resolveOAuthProfilePictureUrl` lalu diunduh+disimpan lewat helper
+ * core bersama `fetchAndStoreProfilePhotoFromUrl` (mekanisme
+ * `profile_photos` yang sama persis dengan Meta/Telegram).
+ */
+const oauthPhotoBackfillInFlight = new Set<string>();
+const oauthPhotoBackfillNegative = new Map<string, number>();
+
+/** Provider yang foto profilnya bisa diselesaikan dari API platform. */
+const OAUTH_PHOTO_PROVIDERS = new Set(["threads"]);
+
+async function resolveOAuthProfilePictureUrl(
+  opts: ChannelsModuleOptions,
+  row: ChannelAccount,
+  credential: string,
+): Promise<string | null> {
+  switch (row.provider) {
+    case "threads": {
+      const profile = await new ThreadsGraphClient({
+        baseUrl: opts.threadsApiBase,
+        accessToken: credential,
+      }).getThreadsProfile();
+      return profile.profilePictureUrl;
+    }
+    default:
+      return null;
+  }
+}
+
+function scheduleOAuthPhotoBackfill(
+  bundle: AuthBundle,
+  opts: ChannelsModuleOptions,
+  row: ChannelAccount,
+): void {
+  if (!OAUTH_PHOTO_PROVIDERS.has(row.provider)) return;
+  if (row.status !== "connected") return;
+  if (!row.accessTokenEncrypted || !opts.channelTokenSecret) return;
+  if (oauthPhotoBackfillInFlight.has(row.id)) return;
+  const lastNegative = oauthPhotoBackfillNegative.get(row.id);
+  if (
+    lastNegative !== undefined &&
+    Date.now() - lastNegative < BOT_PHOTO_BACKFILL_NEGATIVE_TTL_MS
+  ) {
+    return;
+  }
+  const credential = decryptChannelSecret(
+    opts.channelTokenSecret,
+    row.accessTokenEncrypted,
+  );
+  if (!credential) return;
+  oauthPhotoBackfillInFlight.add(row.id);
+  void (async () => {
+    try {
+      const pictureUrl = await resolveOAuthProfilePictureUrl(
+        opts,
+        row,
+        credential,
+      );
+      const stored = pictureUrl
+        ? await fetchAndStoreProfilePhotoFromUrl(bundle.db, {
+            tenantId: row.tenantId,
+            channelAccountId: row.id,
+            pictureUrl,
+          })
+        : false;
+      if (stored) oauthPhotoBackfillNegative.delete(row.id);
+      else oauthPhotoBackfillNegative.set(row.id, Date.now());
+    } catch {
+      oauthPhotoBackfillNegative.set(row.id, Date.now());
+    } finally {
+      oauthPhotoBackfillInFlight.delete(row.id);
+    }
+  })();
+}
+
+/**
  * Mencabut webhook Telegram sebuah akun HANYA bila akun ini memang
  * pemilik webhook saat ini (getWebhookInfo menunjuk ke URL akun ini) —
  * akun duplikat warisan yang bukan pemilik tidak boleh mencabut webhook
@@ -335,6 +424,8 @@ export interface ChannelsModuleOptions {
   publicBaseUrl?: string;
   /** Base URL Graph API (env META_API_BASE; default graph.facebook.com). */
   metaApiBase?: string;
+  /** Base URL Threads API (env THREADS_API_BASE) — backfill foto Threads. */
+  threadsApiBase?: string;
   /**
    * Verify token webhook Meta — nilai yang KITA tentukan; dibagikan ke
    * owner/admin lewat endpoint meta-webhook-info agar bisa ditempel ke
@@ -430,6 +521,7 @@ export function createChannelsRoutes(
       if (withPhoto.has(row.id)) continue;
       scheduleBotPhotoBackfill(bundle, opts, row);
       scheduleMetaPhotoBackfill(bundle, opts, row);
+      scheduleOAuthPhotoBackfill(bundle, opts, row);
     }
     // Fase 7B.3: kesehatan operasional per akun — SATU peta agregat
     // untuk seluruh daftar (bukan kueri per kartu).

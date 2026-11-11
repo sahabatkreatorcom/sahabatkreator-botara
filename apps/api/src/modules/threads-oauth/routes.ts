@@ -8,6 +8,7 @@ import {
 import {
   createThreadsChannelAccount,
   encryptChannelSecret,
+  fetchAndStoreProfilePhotoFromUrl,
   getPlatformPublicConfig,
   getProviderSecret,
   lookupChannelAccountsByProviderExternalId,
@@ -335,7 +336,12 @@ export function createThreadsOAuthRoutes(
     // Tukar code → token pendek → token berumur panjang → profil.
     // Hanya label tahap + kode/pesan resmi provider yang dicatat;
     // code, token, dan secret TIDAK PERNAH dicatat.
-    let profile: { id: string; username: string | null; name: string | null };
+    let profile: {
+      id: string;
+      username: string | null;
+      name: string | null;
+      profilePictureUrl: string | null;
+    };
     let longLived: { accessToken: string; expiresInSeconds: number | null };
     try {
       const anon = new ThreadsGraphClient({ baseUrl: opts.threadsApiBase });
@@ -438,8 +444,44 @@ export function createThreadsOAuthRoutes(
       { channelAccountId: rowId, provider: "threads", method: "oauth" },
     );
 
+    // Foto profil (perbaikan avatar Threads): URL
+    // `threads_profile_picture_url` dari profil yang BARU SAJA diambil
+    // diunduh & disimpan mengikuti mekanisme avatar Meta
+    // (`profile_photos`, owner channel_account) — kartu Channels
+    // langsung beravatar, bukan inisial. Fail-soft dengan batas lunak
+    // (pola Hotfix R1 Meta): kegagalan/lambannya unduhan TIDAK
+    // menggagalkan connect; akun tetap terhubung dan backfill daftar
+    // channel mencoba lagi pada pembacaan berikutnya.
+    await awaitPhotoSoftDeadline(
+      fetchAndStoreProfilePhotoFromUrl(bundle.db, {
+        tenantId: state.tenantId,
+        channelAccountId: rowId,
+        pictureUrl: profile.profilePictureUrl,
+      }),
+    );
+
     return c.redirect(`${webBase}/channels?threads_oauth=connected`, 302);
   });
 
   return app;
+}
+
+/**
+ * Batas lunak menunggu pengambilan foto profil pada jalur connect
+ * (pola Hotfix R1 modul channels/meta-oauth): pekerjaan foto menelan
+ * semua error-nya sendiri; lewat ±6 detik koneksi tetap selesai dan
+ * foto menyusul lewat backfill daftar channel.
+ */
+const PHOTO_FETCH_SOFT_DEADLINE_MS = 6_000;
+
+async function awaitPhotoSoftDeadline(work: Promise<unknown>): Promise<void> {
+  await Promise.race([
+    work.then(
+      () => undefined,
+      () => undefined,
+    ),
+    new Promise<void>((resolve) =>
+      setTimeout(resolve, PHOTO_FETCH_SOFT_DEADLINE_MS),
+    ),
+  ]);
 }

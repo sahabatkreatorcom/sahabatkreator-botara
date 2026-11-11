@@ -162,6 +162,64 @@ export async function deleteChannelAccountProfilePhoto(
   });
 }
 
+/**
+ * Ambil & simpan foto profil dari URL publik yang diberikan API
+ * platform (Threads `threads_profile_picture_url`, TikTok `avatar_url`,
+ * LinkedIn `picture`, Pinterest `profile_image`, Bluesky `avatar`) —
+ * pasangan URL dari `fetchAndStoreTelegramProfilePhoto`: byte foto
+ * diunduh SEKALI lalu disimpan ke `profile_photos` dan disajikan lewat
+ * endpoint kita sendiri, jadi URL CDN platform (yang bisa kedaluwarsa /
+ * bertanda tangan) tidak pernah diekspos ke klien.
+ *
+ * Fail-soft total seperti pola avatar lain: mengembalikan false untuk
+ * SEMUA kegagalan (URL kosong/bukan http(s), unduhan gagal, bukan
+ * gambar, terlalu besar) dan TIDAK PERNAH melempar — kegagalan foto
+ * tidak boleh menggagalkan connect; kartu Channels jatuh ke inisial
+ * dan backfill daftar channel mencoba lagi nanti. URL tidak pernah
+ * masuk log (URL CDN bisa memuat tanda tangan).
+ */
+export async function fetchAndStoreProfilePhotoFromUrl(
+  db: Database,
+  input: {
+    tenantId: string;
+    /** Id baris channel_accounts pemilik foto. */
+    channelAccountId: string;
+    /** URL foto dari respons API platform; null/kosong = tidak ada foto. */
+    pictureUrl: string | null | undefined;
+    /** Batas waktu unduhan (default 5 dtk — jalur ini best-effort). */
+    timeoutMs?: number;
+  },
+): Promise<boolean> {
+  const url = input.pictureUrl?.trim();
+  if (!url || !/^https?:\/\//i.test(url)) return false;
+  try {
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(input.timeoutMs ?? 5_000),
+    });
+    if (!response.ok) return false;
+    const contentType =
+      response.headers.get("content-type")?.split(";")[0]?.trim() ?? "";
+    if (contentType && !contentType.startsWith("image/")) return false;
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (bytes.length === 0 || bytes.length > PROFILE_PHOTO_MAX_BYTES) {
+      return false;
+    }
+    await storeProfilePhoto(db, { tenantId: input.tenantId }, {
+      ownerType: "channel_account",
+      ownerId: input.channelAccountId,
+      contentType: contentType || "image/jpeg",
+      data: bytes,
+    });
+    return true;
+  } catch {
+    // SENGAJA tanpa objek error/URL: cukup label generik.
+    console.error(
+      `[avatars] pengambilan foto profil dari URL gagal (akun ${input.channelAccountId})`,
+    );
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Pengambilan dari Telegram Bot API
 // ---------------------------------------------------------------------------

@@ -1586,6 +1586,13 @@ export interface ThreadsProfile {
   id: string;
   username: string | null;
   name: string | null;
+  /**
+   * URL foto profil — field resminya pada `/me` Threads adalah
+   * `threads_profile_picture_url` (BUKAN `profile_picture_url` —
+   * nama itu hanya milik endpoint profile_lookup). Null bila akun
+   * tidak memasang foto / field tidak dikembalikan.
+   */
+  profilePictureUrl: string | null;
 }
 
 /**
@@ -1803,17 +1810,19 @@ export class ThreadsGraphClient extends GraphHttpClient {
   }
 
   /**
-   * Profil akun pemilik token (`GET /v1.0/me?fields=id,username,name`)
-   * — permukaan berversi biasa, token sebagai Bearer (klien dibangun
-   * dengan token berumur panjang). Dipakai connect untuk external_id
-   * (id) + display_name (name) + public_handle (username).
+   * Profil akun pemilik token (`GET /v1.0/me?fields=id,username,name,
+   * threads_profile_picture_url`) — permukaan berversi biasa, token
+   * sebagai Bearer (klien dibangun dengan token berumur panjang).
+   * Dipakai connect untuk external_id (id) + display_name (name) +
+   * public_handle (username) + foto profil (profilePictureUrl).
    */
   async getThreadsProfile(): Promise<ThreadsProfile> {
     const body = await this.getJsonParams<{
       id?: string;
       username?: string;
       name?: string;
-    }>("me", { fields: "id,username,name" });
+      threads_profile_picture_url?: string;
+    }>("me", { fields: "id,username,name,threads_profile_picture_url" });
     if (typeof body.id !== "string" || !body.id) {
       throw new ThreadsGraphError(200, null, "missing_profile_id");
     }
@@ -1821,6 +1830,11 @@ export class ThreadsGraphClient extends GraphHttpClient {
       id: body.id,
       username: typeof body.username === "string" ? body.username : null,
       name: typeof body.name === "string" ? body.name : null,
+      profilePictureUrl:
+        typeof body.threads_profile_picture_url === "string" &&
+        body.threads_profile_picture_url
+          ? body.threads_profile_picture_url
+          : null,
     };
   }
 }

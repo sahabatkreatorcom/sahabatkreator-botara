@@ -377,6 +377,7 @@ routes.route(
     telegramApiBase: env.TELEGRAM_API_BASE,
     publicBaseUrl: env.BETTER_AUTH_URL,
     metaApiBase: env.META_API_BASE,
+    threadsApiBase: env.THREADS_API_BASE,
     // Token verifikasi efektif (Panel Admin → env) agar info webhook
     // yang dilihat owner/admin workspace selalu token yang berlaku —
     // pola yang sama seperti metaAppSecretConfigured di bawah.

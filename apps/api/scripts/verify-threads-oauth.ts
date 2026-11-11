@@ -23,7 +23,13 @@
  *   [8] akun yang sama dari workspace lain → THREADS_ACCOUNT_ALREADY_CONNECTED;
  *   [9] akun sendiri terputus lalu connect lagi → revive baris yang
  *       sama (bukan duplikat);
- *  [10] fallback env untuk kredensial aplikasi (tanpa panel).
+ *  [10] fallback env untuk kredensial aplikasi (tanpa panel);
+ *  [11] avatar: foto profil dari `threads_profile_picture_url`
+ *       tersimpan saat connect (mekanisme profile_photos Meta);
+ *       avatar yang GAGAL diunduh TIDAK menggagalkan connect
+ *       (fail-soft — akun tetap connected, foto kosong);
+ *  [12] backfill: akun tanpa foto tersimpan memicu pengambilan
+ *       avatar saat daftar channel dibaca → avatarUrl muncul.
  *
  * Token tiruan di skrip ini BUKAN kredensial sungguhan.
  *
@@ -45,11 +51,13 @@ import type { Database } from "@sahabat-kreator/db";
 import {
   clearPlatformSetting,
   decryptChannelSecret,
+  getProfilePhoto,
   listPostTargets,
   setPlatformSetting,
 } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../src/auth";
 import type { AppVariables } from "../src/http";
+import { createChannelsRoutes } from "../src/modules/channels/routes";
 import { createThreadsOAuthRoutes } from "../src/modules/threads-oauth/routes";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +100,13 @@ await client.query(
 const SHORT_TOKEN = "threads-short-token-uji";
 const LONG_TOKEN = "threads-long-token-uji";
 const THREADS_USER_ID = "123456789";
+const SHORT_TOKEN_2 = "threads-short-token-uji-2";
+const LONG_TOKEN_2 = "threads-long-token-uji-2";
+const THREADS_USER_ID_2 = "987654321";
+/** Byte foto profil tiruan (JPEG) yang disajikan CDN tiruan. */
+const AVATAR_BYTES = Buffer.from([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+]);
 let exchangeShouldFail = false;
 let lastExchangeForm: URLSearchParams | null = null;
 let lastExchangeGrant: string | null = null;
@@ -102,6 +117,17 @@ const fake = createServer((req, res) => {
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   };
+  // CDN foto profil tiruan.
+  if (req.method === "GET" && url.pathname === "/cdn/threads-avatar.jpg") {
+    res.writeHead(200, { "content-type": "image/jpeg" });
+    res.end(AVATAR_BYTES);
+    return;
+  }
+  if (req.method === "GET" && url.pathname === "/cdn/broken.jpg") {
+    res.writeHead(500, { "content-type": "text/plain" });
+    res.end("cdn rusak");
+    return;
+  }
   if (req.method === "POST" && url.pathname === "/oauth/access_token") {
     let raw = "";
     req.on("data", (chunk) => (raw += String(chunk)));
@@ -113,28 +139,54 @@ const fake = createServer((req, res) => {
         });
         return;
       }
+      // Kode kedua = identitas kedua yang foto profilnya RUSAK (fail-soft).
+      if (lastExchangeForm.get("code") === "kode-kedua") {
+        json(200, { access_token: SHORT_TOKEN_2, user_id: Number(THREADS_USER_ID_2) });
+        return;
+      }
       json(200, { access_token: SHORT_TOKEN, user_id: Number(THREADS_USER_ID) });
     });
     return;
   }
   if (req.method === "GET" && url.pathname === "/access_token") {
     lastExchangeGrant = url.searchParams.get("grant_type");
-    if (
-      url.searchParams.get("grant_type") !== "th_exchange_token" ||
-      url.searchParams.get("access_token") !== SHORT_TOKEN
-    ) {
+    const short = url.searchParams.get("access_token");
+    if (url.searchParams.get("grant_type") !== "th_exchange_token") {
       json(400, { error: { message: "bad exchange", type: "OAuthException", code: 100 } });
       return;
     }
-    json(200, { access_token: LONG_TOKEN, token_type: "bearer", expires_in: 5_184_000 });
+    if (short === SHORT_TOKEN) {
+      json(200, { access_token: LONG_TOKEN, token_type: "bearer", expires_in: 5_184_000 });
+      return;
+    }
+    if (short === SHORT_TOKEN_2) {
+      json(200, { access_token: LONG_TOKEN_2, token_type: "bearer", expires_in: 5_184_000 });
+      return;
+    }
+    json(400, { error: { message: "bad exchange", type: "OAuthException", code: 100 } });
     return;
   }
   if (req.method === "GET" && url.pathname === "/v1.0/me") {
-    if (req.headers.authorization !== `Bearer ${LONG_TOKEN}`) {
-      json(400, { error: { message: "Invalid OAuth access token", type: "OAuthException", code: 190 } });
+    const fakeBaseHere = `http://127.0.0.1:${(fake.address() as { port: number }).port}`;
+    if (req.headers.authorization === `Bearer ${LONG_TOKEN}`) {
+      json(200, {
+        id: THREADS_USER_ID,
+        username: "kreator.threads",
+        name: "Kreator Threads",
+        threads_profile_picture_url: `${fakeBaseHere}/cdn/threads-avatar.jpg`,
+      });
       return;
     }
-    json(200, { id: THREADS_USER_ID, username: "kreator.threads", name: "Kreator Threads" });
+    if (req.headers.authorization === `Bearer ${LONG_TOKEN_2}`) {
+      json(200, {
+        id: THREADS_USER_ID_2,
+        username: "kreator.rusak",
+        name: "Kreator Rusak",
+        threads_profile_picture_url: `${fakeBaseHere}/cdn/broken.jpg`,
+      });
+      return;
+    }
+    json(400, { error: { message: "Invalid OAuth access token", type: "OAuthException", code: 190 } });
     return;
   }
   json(404, { error: { message: "unmocked", type: "OAuthException", code: 803 } });
@@ -323,7 +375,19 @@ let happyState = "";
   assert.ok(threadsTarget);
   assert.equal(threadsTarget.providerChatId, THREADS_USER_ID);
   assert.equal(threadsTarget.channelAccountId, row.id);
-  console.log("[4] callback → akun terenkripsi token panjang + token_type + expiry; sasaran /posts muncul: OK");
+
+  // [11a] Avatar: foto profil dari threads_profile_picture_url
+  // tersimpan di profile_photos (mekanisme yang sama dengan Meta).
+  const photo = await getProfilePhoto(
+    db,
+    { tenantId: TENANT_A },
+    "channel_account",
+    row.id,
+  );
+  assert.ok(photo, "foto profil Threads harus tersimpan saat connect");
+  assert.equal(photo.contentType, "image/jpeg");
+  assert.ok(Buffer.from(photo.data).equals(AVATAR_BYTES));
+  console.log("[4] callback → akun terenkripsi token panjang + token_type + expiry; sasaran /posts muncul; [11a] avatar tersimpan dari threads_profile_picture_url: OK");
 
   // ---------- [5] Replay state yang sama ditolak ----------
   const replay = await app.request(
@@ -416,6 +480,83 @@ let happyState = "";
     LONG_TOKEN,
   );
   console.log("[9] connect ulang akun terputus → revive baris yang sama: OK");
+}
+
+// ---------- [11b] Avatar rusak → connect tetap berhasil (fail-soft) ----------
+{
+  const state = await startAndGetState(app, TENANT_B, USER_B);
+  const res = await app.request(
+    `/threads/oauth/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
+  );
+  assert.equal(
+    res.headers.get("location"),
+    "https://app.test/channels?threads_oauth=connected",
+  );
+  const rows = await client.query<{ id: string; status: string }>(
+    `SELECT id, status FROM channel_accounts WHERE tenant_id = $1 AND provider = 'threads'`,
+    [TENANT_B],
+  );
+  assert.equal(rows.rows.length, 1);
+  assert.equal(rows.rows[0]!.status, "connected");
+  const photo = await getProfilePhoto(
+    db,
+    { tenantId: TENANT_B },
+    "channel_account",
+    rows.rows[0]!.id,
+  );
+  assert.equal(photo, null);
+  console.log("[11b] unduhan avatar gagal (CDN 500) → akun tetap connected tanpa foto (fail-soft): OK");
+}
+
+// ---------- [12] Backfill avatar lewat daftar channel ----------
+{
+  const before = await client.query<{ id: string }>(
+    `SELECT id FROM channel_accounts WHERE tenant_id = $1 AND provider = 'threads'`,
+    [TENANT_A],
+  );
+  const accountId = before.rows[0]!.id;
+  await client.query(
+    `DELETE FROM profile_photos WHERE tenant_id = $1 AND owner_type = 'channel_account' AND owner_id = $2`,
+    [TENANT_A, accountId],
+  );
+  const channelsApp = new Hono<{ Variables: AppVariables }>();
+  channelsApp.use("*", async (c, next) => {
+    c.set("appUser", { id: USER_A } as unknown as AppVariables["appUser"]);
+    await next();
+  });
+  channelsApp.route(
+    "/",
+    createChannelsRoutes({ db } as unknown as AuthBundle, {
+      channelTokenSecret: CHANNEL_SECRET,
+      threadsApiBase: fakeBase,
+    }),
+  );
+  const list1 = await channelsApp.request(`/tenants/${TENANT_A}/channels`, {
+    headers: { "x-test-user": USER_A },
+  });
+  assert.equal(list1.status, 200);
+  // Backfill berjalan async (fire-and-forget) — tunggu foto tersimpan.
+  let photo = null;
+  for (let i = 0; i < 40 && !photo; i++) {
+    photo = await getProfilePhoto(
+      db,
+      { tenantId: TENANT_A },
+      "channel_account",
+      accountId,
+    );
+    if (!photo) await new Promise((r) => setTimeout(r, 100));
+  }
+  assert.ok(photo, "backfill daftar channel harus mengambil foto Threads");
+  const list2 = await channelsApp.request(`/tenants/${TENANT_A}/channels`, {
+    headers: { "x-test-user": USER_A },
+  });
+  const body2 = (await list2.json()) as {
+    channels: { provider: string; avatarUrl: string | null }[];
+  };
+  const threadsChannel = body2.channels.find((ch) => ch.provider === "threads");
+  assert.ok(threadsChannel);
+  assert.ok(threadsChannel.avatarUrl, "avatarUrl harus terisi sesudah backfill");
+  console.log("[12] daftar channel memicu backfill avatar Threads → avatarUrl terisi: OK");
 }
 
 // ---------- [10] Fallback env kredensial aplikasi ----------

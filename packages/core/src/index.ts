@@ -452,6 +452,7 @@ export {
 export {
   PROFILE_PHOTO_MAX_EDGE,
   deleteChannelAccountProfilePhoto,
+  fetchAndStoreProfilePhotoFromUrl,
   fetchAndStoreTelegramProfilePhoto,
   getProfilePhoto,
   listProfilePhotoOwnerIds,
