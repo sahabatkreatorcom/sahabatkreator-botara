@@ -1461,6 +1461,7 @@ export const id: Resources = {
       "Hasil pengiriman tidak diketahui — periksa channel dulu sebelum mencoba lagi, agar tidak terbit dua kali.",
     ownerOnly: "Hanya owner/admin yang bisa menjadwalkan postingan.",
     mediaCount: "{count} lampiran",
+    moreCount: "+{count} lagi",
     errorGeneric: "Gagal memproses postingan.",
   },
   broadcasts: {

@@ -1462,6 +1462,7 @@ export const en = {
       "The delivery outcome is unknown — check the channel before retrying so it does not publish twice.",
     ownerOnly: "Only owners and admins can schedule posts.",
     mediaCount: "{count} attachments",
+    moreCount: "+{count} more",
     errorGeneric: "Could not process the post.",
   },
   broadcasts: {

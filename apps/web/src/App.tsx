@@ -276,8 +276,11 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
   };
 
   // Builder canvas (Fase 8B) butuh panggung lebih lebar dari kolom
-  // baca 5xl halaman lain — hanya saat builder yang terbuka.
-  const wideMain = activeId === "flows" && match.segment !== null;
+  // baca 5xl halaman lain — hanya saat builder yang terbuka. Halaman
+  // Jadwal Konten juga memakai panggung lebar yang sama: formulir dan
+  // kalender berdampingan tidak muat di kolom baca 5xl.
+  const wideMain =
+    activeId === "posts" || (activeId === "flows" && match.segment !== null);
 
   const handleSignOut = async () => {
     await signOut();

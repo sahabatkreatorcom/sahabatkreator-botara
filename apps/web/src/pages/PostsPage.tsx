@@ -377,31 +377,33 @@ export function PostsPage({ t, locale }: PostsPageProps) {
   );
 
   return (
-    <div className="space-y-6 p-6">
-      <header>
-        <h1 className="text-xl font-semibold text-neutral-900">{t("posts.title")}</h1>
-        <p className="mt-1 text-sm text-neutral-600">{t("posts.subtitle")}</p>
-        <p className="mt-1 text-xs text-neutral-500">
+    <div className="space-y-4">
+      <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+        <div>
+          <h1 className="text-xl font-semibold text-neutral-900">{t("posts.title")}</h1>
+          <p className="mt-0.5 text-sm text-neutral-600">{t("posts.subtitle")}</p>
+        </div>
+        <p className="text-xs text-neutral-500">
           {t("posts.timezoneNote", { timezone })}
         </p>
       </header>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
           {error}
         </div>
       )}
 
       {targets.length === 0 && !loading && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
           {t("posts.targetEmpty")}
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <section className="rounded-xl border border-neutral-200 bg-white p-5 lg:col-span-1">
+      <div className="grid items-start gap-5 lg:grid-cols-12">
+        <section className="rounded-xl border border-neutral-200 bg-white p-5 lg:col-span-5 xl:col-span-4">
           <h2 className="text-sm font-semibold text-neutral-900">{t("posts.newPost")}</h2>
-          <div className="mt-4 space-y-4">
+          <div className="mt-3 space-y-3">
             <div>
               <span className="text-xs font-medium text-neutral-600">
                 {t("posts.targets")}
@@ -445,14 +447,16 @@ export function PostsPage({ t, locale }: PostsPageProps) {
               <span className="text-xs font-medium text-neutral-600">{t("posts.caption")}</span>
               <textarea
                 className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
-                rows={5}
+                rows={7}
                 value={caption}
                 onChange={(event) => setCaption(event.target.value)}
                 disabled={!canManage}
               />
-              <span className="mt-1 flex justify-between text-xs text-neutral-500">
+              <span className="mt-1 flex items-start justify-between gap-2 text-xs text-neutral-500">
                 <span>{t("posts.captionHint", { max: captionMax })}</span>
-                <span className={captionLeft < 0 ? "text-red-600" : ""}>{captionLeft}</span>
+                <span className={`shrink-0 ${captionLeft < 0 ? "text-red-600" : ""}`}>
+                  {captionLeft}
+                </span>
               </span>
             </label>
 
@@ -508,8 +512,8 @@ export function PostsPage({ t, locale }: PostsPageProps) {
           </div>
         </section>
 
-        <section className="lg:col-span-2">
-          <div className="mb-3 flex flex-wrap items-center gap-2">
+        <section className="lg:col-span-7 xl:col-span-8">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
             {viewButton("month", t("posts.viewCalendar"))}
             {viewButton("week", t("posts.viewWeek"))}
             {viewButton("list", t("posts.viewList"))}
@@ -566,7 +570,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
           </div>
 
           {view !== "list" && unscheduledCount > 0 && (
-            <p className="mb-3 text-xs text-neutral-500">
+            <p className="mb-2 text-xs text-neutral-500">
               {t("posts.unscheduledNote", { count: unscheduledCount })}
             </p>
           )}
@@ -682,11 +686,17 @@ function CalendarGrid({
         {cells.map((day) => {
           const key = dayKey(day);
           const items = postsByDay.get(key) ?? [];
+          // Batas chip yang DITAMPILKAN per sel (murni presentasi):
+          // pengelompokan dan drag tidak berubah; kelebihan chip
+          // diringkas "+N lagi" dan daftar lengkapnya ada di tampilan
+          // Daftar. Sel minggu lebih tinggi, jadi memuat lebih banyak.
+          const maxChips = view === "week" ? 6 : 3;
+          const visibleItems = items.slice(0, maxChips);
           const inMonth = view === "week" || day.m === monthCursor.m;
           return (
             <div
               key={key}
-              className={`min-h-24 border-b border-r border-neutral-100 p-1.5 ${
+              className={`${view === "week" ? "min-h-44" : "min-h-28"} border-b border-r border-neutral-100 p-1.5 ${
                 inMonth ? "" : "bg-neutral-50 text-neutral-400"
               } ${key === todayKey ? "bg-amber-50" : ""}`}
               onDragOver={(event) => {
@@ -701,7 +711,7 @@ function CalendarGrid({
             >
               <div className="text-xs font-medium">{day.d}</div>
               <div className="mt-1 space-y-1">
-                {items.map((post) => {
+                {visibleItems.map((post) => {
                   const draggable =
                     canManage &&
                     (post.status === "draft" || post.status === "scheduled");
@@ -732,6 +742,13 @@ function CalendarGrid({
                     </div>
                   );
                 })}
+                {items.length > visibleItems.length && (
+                  <div className="px-1.5 text-[11px] font-medium text-neutral-500">
+                    {t("posts.moreCount", {
+                      count: items.length - visibleItems.length,
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           );
