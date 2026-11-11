@@ -52,6 +52,7 @@ import {
 import { TikTokClient } from "@sahabat-kreator/channel-tiktok";
 import { LinkedInClient } from "@sahabat-kreator/channel-linkedin";
 import { PinterestClient } from "@sahabat-kreator/channel-pinterest";
+import { BlueskyClient } from "@sahabat-kreator/channel-bluesky";
 import {
   WhatsAppCloudClient,
   WhatsAppGraphError,
@@ -312,6 +313,7 @@ const OAUTH_PHOTO_PROVIDERS = new Set([
   "tiktok",
   "linkedin",
   "pinterest",
+  "bluesky",
 ]);
 
 async function resolveOAuthProfilePictureUrl(
@@ -344,6 +346,21 @@ async function resolveOAuthProfilePictureUrl(
         baseUrl: opts.pinterestApiBase,
       }).getPinterestUserAccount(credential);
       return account.profileImageUrl;
+    }
+    case "bluesky": {
+      // Kredensial tersimpan Bluesky adalah APP PASSWORD, bukan
+      // token sesi: buat sesi segar (identifier = DID akun) lalu
+      // baca profilnya — pola yang sama seperti adapter penerbit.
+      const client = new BlueskyClient({ baseUrl: opts.blueskyApiBase });
+      const session = await client.createSession({
+        identifier: row.externalId,
+        password: credential,
+      });
+      const profile = await client.getProfile({
+        actor: session.did,
+        accessJwt: session.accessJwt,
+      });
+      return profile.avatarUrl;
     }
     default:
       return null;
@@ -458,6 +475,8 @@ export interface ChannelsModuleOptions {
   linkedinApiBase?: string;
   /** Base URL API Pinterest (env PINTEREST_API_BASE) — backfill foto Pinterest. */
   pinterestApiBase?: string;
+  /** Base URL Bluesky (env BLUESKY_API_BASE) — backfill foto Bluesky. */
+  blueskyApiBase?: string;
   /**
    * Verify token webhook Meta — nilai yang KITA tentukan; dibagikan ke
    * owner/admin lewat endpoint meta-webhook-info agar bisa ditempel ke

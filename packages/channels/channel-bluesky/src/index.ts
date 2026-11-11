@@ -70,6 +70,14 @@ export interface BlueskySession {
   refreshJwt: string;
 }
 
+/** Profil aktor Bluesky (`app.bsky.actor.getProfile`). */
+export interface BlueskyProfile {
+  did: string;
+  handle: string;
+  /** URL avatar aktor; null bila akun tidak memasang avatar. */
+  avatarUrl: string | null;
+}
+
 /** Referensi blob hasil `uploadBlob`, siap disematkan ke record. */
 export interface BlueskyBlobRef {
   $type: "blob";
@@ -206,6 +214,47 @@ export class BlueskyClient {
       handle: body.handle ?? input.identifier,
       accessJwt: body.accessJwt,
       refreshJwt: body.refreshJwt,
+    };
+  }
+
+  /**
+   * Profil aktor (`GET /xrpc/app.bsky.actor.getProfile?actor=…`,
+   * Bearer accessJwt sesi): handle kanonis + URL avatar. Dipakai
+   * connect untuk mengambil foto profil sesudah sesi tervalidasi,
+   * dan backfill avatar di API. Permukaan ini GET — plumbing kelas
+   * ini berbasis POST, jadi panggilannya berdiri sendiri dengan
+   * aturan error yang sama. accessJwt TIDAK PERNAH masuk error.
+   */
+  async getProfile(input: {
+    actor: string;
+    accessJwt: string;
+  }): Promise<BlueskyProfile> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/xrpc/app.bsky.actor.getProfile?actor=${encodeURIComponent(input.actor)}`,
+        {
+          method: "GET",
+          headers: { authorization: `Bearer ${input.accessJwt}` },
+          signal: AbortSignal.timeout(this.timeoutMs),
+        },
+      );
+    } catch {
+      throw new BlueskyApiError(0, null, "network_error");
+    }
+    if (!response.ok) throw await this.parseError(response);
+    const body = (await response.json().catch(() => ({}))) as {
+      did?: unknown;
+      handle?: unknown;
+      avatar?: unknown;
+    };
+    if (typeof body.did !== "string" || !body.did) {
+      throw new BlueskyApiError(200, null, "missing_profile_did");
+    }
+    return {
+      did: body.did,
+      handle: typeof body.handle === "string" ? body.handle : input.actor,
+      avatarUrl: typeof body.avatar === "string" ? body.avatar : null,
     };
   }
 

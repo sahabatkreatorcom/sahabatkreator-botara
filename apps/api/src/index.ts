@@ -47,6 +47,7 @@ import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
 import { createTikTokOAuthRoutes } from "./modules/tiktok-oauth/routes";
 import { createLinkedInOAuthRoutes } from "./modules/linkedin-oauth/routes";
 import { createPinterestOAuthRoutes } from "./modules/pinterest-oauth/routes";
+import { createBlueskyConnectRoutes } from "./modules/bluesky-connect/routes";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
 import { createMediaRoutes } from "./modules/media/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
@@ -384,6 +385,7 @@ routes.route(
     tiktokApiBase: env.TIKTOK_API_BASE,
     linkedinApiBase: env.LINKEDIN_API_BASE,
     pinterestApiBase: env.PINTEREST_API_BASE,
+    blueskyApiBase: env.BLUESKY_API_BASE,
     // Token verifikasi efektif (Panel Admin → env) agar info webhook
     // yang dilihat owner/admin workspace selalu token yang berlaku —
     // pola yang sama seperti metaAppSecretConfigured di bawah.
@@ -625,6 +627,17 @@ routes.route(
     publicBaseUrl: env.BETTER_AUTH_URL,
     redisUrl: env.REDIS_URL,
     stateSecret: env.BETTER_AUTH_SECRET,
+  }),
+);
+// Modul Bluesky Connect (gelombang Semua OAuth) — BUKAN OAuth:
+// formulir handle + App Password divalidasi lewat createSession
+// AT Protocol; DID menjadi external_id dan app password disimpan
+// terenkripsi persis format adapter Gelombang 1.5.
+routes.route(
+  "/",
+  createBlueskyConnectRoutes(authBundle, {
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    blueskyApiBase: env.BLUESKY_API_BASE,
   }),
 );
 
