@@ -46,6 +46,7 @@ import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
 import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
 import { createTikTokOAuthRoutes } from "./modules/tiktok-oauth/routes";
 import { createLinkedInOAuthRoutes } from "./modules/linkedin-oauth/routes";
+import { createPinterestOAuthRoutes } from "./modules/pinterest-oauth/routes";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
 import { createMediaRoutes } from "./modules/media/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
@@ -382,6 +383,7 @@ routes.route(
     threadsApiBase: env.THREADS_API_BASE,
     tiktokApiBase: env.TIKTOK_API_BASE,
     linkedinApiBase: env.LINKEDIN_API_BASE,
+    pinterestApiBase: env.PINTEREST_API_BASE,
     // Token verifikasi efektif (Panel Admin → env) agar info webhook
     // yang dilihat owner/admin workspace selalu token yang berlaku —
     // pola yang sama seperti metaAppSecretConfigured di bawah.
@@ -603,6 +605,23 @@ routes.route(
     platform: platformOptions,
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
     linkedinApiBase: env.LINKEDIN_API_BASE,
+    publicBaseUrl: env.BETTER_AUTH_URL,
+    redisUrl: env.REDIS_URL,
+    stateSecret: env.BETTER_AUTH_SECRET,
+  }),
+);
+// Modul Pinterest OAuth Connect (gelombang Semua OAuth) —
+// "Hubungkan dengan Pinterest": start ber-state sekali pakai +
+// callback tunggal publik /pinterest/oauth/callback + info
+// ketersediaan. Kredensial aplikasi dari Panel Admin
+// (pinterest_app_id/secret; env hanya fallback). Access token
+// ±30 hari disegarkan worker lifecycle via refresh token.
+routes.route(
+  "/",
+  createPinterestOAuthRoutes(authBundle, {
+    platform: platformOptions,
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    pinterestApiBase: env.PINTEREST_API_BASE,
     publicBaseUrl: env.BETTER_AUTH_URL,
     redisUrl: env.REDIS_URL,
     stateSecret: env.BETTER_AUTH_SECRET,

@@ -51,6 +51,7 @@ import {
 } from "@sahabat-kreator/channel-messenger";
 import { TikTokClient } from "@sahabat-kreator/channel-tiktok";
 import { LinkedInClient } from "@sahabat-kreator/channel-linkedin";
+import { PinterestClient } from "@sahabat-kreator/channel-pinterest";
 import {
   WhatsAppCloudClient,
   WhatsAppGraphError,
@@ -306,7 +307,12 @@ const oauthPhotoBackfillInFlight = new Set<string>();
 const oauthPhotoBackfillNegative = new Map<string, number>();
 
 /** Provider yang foto profilnya bisa diselesaikan dari API platform. */
-const OAUTH_PHOTO_PROVIDERS = new Set(["threads", "tiktok", "linkedin"]);
+const OAUTH_PHOTO_PROVIDERS = new Set([
+  "threads",
+  "tiktok",
+  "linkedin",
+  "pinterest",
+]);
 
 async function resolveOAuthProfilePictureUrl(
   opts: ChannelsModuleOptions,
@@ -332,6 +338,12 @@ async function resolveOAuthProfilePictureUrl(
         baseUrl: opts.linkedinApiBase,
       }).getLinkedInUserInfo(credential);
       return info.pictureUrl;
+    }
+    case "pinterest": {
+      const account = await new PinterestClient({
+        baseUrl: opts.pinterestApiBase,
+      }).getPinterestUserAccount(credential);
+      return account.profileImageUrl;
     }
     default:
       return null;
@@ -444,6 +456,8 @@ export interface ChannelsModuleOptions {
   tiktokApiBase?: string;
   /** Base URL API LinkedIn (env LINKEDIN_API_BASE) — backfill foto LinkedIn. */
   linkedinApiBase?: string;
+  /** Base URL API Pinterest (env PINTEREST_API_BASE) — backfill foto Pinterest. */
+  pinterestApiBase?: string;
   /**
    * Verify token webhook Meta — nilai yang KITA tentukan; dibagikan ke
    * owner/admin lewat endpoint meta-webhook-info agar bisa ditempel ke

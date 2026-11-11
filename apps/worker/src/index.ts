@@ -49,6 +49,7 @@ import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
 import { runThreadsTokenLifecycle } from "./threads-token-lifecycle";
 import { runTikTokTokenLifecycle } from "./tiktok-token-lifecycle";
 import { runLinkedInTokenLifecycle } from "./linkedin-token-lifecycle";
+import { runPinterestTokenLifecycle } from "./pinterest-token-lifecycle";
 import { startMediaIngestLoop } from "./media-ingest";
 import { MEDIA_GC_INTERVAL_MS, startMediaGcLoop } from "./media-gc";
 import {
@@ -1421,6 +1422,41 @@ const linkedinTokenLifecycleTimer = setInterval(
 void linkedinTokenLifecycleTick();
 
 // ---------------------------------------------------------------------------
+// Lifecycle token Pinterest (gelombang Semua OAuth): putaran sejajar
+// TikTok — access token ±30 hari disegarkan dengan grant
+// `refresh_token` API v5 SEBELUM kedaluwarsa (rotasi refresh token
+// disimpan hanya bila grant menerbitkan yang baru). Tick terpisah,
+// interval sama. Jalan run-once: `pnpm --filter
+// @sahabat-kreator/worker pinterest:token-lifecycle`.
+let pinterestTokenLifecycleRunning = false;
+async function pinterestTokenLifecycleTick(): Promise<void> {
+  if (pinterestTokenLifecycleRunning) return;
+  pinterestTokenLifecycleRunning = true;
+  try {
+    const result = await runPinterestTokenLifecycle({
+      db,
+      platform: platformSettingsOptions,
+      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+      pinterestApiBase: env.PINTEREST_API_BASE,
+    });
+    if (result.scanned > 0) {
+      console.log(
+        `[worker] lifecycle token Pinterest: ${result.scanned} akun terpindai — refresh=${result.refreshed} warned=${result.warned} authError=${result.authErrored} failed=${result.failed}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] lifecycle token Pinterest gagal (akan dicoba lagi):", err);
+  } finally {
+    pinterestTokenLifecycleRunning = false;
+  }
+}
+const pinterestTokenLifecycleTimer = setInterval(
+  () => void pinterestTokenLifecycleTick(),
+  TOKEN_LIFECYCLE_INTERVAL_MS,
+);
+void pinterestTokenLifecycleTick();
+
+// ---------------------------------------------------------------------------
 // Poller pengiriman pesan outbound (Telegram + Meta).
 //
 // DIPINDAHKAN dari proses API ke worker (rekomendasi analisis). Selama
@@ -1521,6 +1557,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(threadsTokenLifecycleTimer);
   clearInterval(tiktokTokenLifecycleTimer);
   clearInterval(linkedinTokenLifecycleTimer);
+  clearInterval(pinterestTokenLifecycleTimer);
   // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang
   // berjalan memakai `db`, dan memutus pool di bawahnya mengubah
   // pengiriman yang sedang berlangsung menjadi kegagalan palsu yang

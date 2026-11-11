@@ -84,6 +84,25 @@ export interface PinterestBoard {
   name: string | null;
 }
 
+/** Hasil exchange/refresh token OAuth Pinterest. */
+export interface PinterestOAuthTokenResult {
+  accessToken: string;
+  /** Umur access token dari provider (30 hari = 2592000 detik); null bila tak dilaporkan. */
+  expiresInSeconds: number | null;
+  /** Refresh token BARU bila diterbitkan grant ini; null = pertahankan yang lama. */
+  refreshToken: string | null;
+}
+
+/** Akun Pinterest pemilik token (`GET /v5/user_account`). */
+export interface PinterestUserAccount {
+  /** ID akun Pinterest — menjadi external_id akun channel. */
+  id: string;
+  /** Username akun — identitas tampil (adapter & kartu memakai ini). */
+  username: string | null;
+  /** URL foto profil dari field `profile_image`; null bila tak ada. */
+  profileImageUrl: string | null;
+}
+
 interface PinterestErrorBody {
   message?: unknown;
 }
@@ -147,6 +166,130 @@ export class PinterestClient {
     }
     if (!response.ok) throw await this.parseError(response);
     return response.json().catch(() => ({}));
+  }
+
+  // -------------------------------------------------------------------------
+  // OAuth connect (gelombang Semua OAuth)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Satu panggilan ke token endpoint Pinterest
+   * (`POST /v5/oauth/token`, form-urlencoded, kredensial aplikasi
+   * sebagai HTTP Basic base64(appId:appSecret) — bentuk resmi v5,
+   * BUKAN di badan form). Dipakai grant authorization_code maupun
+   * refresh_token. App secret TIDAK PERNAH masuk error yang
+   * dibangun.
+   */
+  private async oauthTokenRequest(
+    appId: string,
+    appSecret: string,
+    form: URLSearchParams,
+  ): Promise<PinterestOAuthTokenResult> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/v5/oauth/token`, {
+        method: "POST",
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: {
+          Authorization: `Basic ${Buffer.from(`${appId}:${appSecret}`).toString("base64")}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+      });
+    } catch {
+      throw new PinterestApiError(0, "network_error");
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await response.json()) as Record<string, unknown>;
+    } catch {
+      /* body bukan JSON — error generik di bawah */
+    }
+    const accessToken =
+      typeof body.access_token === "string" ? body.access_token : null;
+    if (!response.ok || !accessToken) {
+      const description =
+        typeof body.message === "string"
+          ? body.message.slice(0, 200)
+          : `pinterest_oauth_error_${response.status}`;
+      throw new PinterestApiError(response.status, description);
+    }
+    return {
+      accessToken,
+      expiresInSeconds:
+        typeof body.expires_in === "number" ? body.expires_in : null,
+      refreshToken:
+        typeof body.refresh_token === "string" ? body.refresh_token : null,
+    };
+  }
+
+  /**
+   * Tukar authorization code → access token (30 hari) + refresh
+   * token: grant `authorization_code` dengan redirect_uri yang
+   * IDENTIK dengan dialog authorize.
+   */
+  async exchangePinterestCode(input: {
+    appId: string;
+    appSecret: string;
+    code: string;
+    redirectUri: string;
+  }): Promise<PinterestOAuthTokenResult> {
+    return this.oauthTokenRequest(
+      input.appId,
+      input.appSecret,
+      new URLSearchParams({
+        grant_type: "authorization_code",
+        code: input.code,
+        redirect_uri: input.redirectUri,
+      }),
+    );
+  }
+
+  /**
+   * Segarkan access token dari refresh token: grant `refresh_token`.
+   * Pinterest mendukung penyegaran berkelanjutan; respons bisa
+   * membawa refresh token baru (rotasi) atau tidak — pemanggil
+   * menyimpan yang baru bila ada dan mempertahankan yang lama bila
+   * tidak (pola runner lifecycle Pinterest di worker). Refresh yang
+   * mati/dicabut dijawab 401 oleh provider (dipetakan lifecycle ke
+   * akun 'error' pinterest_unauthorized).
+   */
+  async refreshPinterestAccessToken(input: {
+    appId: string;
+    appSecret: string;
+    refreshToken: string;
+  }): Promise<PinterestOAuthTokenResult> {
+    return this.oauthTokenRequest(
+      input.appId,
+      input.appSecret,
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        refresh_token: input.refreshToken,
+      }),
+    );
+  }
+
+  /**
+   * Akun pemilik token (`GET /v5/user_account`, Bearer; butuh scope
+   * `user_accounts:read` yang memang diminta dialog connect): id =
+   * external_id, username = identitas, `profile_image` = URL foto
+   * profil.
+   */
+  async getPinterestUserAccount(
+    accessToken: string,
+  ): Promise<PinterestUserAccount> {
+    const body = (await this.request(accessToken, "/v5/user_account", {
+      method: "GET",
+    })) as { id?: unknown; username?: unknown; profile_image?: unknown };
+    if (typeof body.id !== "string" || !body.id) {
+      throw new PinterestApiError(200, "missing_account_id");
+    }
+    return {
+      id: body.id,
+      username: typeof body.username === "string" ? body.username : null,
+      profileImageUrl:
+        typeof body.profile_image === "string" ? body.profile_image : null,
+    };
   }
 
   /** Daftar board milik akun (satu halaman cukup untuk board bawaan). */
