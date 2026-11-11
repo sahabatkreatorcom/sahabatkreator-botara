@@ -85,6 +85,13 @@ const EnvSchema = z.object({
    */
   POST_MEDIA_PUBLIC_BASE_URL: z.string().url().optional(),
   /**
+   * Base URL Threads API. Default https://graph.threads.net (versi
+   * v1.0 ditambahkan klien); override hanya untuk uji mock — pola yang
+   * sama dengan META_API_BASE. Threads memakai aplikasi, token, dan
+   * permukaan API yang terpisah dari graph.facebook.com.
+   */
+  THREADS_API_BASE: z.string().url().optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta

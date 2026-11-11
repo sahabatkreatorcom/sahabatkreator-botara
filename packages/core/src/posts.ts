@@ -181,19 +181,22 @@ async function loadMedia(
 }
 
 /**
- * Provider Meta yang akun terhubungnya SENDIRI adalah linimasa.
+ * Provider linimasa yang akun terhubungnya SENDIRI adalah sasarannya.
  * Berbeda dari Telegram — yang sasaran channel-nya baru diketahui saat
- * bot ditambahkan ke sebuah channel oleh admin — Page dan akun IG
- * Business sudah membawa alamat terbitnya sejak connect: `external_id`
- * akun adalah Page ID / IG user ID. Karena itu tidak ada migrasi atau
- * tabel sasaran baru: sasaran dimaterialisasi sebagai percakapan
- * `kind='channel'` dengan `provider_chat_id = external_id`, persis
- * bentuk yang sudah dipakai state machine post.
+ * bot ditambahkan ke sebuah channel oleh admin — Page, akun IG
+ * Business, dan akun Threads sudah membawa alamat terbitnya sejak
+ * connect: `external_id` akun adalah Page ID / IG user ID / Threads
+ * user ID. Karena itu tidak ada tabel sasaran baru: sasaran
+ * dimaterialisasi sebagai percakapan `kind='channel'` dengan
+ * `provider_chat_id = external_id`, persis bentuk yang sudah dipakai
+ * state machine post. Untuk Threads ini murni sasaran publikasi —
+ * provider itu tidak menjadi channel inbox hanya karena sasarannya
+ * memakai baris percakapan channel.
  */
-const TIMELINE_ACCOUNT_PROVIDERS = ["messenger", "instagram"] as const;
+const TIMELINE_ACCOUNT_PROVIDERS = ["messenger", "instagram", "threads"] as const;
 
 /**
- * Materialisasi idempoten sasaran linimasa Meta untuk akun terhubung.
+ * Materialisasi idempoten sasaran linimasa untuk akun terhubung.
  *
  * Kontak jangkar adalah akun itu sendiri (pola `ensureTelegramChannel`):
  * identitas `(channel_account_id, external_id akun)` menunjuk ke satu
@@ -203,7 +206,7 @@ const TIMELINE_ACCOUNT_PROVIDERS = ["messenger", "instagram"] as const;
  * yang baru terhubung; ia tidak membuat postingan dan tidak memanggil
  * provider. Panggilan berulang menemukan baris yang sama.
  */
-async function ensureMetaTimelineTargets(
+async function ensureTimelineTargets(
   tx: DbTx,
   tenantId: string,
 ): Promise<void> {
@@ -310,8 +313,8 @@ async function ensureMetaTimelineTargets(
  * Channel yang bisa dituju: percakapan `kind='channel'` pada akun yang
  * masih terhubung. Percakapan channel Telegram dibuat saat bot
  * ditambahkan sebagai admin (webhook `my_chat_member` / `channel_post`);
- * sasaran Page/IG dimaterialisasi dari akun terhubung oleh
- * `ensureMetaTimelineTargets` di atas. Daftar kosong berarti belum ada
+ * sasaran Page/IG/Threads dimaterialisasi dari akun terhubung oleh
+ * `ensureTimelineTargets` di atas. Daftar kosong berarti belum ada
  * channel/akun linimasa yang terhubung, dan UI menampilkan instruksi
  * alih-alih pemilih kosong.
  */
@@ -320,7 +323,7 @@ export async function listPostTargets(
   input: { tenantId: string },
 ): Promise<PostTarget[]> {
   return withTenantDb(db, input.tenantId, async (tx) => {
-    await ensureMetaTimelineTargets(tx, input.tenantId);
+    await ensureTimelineTargets(tx, input.tenantId);
     return tx
       .select({
         channelAccountId: conversations.channelAccountId,

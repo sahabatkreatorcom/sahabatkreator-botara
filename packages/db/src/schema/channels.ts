@@ -30,6 +30,9 @@ export const channelProviderEnum = pgEnum("channel_provider", [
   "messenger",
   "telegram",
   "webchat",
+  // Gelombang 1: akun Threads khusus content schedule (bukan inbox).
+  // Nilai enum ditambahkan oleh migrasi 0014; urutan lama tidak diubah.
+  "threads",
 ]);
 
 export const channelAccountStatusEnum = pgEnum("channel_account_status", [

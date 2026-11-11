@@ -13,10 +13,11 @@ import {
   MetaGraphError,
   type MetaPublishFile,
 } from "@sahabat-kreator/channel-messenger";
-import type {
-  PostPublisherAdapter,
-  PostPublisherOptions,
-  PublishPostResult,
+import {
+  resolvePostPublicMediaUrl,
+  type PostPublisherAdapter,
+  type PostPublisherOptions,
+  type PublishPostResult,
 } from "./post-publisher";
 
 /**
@@ -35,32 +36,6 @@ export interface MetaPostMediaFile extends MetaPublishFile {
   r2Key: string;
   mimeType: string | null;
   fileName: string | null;
-}
-
-/**
- * Resolusi URL media publik untuk API container (Instagram/Threads).
- *
- * Media repo TIDAK pernah diekspos apa adanya: object store privat dan
- * endpoint API media memeriksa sesi + tenant. Fungsi ini hanya memakai
- * resolver khusus (rantai uji / integrasi CDN bertanda tangan di luar
- * repo) atau base URL publik yang secara eksplisit dikonfigurasi
- * operator sebagai pemetaan `{base}/{r2Key}`. Tanpa keduanya ia
- * mengembalikan null dan adapter gagal SEBELUM memanggil provider —
- * bukan menebak URL internal yang pasti ditolak Meta.
- */
-export function resolvePublicMediaUrl(
-  opts: PostPublisherOptions,
-  media: { r2Key: string; mimeType: string | null; fileName: string | null },
-): string | null {
-  const custom = opts.resolvePublicMediaUrl?.(media);
-  if (custom) return custom;
-  if (!opts.publicMediaBaseUrl) return null;
-  const base = opts.publicMediaBaseUrl.replace(/\/+$/, "");
-  const path = media.r2Key
-    .split("/")
-    .map((segment) => encodeURIComponent(segment))
-    .join("/");
-  return `${base}/${path}`;
 }
 
 type MetaPublishSender = (
@@ -290,7 +265,7 @@ async function sendInstagramPost(
   }
 
   const urls = files.map((file) => {
-    const url = resolvePublicMediaUrl(opts, file);
+    const url = resolvePostPublicMediaUrl(opts, file);
     if (!url) throw new Error("instagram_public_media_url_unavailable");
     return url;
   });

@@ -501,6 +501,7 @@ const bullWorker = new Worker<MainJobData>(
           telegramApiBase: env.TELEGRAM_API_BASE,
           metaApiBase: env.META_API_BASE,
           metaGraphApiVersion: META_GRAPH_API_VERSION,
+          threadsApiBase: env.THREADS_API_BASE,
           publicMediaBaseUrl: env.POST_MEDIA_PUBLIC_BASE_URL,
           mediaStore,
         },

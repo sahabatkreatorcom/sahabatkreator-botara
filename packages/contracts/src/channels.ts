@@ -76,6 +76,16 @@ export const ChannelHealthSchema = z.object({
 });
 export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
 
+/**
+ * Permintaan connect channel INBOX.
+ *
+ * `provider: "threads"` valid sebagai identitas akun linimasa pada
+ * skema akun/sasaran, tetapi SENGAJA belum dapat dibuat lewat endpoint
+ * generik ini: Threads bukan channel inbox dan provisioning-nya adalah
+ * OAuth aplikasi Threads yang terpisah (dimock pada Gelombang 1).
+ * Route channel menjawabnya `CHANNEL_NOT_AVAILABLE_YET`, bukan
+ * mengalirkannya ke connect Meta graph.facebook.com.
+ */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,
   displayName: z.string().trim().min(1).max(255).optional(),

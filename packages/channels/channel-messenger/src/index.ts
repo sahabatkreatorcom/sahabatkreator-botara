@@ -1556,6 +1556,99 @@ export class MetaGraphClient extends GraphHttpClient {
   }
 }
 
+/** Base URL Threads API — host dan versi terpisah dari Graph Facebook. */
+export const DEFAULT_THREADS_API_BASE = "https://graph.threads.net";
+export const DEFAULT_THREADS_API_VERSION = "v1.0";
+
+/** Error Threads API yang aman dicatat: status + kode resmi provider. */
+export class ThreadsGraphError extends GraphApiError {
+  constructor(
+    status: number,
+    graphCode: number | null,
+    description: string,
+    graphSubcode: number | null = null,
+  ) {
+    super("Threads API", status, graphCode, description, graphSubcode);
+    this.name = "ThreadsGraphError";
+  }
+}
+
+/**
+ * Klien Threads API untuk PUBLIKASI SAJA.
+ *
+ * Ia berbagi plumbing HTTP Graph dengan MetaGraphClient, tetapi bukan
+ * adapter inbox dan tidak punya metode pesan/webhook. Threads memakai
+ * host `graph.threads.net` dan versi v1.0; tokennya adalah Threads
+ * user access token dari aplikasi Threads yang terpisah.
+ */
+export class ThreadsGraphClient extends GraphHttpClient {
+  constructor(options: GraphClientOptions = {}) {
+    super({
+      ...options,
+      baseUrl: options.baseUrl ?? DEFAULT_THREADS_API_BASE,
+      apiVersion: options.apiVersion ?? DEFAULT_THREADS_API_VERSION,
+    });
+  }
+
+  protected createError(
+    status: number,
+    graphCode: number | null,
+    description: string,
+    graphSubcode: number | null,
+  ): ThreadsGraphError {
+    return new ThreadsGraphError(status, graphCode, description, graphSubcode);
+  }
+
+  /** Buat satu container Threads (teks, gambar, video, atau karousel). */
+  async createThreadsContainer(input: {
+    threadsUserId: string;
+    mediaType: "TEXT" | "IMAGE" | "VIDEO" | "CAROUSEL";
+    text?: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    children?: string[];
+    isCarouselItem?: boolean;
+  }): Promise<{ containerId: string }> {
+    const payload: Record<string, string | boolean> = {
+      media_type: input.mediaType,
+    };
+    if (input.text && !input.isCarouselItem) payload.text = input.text;
+    if (input.imageUrl) payload.image_url = input.imageUrl;
+    if (input.videoUrl) payload.video_url = input.videoUrl;
+    if (input.children) payload.children = input.children.join(",");
+    if (input.isCarouselItem) payload.is_carousel_item = true;
+    const body = await this.postJson<{ id?: string }>(
+      `${encodeURIComponent(input.threadsUserId)}/threads`,
+      payload,
+    );
+    if (!body.id) {
+      throw new ThreadsGraphError(200, null, "missing_container_id");
+    }
+    return { containerId: body.id };
+  }
+
+  /** Baca status container Threads. */
+  async getThreadsContainerStatus(containerId: string): Promise<string> {
+    const body = await this.getJson<{ status?: string; error_message?: string }>(
+      `${encodeURIComponent(containerId)}?fields=status,error_message`,
+    );
+    return body.status ?? "UNKNOWN";
+  }
+
+  /** Terbitkan container Threads yang sudah `FINISHED`. */
+  async publishThreadsContainer(input: {
+    threadsUserId: string;
+    containerId: string;
+  }): Promise<{ providerPostId: string }> {
+    const body = await this.postJson<{ id?: string }>(
+      `${encodeURIComponent(input.threadsUserId)}/threads_publish`,
+      { creation_id: input.containerId },
+    );
+    if (!body.id) throw new ThreadsGraphError(200, null, "missing_post_id");
+    return { providerPostId: body.id };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Webhook: verifikasi tanda tangan + normalisasi payload (fungsi murni)
 // ---------------------------------------------------------------------------

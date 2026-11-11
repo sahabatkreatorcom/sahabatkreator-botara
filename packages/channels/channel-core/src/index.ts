@@ -20,7 +20,14 @@ export type ChannelProvider =
   | "instagram"
   | "messenger"
   | "telegram"
-  | "webchat";
+  | "webchat"
+  /**
+   * Khusus content schedule (Gelombang 1): Threads tidak
+   * mengimplementasikan ChannelAdapter inbox dan tidak boleh dipilih
+   * jalur pengiriman pesan mana pun. Nilai ini ada agar akun/sasaran
+   * linimasanya memakai identitas provider yang sama dengan kontrak.
+   */
+  | "threads";
 
 export interface ChannelAccountRef {
   id: string;
@@ -167,4 +174,9 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
   },
   telegram: { provider: "telegram", freeFormWindowHours: null, notes: "Bot API: tidak ada jendela pesan." },
   webchat: { provider: "webchat", freeFormWindowHours: null, notes: "Channel milik sendiri: sesi & consent diatur sendiri." },
+  threads: {
+    provider: "threads",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule; tidak ada jendela pesan atau pengiriman DM.",
+  },
 };

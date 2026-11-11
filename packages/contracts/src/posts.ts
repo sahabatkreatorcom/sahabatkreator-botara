@@ -178,6 +178,21 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
   },
+  threads: {
+    // Threads API (Gelombang 1): teks boleh berdiri sendiri (maks
+    // 500), gambar/video/karousel memakai container dua tahap. Sistem
+    // repo membatasi media bersama ke 10 walau karousel Threads bisa
+    // lebih banyak. Dokumen dan first comment tidak didukung model ini.
+    publishSupported: true,
+    mediaRequired: false,
+    maxCaption: 500,
+    maxMedia: 10,
+    supportsAlbum: true,
+    supportsVideo: true,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
     // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.

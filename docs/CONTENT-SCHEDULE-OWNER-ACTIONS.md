@@ -73,6 +73,21 @@ hanya bisa diajukan dari akun pemilik:
    container foto/Reels/karousel diverifikasi melawan fake Graph API
    (`verify:meta-post`) dengan URL CDN contoh.
 
+3. **Threads** — dibutuhkan: aplikasi Threads milik pemilik yang
+   terpisah dari aplikasi Facebook/Instagram, review/izin
+   `threads_content_publish`, akun Threads contoh, Threads user ID +
+   user access token hasil OAuth nyata, dan infrastruktur URL media
+   publik yang sama seperti Instagram untuk postingan bergambar/video.
+   Untuk apa: adapter membuat container di `graph.threads.net/v1.0`,
+   menunggu statusnya, lalu memanggil `threads_publish`; teks dapat
+   terbit tanpa media, sedangkan media tanpa URL publik gagal aman
+   dengan `threads_public_media_url_unavailable`. Sudah dimock:
+   provider `threads` ditambahkan end-to-end sebatas akun/sasaran
+   linimasa + capability + adapter (migrasi 0014), OAuth/connect
+   generik sengaja belum dibuka dan Threads didokumentasikan bukan
+   channel inbox; seluruh protokol container diverifikasi melawan
+   fake Threads API (`verify:threads-post`).
+
 ## Gelombang berikutnya
 
 _(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_

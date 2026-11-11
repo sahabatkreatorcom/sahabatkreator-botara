@@ -8,6 +8,7 @@ import {
   facebookPagePostPublisher,
   instagramPostPublisher,
 } from "./meta-post";
+import { threadsPostPublisher } from "./threads-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -45,6 +46,8 @@ export interface PostPublisherOptions {
   metaApiBase?: string | undefined;
   /** Versi Graph ter-pin dari config platform. */
   metaGraphApiVersion?: string | undefined;
+  /** Base URL Threads API (env THREADS_API_BASE; default graph.threads.net). */
+  threadsApiBase?: string | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
@@ -69,6 +72,32 @@ export interface PublishPostResult {
   reason?: string;
 }
 
+/**
+ * Resolusi URL media publik untuk API container (Instagram/Threads).
+ *
+ * Media repo TIDAK pernah diekspos apa adanya: object store privat dan
+ * endpoint API media memeriksa sesi + tenant. Fungsi ini hanya memakai
+ * resolver khusus (rantai uji / integrasi CDN bertanda tangan di luar
+ * repo) atau base URL publik yang secara eksplisit dikonfigurasi
+ * operator sebagai pemetaan `{base}/{r2Key}`. Tanpa keduanya ia
+ * mengembalikan null dan adapter gagal SEBELUM memanggil provider —
+ * bukan menebak URL internal yang pasti ditolak provider.
+ */
+export function resolvePostPublicMediaUrl(
+  opts: PostPublisherOptions,
+  media: { r2Key: string; mimeType: string | null; fileName: string | null },
+): string | null {
+  const custom = opts.resolvePublicMediaUrl?.(media);
+  if (custom) return custom;
+  if (!opts.publicMediaBaseUrl) return null;
+  const base = opts.publicMediaBaseUrl.replace(/\/+$/, "");
+  const path = media.r2Key
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${base}/${path}`;
+}
+
 export interface PostPublisherAdapter {
   /** Nilai provider pada percakapan sasaran (mis. `telegram`). */
   readonly provider: string;
@@ -84,6 +113,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   telegramPostPublisher,
   facebookPagePostPublisher,
   instagramPostPublisher,
+  threadsPostPublisher,
 ];
 
 export function getPostPublisher(

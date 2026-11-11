@@ -28,11 +28,11 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("provider-ngawur")).toBeUndefined();
   });
 
-  it("hanya provider beradapter yang publishSupported (telegram + meta page/ig sejauh ini)", () => {
+  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta sejauh ini)", () => {
     const supported = Object.entries(POST_PROVIDER_CAPABILITIES)
       .filter(([, capability]) => capability.publishSupported)
       .map(([provider]) => provider);
-    expect(supported).toEqual(["telegram", "instagram", "messenger"]);
+    expect(supported).toEqual(["telegram", "instagram", "messenger", "threads"]);
   });
 
   it("telegram mempertahankan batas Fase 23: caption 1024, album 10, dokumen tidak boleh di album", () => {

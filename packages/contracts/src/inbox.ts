@@ -12,6 +12,16 @@ export const ChannelProviderSchema = z.enum([
   "messenger",
   "telegram",
   "webchat",
+  /**
+   * Threads (Gelombang 1) — provider KHUSUS content schedule.
+   * Ia berada di enum bersama agar akun, sasaran post, dan capability
+   * memakai satu identitas provider, tetapi ia BUKAN channel inbox:
+   * tidak ada webhook pesan, percakapan dua arah, broadcast, atau
+   * jalur connect channel generik untuknya. Satu-satunya percakapan
+   * yang boleh lahir adalah sasaran sintetis `kind='channel'` untuk
+   * linimasa akun itu sendiri.
+   */
+  "threads",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 

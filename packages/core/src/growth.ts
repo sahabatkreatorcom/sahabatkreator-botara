@@ -155,6 +155,11 @@ export function buildGrowthTargetUrl(
       // widget membaca siteKey dari ?key= dan slug atribusi dari ?src=.
       return `/webchat-demo?key=${encodeURIComponent(account.externalId)}&src=${encodeURIComponent(link.slug)}`;
     }
+    case "threads": {
+      // Threads khusus content schedule, bukan channel percakapan:
+      // tidak ada tautan DM/atribusi growth untuk akun linimasa ini.
+      return null;
+    }
   }
 }
 
