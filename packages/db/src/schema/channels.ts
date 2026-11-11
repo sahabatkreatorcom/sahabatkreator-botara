@@ -95,6 +95,20 @@ export const channelTokenTypeEnum = pgEnum("channel_token_type", [
   // `th_refresh_token` di graph.threads.net TANPA app secret — beda
   // keluarga dari varian Meta di atas, jadi nilainya sendiri.
   "threads_user_token",
+  // Gelombang Semua OAuth (migrasi 0022) — satu varian per provider
+  // karena siklus hidupnya memang berbeda:
+  // - tiktok_user_token: access token Login Kit (±24 jam), refreshable
+  //   via grant `refresh_token` (refresh token ±365 hari tersimpan di
+  //   kolom refresh_token_encrypted).
+  "tiktok_user_token",
+  // - pinterest_user_token: access token API v5 (30 hari), refreshable
+  //   via grant `refresh_token` (penyegaran berkelanjutan; refresh
+  //   token tersimpan di kolom refresh_token_encrypted).
+  "pinterest_user_token",
+  // - linkedin_user_token: access token LinkedIn (±60 hari), TIDAK
+  //   refreshable (program standar tanpa refresh token) — lifecycle
+  //   hanya menandai expiring/expired agar pemilik menghubungkan ulang.
+  "linkedin_user_token",
 ]);
 
 /**
@@ -123,6 +137,14 @@ export const channelAccounts = pgTable(
     status: channelAccountStatusEnum("status").notNull().default("disconnected"),
     /** Token akses provider TERENKRIPSI (envelope encryption) — bukan token mentah. */
     accessTokenEncrypted: text("access_token_encrypted"),
+    /**
+     * Refresh token provider TERENKRIPSI (envelope yang sama, migrasi
+     * 0022) — hanya provider OAuth yang menerbitkannya untuk akun
+     * channel (TikTok Login Kit, Pinterest v5). Provider lain NULL:
+     * Meta/Threads me-refresh dari access token itu sendiri, dan token
+     * Google hidup di tabel koneksi Google-nya sendiri.
+     */
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
     /** Secret untuk verifikasi signature webhook akun ini (bila provider mendukung). */
     webhookSecret: varchar("webhook_secret", { length: 255 }),
     /** Username bot Telegram (tanpa '@', dari getMe — Fase 6A). Bukan rahasia; untuk tampilan. */

@@ -392,6 +392,43 @@ export {
   type ThreadsTokenLifecycleRef,
 } from "./threads";
 export {
+  createTikTokChannelAccount,
+  updateTikTokChannelAccountCredentials,
+  tiktokTokenLifecycleDecision,
+  listExpiringTikTokTokens,
+  type TikTokChannelTokenType,
+  type CreateTikTokChannelInput,
+  type UpdateTikTokCredentialsInput,
+  type TikTokTokenLifecycleRef,
+} from "./tiktok";
+export {
+  createLinkedInChannelAccount,
+  updateLinkedInChannelAccountCredentials,
+  linkedinTokenLifecycleDecision,
+  listExpiringLinkedInTokens,
+  LINKEDIN_TOKEN_EXPIRED_ERROR_CODE,
+  type LinkedInChannelTokenType,
+  type CreateLinkedInChannelInput,
+  type UpdateLinkedInCredentialsInput,
+  type LinkedInTokenLifecycleRef,
+} from "./linkedin";
+export {
+  createPinterestChannelAccount,
+  updatePinterestChannelAccountCredentials,
+  pinterestTokenLifecycleDecision,
+  listExpiringPinterestTokens,
+  type PinterestChannelTokenType,
+  type CreatePinterestChannelInput,
+  type UpdatePinterestCredentialsInput,
+  type PinterestTokenLifecycleRef,
+} from "./pinterest";
+export {
+  createBlueskyChannelAccount,
+  updateBlueskyChannelAccountCredentials,
+  type CreateBlueskyChannelInput,
+  type UpdateBlueskyCredentialsInput,
+} from "./bluesky";
+export {
   WHATSAPP_CONTACT_FALLBACK_NAME,
   whatsAppProviderMessageId,
   createWhatsAppChannelAccount,

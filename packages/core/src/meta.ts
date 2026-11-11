@@ -416,6 +416,14 @@ export async function applyMetaTokenLifecycleUpdate(
   update: {
     /** Envelope token hasil refresh — BUKAN token mentah. */
     encryptedAccessToken?: string;
+    /**
+     * Envelope refresh token hasil rotasi (gelombang Semua OAuth:
+     * TikTok/Pinterest menerbitkan refresh token BARU pada grant
+     * refresh; yang lama harus diganti atomik bersama access token).
+     * undefined = jangan ubah (Meta/Threads me-refresh dari access
+     * token itu sendiri dan tidak punya kolom ini terisi).
+     */
+    encryptedRefreshToken?: string;
     tokenExpiresAt?: Date | null;
     tokenRefreshedAt?: Date | null;
     tokenHealth: ChannelAccount["tokenHealth"];
@@ -428,6 +436,9 @@ export async function applyMetaTokenLifecycleUpdate(
     };
     if (update.encryptedAccessToken !== undefined) {
       patch.accessTokenEncrypted = update.encryptedAccessToken;
+    }
+    if (update.encryptedRefreshToken !== undefined) {
+      patch.refreshTokenEncrypted = update.encryptedRefreshToken;
     }
     if (update.tokenExpiresAt !== undefined) {
       patch.tokenExpiresAt = update.tokenExpiresAt;
