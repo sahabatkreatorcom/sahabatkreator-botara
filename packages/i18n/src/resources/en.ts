@@ -1412,6 +1412,7 @@ export const en = {
     title: "Content schedule",
     subtitle:
       "Plan posts to your Telegram channel and let the publish time do the work.",
+    timezoneNote: "All times on this page use the workspace timezone: {timezone}.",
     newPost: "New post",
     target: "Channel",
     targetEmpty:

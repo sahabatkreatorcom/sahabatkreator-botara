@@ -4,14 +4,82 @@ function intlLocale(locale: Locale): string {
   return locale === "id" ? "id-ID" : "en-US";
 }
 
-/** Format tanggal+waktu lengkap lewat Intl (RANCANGAN §11.1 — tanpa format manual). */
-export function formatDateTime(iso: string, locale: Locale): string {
+/**
+ * Format tanggal+waktu lengkap lewat Intl (RANCANGAN §11.1 — tanpa
+ * format manual). `timeZone` opsional: tanpa argumen, perilaku lama
+ * (zona waktu browser). Halaman yang menjadwalkan sesuatu untuk orang
+ * lain — content schedule — WAJIB meneruskan zona waktu tenant, karena
+ * "jam 9 pagi" pada jadwal adalah jam 9 pagi di workspace, bukan di
+ * peramban siapa pun yang kebetulan membuka halamannya.
+ */
+export function formatDateTime(
+  iso: string,
+  locale: Locale,
+  timeZone?: string,
+): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return new Intl.DateTimeFormat(intlLocale(locale), {
     dateStyle: "medium",
     timeStyle: "short",
+    ...(timeZone ? { timeZone } : {}),
   }).format(d);
+}
+
+/** Offset zona waktu (wall clock − UTC) pada satu instant, dalam ms. */
+function zoneOffsetMs(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(instant);
+  const value = (type: string) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  const wallAsUtc = Date.UTC(
+    value("year"),
+    value("month") - 1,
+    value("day"),
+    value("hour"),
+    value("minute"),
+    value("second"),
+  );
+  return wallAsUtc - Math.floor(instant.getTime() / 1000) * 1000;
+}
+
+/**
+ * Tafsirkan nilai `datetime-local` ("2026-11-20T09:00") sebagai jam
+ * dinding pada `timeZone`, kembalikan ISO UTC untuk server.
+ *
+ * Input datetime-local tidak membawa zona; browser menafsirkannya
+ * sebagai zona BROWSER. Untuk jadwal workspace itu salah begitu
+ * admin membuka halaman dari zona lain — jadwal "jam 9" bisa tayang
+ * jam 16. Di sini komponennya dibaca apa adanya, lalu digeser sebesar
+ * offset zona tenant pada instant tebakan. Satu iterasi cukup untuk
+ * semua zona nyata; ketidaktepatan hanya mungkin pada menit-menit di
+ * sekitar pergantian DST, yang tidak dikenal zona-zona Indonesia.
+ */
+export function zonedLocalToIso(local: string, timeZone: string): string | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(
+    local.trim(),
+  );
+  if (!match) return null;
+  const [, year, month, day, hour, minute, second] = match;
+  const guessUtc = Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second ?? 0),
+  );
+  if (Number.isNaN(guessUtc)) return null;
+  const offset = zoneOffsetMs(new Date(guessUtc), timeZone);
+  return new Date(guessUtc - offset).toISOString();
 }
 
 /** Tanggal saja (tanpa jam) lewat Intl — mis. label "Terhubung 28 Okt 2026" di kartu channel. */

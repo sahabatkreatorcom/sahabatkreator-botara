@@ -1411,6 +1411,7 @@ export const id: Resources = {
     title: "Jadwal konten",
     subtitle:
       "Rencanakan postingan ke channel Telegram, lalu biarkan jam tayangnya bekerja.",
+    timezoneNote: "Semua jam di halaman ini memakai zona waktu workspace: {timezone}.",
     newPost: "Postingan baru",
     target: "Channel",
     targetEmpty:

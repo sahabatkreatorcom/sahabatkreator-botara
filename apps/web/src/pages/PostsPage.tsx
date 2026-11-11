@@ -8,7 +8,7 @@ import type {
 
 import { api } from "../api/client";
 import { translateApiError } from "../api/errorText";
-import { formatDateTime } from "../utils/format";
+import { formatDateTime, zonedLocalToIso } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
 /**
@@ -27,6 +27,12 @@ import { useWorkspace } from "../workspace/WorkspaceProvider";
  *   provider saat jam tayang adalah kegagalan yang paling merugikan.
  * - Draf bisa dijadwalkan langsung dari barisnya (input jam di baris),
  *   tanpa membuka formulir lagi.
+ * - SEMUA jam di halaman ini adalah jam zona waktu TENANT
+ *   (`tenants.timezone`, default Asia/Jakarta), bukan jam browser:
+ *   tampilan diformat dengan zona itu dan nilai `datetime-local`
+ *   ditafsirkan sebagai jam dinding zona itu. Jadwal adalah janji
+ *   workspace; ia tidak boleh bergeser hanya karena admin membukanya
+ *   dari kota lain.
  */
 
 interface PostsPageProps {
@@ -52,17 +58,18 @@ const STATUS_KEY: Record<PostStatus, Parameters<PostsPageProps["t"]>[0]> = {
   cancelled: "posts.statusCancelled",
 };
 
-/** `datetime-local` bekerja di waktu lokal browser; server menerima ISO UTC. */
-function toIso(local: string): string | null {
-  if (!local) return null;
-  const date = new Date(local);
-  return Number.isNaN(date.getTime()) ? null : date.toISOString();
-}
-
 export function PostsPage({ t, locale }: PostsPageProps) {
   const { active } = useWorkspace();
   const tenantId = active?.id ?? null;
   const canManage = active?.role === "owner" || active?.role === "admin";
+  // Zona waktu tenant dari settings workspace (kolom sudah ada sejak
+  // skema tenant dibuat); fallback Asia/Jakarta untuk workspace lama
+  // yang nilainya kosong — sama dengan default kolomnya di basis data.
+  const timezone = active?.timezone ? active.timezone : "Asia/Jakarta";
+
+  /** `datetime-local` → ISO UTC, ditafsirkan sebagai jam dinding zona tenant. */
+  const toIso = (local: string): string | null =>
+    local ? zonedLocalToIso(local, timezone) : null;
 
   const [posts, setPosts] = useState<PostResponse[]>([]);
   const [targets, setTargets] = useState<PostTarget[]>([]);
@@ -179,6 +186,9 @@ export function PostsPage({ t, locale }: PostsPageProps) {
       <header>
         <h1 className="text-xl font-semibold text-neutral-900">{t("posts.title")}</h1>
         <p className="mt-1 text-sm text-neutral-600">{t("posts.subtitle")}</p>
+        <p className="mt-1 text-xs text-neutral-500">
+          {t("posts.timezoneNote", { timezone })}
+        </p>
       </header>
 
       {error && (
@@ -331,9 +341,9 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                       )}
                       <p className="mt-2 text-xs text-neutral-500">
                         {post.status === "published" && post.publishedAt
-                          ? formatDateTime(post.publishedAt, locale)
+                          ? formatDateTime(post.publishedAt, locale, timezone)
                           : post.scheduledAt
-                            ? formatDateTime(post.scheduledAt, locale)
+                            ? formatDateTime(post.scheduledAt, locale, timezone)
                             : "—"}
                         {post.errorCode ? ` · ${post.errorCode}` : ""}
                       </p>
