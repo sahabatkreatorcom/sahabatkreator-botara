@@ -66,6 +66,17 @@ export const PROVIDER_META: Record<string, ProviderMeta> = {
       </>
     ),
   },
+  threads: {
+    // Threads bermerek monokrom (hitam-putih); abu netral dipilih agar
+    // glyph terbaca di tema terang maupun gelap.
+    color: "#6B7280",
+    glyph: (
+      <>
+        <circle cx="12" cy="12" r="4" />
+        <path d="M16 8.5v5.2a2.6 2.6 0 0 0 5.2 0V12a9.2 9.2 0 1 0-3.4 7.1" />
+      </>
+    ),
+  },
   messenger: {
     color: "#0084FF",
     // Fase 7A (permintaan user): path logo Messenger autentik (gelembung

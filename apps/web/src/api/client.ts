@@ -110,6 +110,8 @@ import type {
   MetaOAuthSessionResponse,
   MetaOAuthStartResponse,
   MetaWebhookInfoResponse,
+  ThreadsOAuthInfoResponse,
+  ThreadsOAuthStartResponse,
   PaymentLinkListResponse,
   PaymentLinkResponse,
   OrderListResponse,
@@ -603,6 +605,30 @@ export const api = {
       return request<MetaOAuthCompleteResponse>(
         `/api/tenants/${tenantId}/meta-oauth/sessions/${sessionId}/complete`,
         { method: "POST", body: JSON.stringify({ assetId }) },
+      );
+    },
+    /**
+     * GET /api/tenants/:tenantId/channels/threads-oauth-info —
+     * ketersediaan connect Threads (integrasi Threads). Owner/admin
+     * saja; membawa Redirect URI resmi + status konfigurasi kredensial
+     * aplikasi Threads (App ID publik boleh tampil; secret tidak).
+     */
+    threadsOAuthInfo(tenantId: string): Promise<ThreadsOAuthInfoResponse> {
+      return request<ThreadsOAuthInfoResponse>(
+        `/api/tenants/${tenantId}/channels/threads-oauth-info`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/threads-oauth/start — buat state
+     * sekali pakai + URL dialog authorize Threads; pemanggil
+     * mengarahkan browser ke sana (redirect penuh). Callback langsung
+     * menghubungkan akun (tanpa sesi pemilih seperti Meta).
+     */
+    threadsOAuthStart(tenantId: string): Promise<ThreadsOAuthStartResponse> {
+      return request<ThreadsOAuthStartResponse>(
+        `/api/tenants/${tenantId}/threads-oauth/start`,
+        { method: "POST", body: JSON.stringify({}) },
       );
     },
     /** DELETE /api/tenants/:tenantId/channels/:channelId — putuskan koneksi (hotfix Telegram); riwayat percakapan tidak dihapus. */

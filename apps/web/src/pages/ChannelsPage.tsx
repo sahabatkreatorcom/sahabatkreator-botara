@@ -20,6 +20,7 @@ import type {
   MetaOAuthProvider,
   MetaOAuthSessionResponse,
   MetaWebhookInfoResponse,
+  ThreadsOAuthInfoResponse,
 } from "@sahabat-kreator/contracts";
 import { api, ApiClientError } from "../api/client";
 import { translateApiError } from "../api/errorText";
@@ -41,6 +42,7 @@ import {
   MetaOAuthStepBlock,
   MetaWebhookInfoBlock,
   StatusPill,
+  ThreadsOAuthStepBlock,
   type ConnectProvider,
 } from "./channels/blocks";
 import {
@@ -151,6 +153,16 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
   );
   const [connectWarning, setConnectWarning] = useState<string | null>(null);
   const oauthParamsHandled = useRef(false);
+  // OAuth Threads (integrasi Threads): ketersediaan connect, status
+  // start, dan banner sukses kepulangan callback (callback langsung
+  // menghubungkan — tidak ada sesi pemilih seperti Meta).
+  const [threadsOAuthInfo, setThreadsOAuthInfo] =
+    useState<ThreadsOAuthInfoResponse | null>(null);
+  const [threadsOAuthStarting, setThreadsOAuthStarting] = useState(false);
+  const [threadsOAuthStartError, setThreadsOAuthStartError] = useState<
+    string | null
+  >(null);
+  const [threadsConnected, setThreadsConnected] = useState(false);
   const [copiedWebhookField, setCopiedWebhookField] = useState<string | null>(
     null,
   );
@@ -244,6 +256,15 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       .catch(() => {
         if (!cancelled) setOauthInfo(null);
       });
+    // Ketersediaan connect Threads — gerbang & perlakuan yang sama.
+    api.channels
+      .threadsOAuthInfo(tenantId)
+      .then((info) => {
+        if (!cancelled) setThreadsOAuthInfo(info);
+      })
+      .catch(() => {
+        if (!cancelled) setThreadsOAuthInfo(null);
+      });
     return () => {
       cancelled = true;
     };
@@ -253,20 +274,28 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
   useEffect(() => {
     setManualOpen(false);
     setOauthStartError(null);
+    setThreadsOAuthStartError(null);
   }, [connectStep]);
 
   // Kepulangan dari dialog Meta (Fase 7D): callback API me-redirect ke
   // /channels?meta_oauth=<sesi> atau ?meta_oauth_error=<kode>. Baca
   // SEKALI, bersihkan query dari URL, lalu tampilkan pemilih/banner.
+  // Kepulangan Threads (integrasi Threads) memakai penanda sendiri:
+  // ?threads_oauth=connected (callback langsung menghubungkan) atau
+  // ?threads_oauth_error=<kode> — ditangani di efek yang sama.
   useEffect(() => {
     if (oauthParamsHandled.current) return;
     oauthParamsHandled.current = true;
     const params = new URLSearchParams(window.location.search);
     const sessionId = params.get("meta_oauth");
     const errorCode = params.get("meta_oauth_error");
-    if (!sessionId && !errorCode) return;
+    const threadsResult = params.get("threads_oauth");
+    const threadsError = params.get("threads_oauth_error");
+    if (!sessionId && !errorCode && !threadsResult && !threadsError) return;
     params.delete("meta_oauth");
     params.delete("meta_oauth_error");
+    params.delete("threads_oauth");
+    params.delete("threads_oauth_error");
     const rest = params.toString();
     window.history.replaceState(
       null,
@@ -282,6 +311,15 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       setOauthSessionError(null);
       setOauthSession(null);
       setOauthSessionId(sessionId);
+    }
+    if (threadsError) {
+      setOauthBannerError(
+        translateApiError(t, new ApiClientError(0, threadsError, "")),
+      );
+    }
+    if (threadsResult === "connected") {
+      setThreadsConnected(true);
+      void load();
     }
     // Sengaja hanya sekali saat mount; `t` dari render pertama cukup.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -508,6 +546,24 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     }
   };
 
+  /** Mulai connect Threads: minta URL dialog lalu arahkan browser. */
+  const handleThreadsOAuthStart = async () => {
+    if (!tenantId || threadsOAuthStarting) return;
+    setThreadsOAuthStarting(true);
+    setThreadsOAuthStartError(null);
+    try {
+      const started = await api.channels.threadsOAuthStart(tenantId);
+      window.location.href = started.dialogUrl;
+    } catch (err) {
+      setThreadsOAuthStartError(
+        err instanceof ApiClientError
+          ? translateApiError(t, err)
+          : t("errors.generic"),
+      );
+      setThreadsOAuthStarting(false);
+    }
+  };
+
   /** Selesaikan OAuth: hubungkan aset terpilih dari sesi (Fase 7D). */
   const handleOAuthComplete = async (asset: MetaOAuthAsset) => {
     // Hotfix R1: aset nonaktif (Page tanpa token yang dapat dipakai)
@@ -699,6 +755,21 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
           <button
             type="button"
             onClick={() => setOauthBannerError(null)}
+            className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-muted hover:text-ink"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+      ) : null}
+
+      {threadsConnected ? (
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-line bg-elevated px-3 py-2">
+          <p className="text-sm text-ink">
+            {t("channels.threadsConnectedNotice")}
+          </p>
+          <button
+            type="button"
+            onClick={() => setThreadsConnected(false)}
             className="shrink-0 rounded-md px-2 py-1 text-sm font-medium text-muted hover:text-ink"
           >
             {t("common.close")}
@@ -1405,6 +1476,16 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                   </form>
                     ) : null}
                   </>
+                ) : null}
+
+                {connectStep === "threads" ? (
+                  <ThreadsOAuthStepBlock
+                    t={t}
+                    info={threadsOAuthInfo}
+                    starting={threadsOAuthStarting}
+                    startError={threadsOAuthStartError}
+                    onStart={() => void handleThreadsOAuthStart()}
+                  />
                 ) : null}
 
                 {connectStep === "whatsapp" ? (

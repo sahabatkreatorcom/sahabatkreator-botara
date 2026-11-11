@@ -83,6 +83,16 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.META_OAUTH_EXCHANGE_FAILED");
     case "META_OAUTH_CANCELLED":
       return t("errors.META_OAUTH_CANCELLED");
+    case "THREADS_OAUTH_NOT_CONFIGURED":
+      return t("errors.THREADS_OAUTH_NOT_CONFIGURED");
+    case "THREADS_OAUTH_STATE_INVALID":
+      return t("errors.THREADS_OAUTH_STATE_INVALID");
+    case "THREADS_OAUTH_EXCHANGE_FAILED":
+      return t("errors.THREADS_OAUTH_EXCHANGE_FAILED");
+    case "THREADS_OAUTH_CANCELLED":
+      return t("errors.THREADS_OAUTH_CANCELLED");
+    case "THREADS_ACCOUNT_ALREADY_CONNECTED":
+      return t("errors.THREADS_ACCOUNT_ALREADY_CONNECTED");
     case "CHANNEL_DELETE_CONFIRMATION_MISMATCH":
       return t("errors.CHANNEL_DELETE_CONFIRMATION_MISMATCH");
     case "CHANNEL_ALREADY_TRASHED":

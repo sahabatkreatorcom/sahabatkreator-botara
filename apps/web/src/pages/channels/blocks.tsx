@@ -9,6 +9,7 @@ import type {
   ChannelAccountResponse,
   MetaOAuthProvider,
   MetaWebhookInfoResponse,
+  ThreadsOAuthInfoResponse,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { FieldError } from "../../components/AuthLayout";
@@ -68,6 +69,67 @@ export function MetaOAuthStepBlock({
       {!available ? (
         <p className="mt-2 text-xs text-muted">
           {t("channels.oauthNotConfigured")}
+        </p>
+      ) : null}
+      {startError ? (
+        <div className="mt-2">
+          <FieldError message={startError} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Blok OAuth Threads di langkah form modal (integrasi Threads):
+ * penjelasan singkat + Redirect URI resmi yang harus didaftarkan di
+ * aplikasi Threads + tombol primer "Hubungkan dengan Threads" bila
+ * kredensial aplikasi Threads terisi di Panel Admin (selain itu
+ * tombol nonaktif + petunjuk). Threads TIDAK punya cara manual —
+ * langkah ini murni OAuth, dan callback-nya langsung menghubungkan
+ * akun (tanpa pemilih aset seperti Meta).
+ */
+export function ThreadsOAuthStepBlock({
+  t,
+  info,
+  starting,
+  startError,
+  onStart,
+}: {
+  t: Translate;
+  info: ThreadsOAuthInfoResponse | null;
+  starting: boolean;
+  startError: string | null;
+  onStart: () => void;
+}) {
+  const available = info?.available ?? false;
+  return (
+    <div className="mt-4">
+      <p className="text-sm text-muted">{t("channels.threadsConnectBody")}</p>
+      {info ? (
+        <div className="mt-3 rounded-lg border border-line bg-elevated/40 p-3">
+          <div className="text-xs text-muted">
+            {t("channels.threadsRedirectUriLabel")}
+          </div>
+          <div className="mt-0.5 break-all font-mono text-xs text-ink">
+            {info.oauthRedirectUri}
+          </div>
+        </div>
+      ) : null}
+      <button
+        id="threads-connect-button"
+        type="button"
+        disabled={!available || starting}
+        onClick={onStart}
+        className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-black px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+      >
+        {starting
+          ? t("channels.threadsStarting")
+          : t("channels.threadsContinue")}
+      </button>
+      {!available ? (
+        <p className="mt-2 text-xs text-muted">
+          {t("channels.threadsNotConfigured")}
         </p>
       ) : null}
       {startError ? (
@@ -214,6 +276,7 @@ export const CONNECT_PROVIDERS = [
   { provider: "messenger", descKey: "channels.pickMessengerDesc" },
   { provider: "instagram", descKey: "channels.pickInstagramDesc" },
   { provider: "whatsapp", descKey: "channels.pickWhatsappDesc" },
+  { provider: "threads", descKey: "channels.pickThreadsDesc" },
 ] as const;
 
 export type ConnectProvider = (typeof CONNECT_PROVIDERS)[number]["provider"];
@@ -228,6 +291,7 @@ export const CONNECT_FORM_TITLES: Record<ConnectProvider, TranslationKey> = {
   messenger: "channels.messengerTitle",
   instagram: "channels.instagramTitle",
   whatsapp: "channels.whatsappTitle",
+  threads: "channels.threadsTitle",
 };
 
 /** Field pertama yang difokuskan saat langkah form modal dibuka. */
@@ -237,6 +301,8 @@ export const CONNECT_FORM_FOCUS_IDS: Record<ConnectProvider, string> = {
   messenger: "messenger-page-id",
   instagram: "instagram-ig-id",
   whatsapp: "whatsapp-phone-id",
+  // Threads tanpa form manual: fokus ke tombol connect OAuth-nya.
+  threads: "threads-connect-button",
 };
 
 /**
