@@ -186,12 +186,12 @@ async function loadMedia(
  * Berbeda dari Telegram — yang sasaran channel-nya baru diketahui saat
  * bot ditambahkan ke sebuah channel oleh admin — Page, akun IG
  * Business, akun Threads, akun Bluesky, channel YouTube, profil
- * LinkedIn, akun Pinterest, dan lokasi Google Business sudah
- * membawa alamat terbitnya sejak connect: `external_id`
+ * LinkedIn, akun Pinterest, lokasi Google Business, dan akun TikTok
+ * sudah membawa alamat terbitnya sejak connect: `external_id`
  * akun adalah Page ID / IG user ID / Threads user ID / DID Bluesky /
  * channel ID YouTube / member ID LinkedIn / Pinterest user ID / nama
- * resource lokasi Google Business. Karena itu tidak ada tabel
- * sasaran baru: sasaran dimaterialisasi sebagai percakapan
+ * resource lokasi Google Business / open_id TikTok. Karena itu tidak
+ * ada tabel sasaran baru: sasaran dimaterialisasi sebagai percakapan
  * `kind='channel'` dengan `provider_chat_id = external_id`, persis
  * bentuk yang sudah dipakai state machine post. Untuk Threads,
  * Bluesky, YouTube, dan LinkedIn ini murni sasaran publikasi —
@@ -212,6 +212,7 @@ const TIMELINE_ACCOUNT_PROVIDERS = [
   "linkedin",
   "pinterest",
   "google_business",
+  "tiktok",
 ] as const;
 
 /**

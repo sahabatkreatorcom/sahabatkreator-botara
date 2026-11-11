@@ -1,0 +1,28 @@
+-- 0020_tiktok_provider.sql
+--
+-- Provider TikTok untuk content schedule (Gelombang 4 — gelombang
+-- terakhir roadmap).
+--
+-- TikTok ditambahkan ke enum `channel_provider` agar akun,
+-- identitasnya, dan sasaran post memakai model `channel_accounts` /
+-- percakapan `kind='channel'` yang sama seperti provider content
+-- schedule sebelumnya. Ini BUKAN penambahan channel inbox: tidak
+-- ada tabel, webhook, atau jalur pesan baru. Nilai enum saja sudah
+-- cukup karena baris akunnya membawa identitas kreator + kredensial
+-- penerbitan: external_id = open_id TikTok (sekaligus alamat kirim
+-- `provider_chat_id` sasaran sintetis), public_handle = username
+-- TikTok, dan access token OAuth scope `video.publish` tersimpan
+-- terenkripsi pada akun channel — pola kredensial yang sama dengan
+-- LinkedIn/Pinterest. (Access token TikTok berumur ±24 jam dan repo
+-- belum punya kolom refresh token generik di luar lifecycle token
+-- Meta; penyegaran otomatis adalah pengembangan lanjutan — token
+-- yang kedaluwarsa dipetakan adapter ke `tiktok_unauthorized` agar
+-- operator menghubungkan ulang akun.)
+--
+-- Catatan gerbang: sebelum aplikasi pemilik lolos audit Content
+-- Posting API TikTok, API hanya mengizinkan privasi `SELF_ONLY`;
+-- adapter membawa mode privasi terkonfigurasi dengan bawaan
+-- `SELF_ONLY`. Migrasi ini hanya menyiapkan identitas; audit itu
+-- dicatat di OWNER-ACTIONS.
+
+ALTER TYPE "public"."channel_provider" ADD VALUE IF NOT EXISTS 'tiktok';

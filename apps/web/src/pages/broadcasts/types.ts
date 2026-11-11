@@ -45,6 +45,9 @@ export const PROVIDER_NAMES: Record<ChannelProvider, string> = {
   // Nama tampil saja: Google Business juga khusus content schedule,
   // bukan channel broadcast/inbox.
   google_business: "Google Business",
+  // Nama tampil saja: TikTok juga khusus content schedule, bukan
+  // channel broadcast/inbox.
+  tiktok: "TikTok",
 };
 
 export const SUPPORTED_PROVIDERS: ReadonlySet<ChannelProvider> = new Set([

@@ -331,6 +331,41 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
   },
+  tiktok: {
+    // TikTok Content Posting API (Gelombang 4): direct post HANYA
+    // video — satu post = tepat satu video yang diunggah sebagai
+    // biner FILE_UPLOAD dari object store privat (init → unggah per
+    // potongan → polling status). Judul postingan TikTok ADALAH
+    // caption itu sendiri (`post_info.title`, maks 2200 termasuk
+    // tagar/mention — TikTok menghitung karakter Unicode; panjang
+    // string JS berada di sisi aman untuk teks non-astral dan
+    // adapter memotong sebagai pertahanan terakhir), jadi kolom
+    // `title` post TIDAK dipetakan ke platform (maxTitle null): ia
+    // tetap label internal kalender. Mode FOTO tidak dinyalakan:
+    // foto Content Posting API hanya menerima `PULL_FROM_URL` dari
+    // URL pada domain yang diverifikasi kepemilikannya di portal
+    // developer TikTok — bertabrakan dengan model media privat repo
+    // (tidak ada jalur unggah biner foto seperti video); dinyalakan
+    // kelak bila infrastruktur URL terverifikasi itu ada, alasan
+    // yang sama seperti video Bluesky/Pinterest ditunda. GERBANG
+    // AUDIT: sebelum aplikasi pemilik lolos audit TikTok, API hanya
+    // mengizinkan privasi `SELF_ONLY`; adapter membawa mode privasi
+    // terkonfigurasi dengan bawaan `SELF_ONLY` (env platform,
+    // divalidasi terhadap `privacy_level_options` akun sebelum
+    // unggah) dan postingan dari mode itu tercatat sebagai terbit
+    // privat — tidak pernah diklaim publik.
+    publishSupported: true,
+    mediaRequired: true,
+    maxCaption: 2200,
+    maxTitle: null,
+    maxMedia: 1,
+    supportsAlbum: false,
+    supportsPhotos: false,
+    supportsVideo: true,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
     // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.

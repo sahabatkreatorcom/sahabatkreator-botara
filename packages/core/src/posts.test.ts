@@ -49,6 +49,7 @@ const LINKEDIN_ACCOUNT = "8a060000-0000-4000-8000-000000000023";
 const PINTEREST_ACCOUNT = "8a070000-0000-4000-8000-000000000023";
 const GBP_ACCOUNT = "8a080000-0000-4000-8000-000000000023";
 const GBP_LOCATION_NAME = "accounts/123456/locations/789012";
+const TIKTOK_ACCOUNT = "8a090000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
@@ -122,6 +123,12 @@ beforeAll(async () => {
        (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
      VALUES ($1, $2, 'google_business', $3, 'Toko Kopi Promo', 'connected', NULL, NULL)`,
     [GBP_ACCOUNT, TEST_TENANT_ID, GBP_LOCATION_NAME],
+  );
+  await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'tiktok', 'open_id_tiktok_123', 'TikTok Promo', 'connected', 'v1:tiktok-token', 'tiktokpromo')`,
+    [TIKTOK_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
@@ -585,6 +592,77 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
         tenantId: TEST_TENANT_ID,
         userId: USER_ID,
         postId: twoPhotos.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_TOO_MANY" });
+  });
+
+  it("akun TikTok menjadi sasaran publikasi (open_id); wajib tepat satu video, foto ditolak", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const tiktok = targets.find((target) => target.provider === "tiktok");
+    expect(tiktok?.channelAccountId).toBe(TIKTOK_ACCOUNT);
+    expect(tiktok?.providerChatId).toBe("open_id_tiktok_123");
+
+    const video = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Video promo minggu ini",
+      caption: "Caption adalah judul postingan TikTok #promo",
+      mediaIds: [MEDIA_VIDEO],
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: video.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.target.provider).toBe("tiktok");
+
+    const textOnly = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Tanpa video",
+      caption: "Direct post TikTok wajib video",
+      mediaIds: [],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: textOnly.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_REQUIRED" });
+
+    const photo = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Foto TikTok",
+      caption: "Mode foto belum dinyalakan gelombang ini",
+      mediaIds: [MEDIA_PHOTO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: photo.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+
+    const twoMedia = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok!.conversationId,
+      title: "Dua media TikTok",
+      caption: "Satu direct post hanya membawa satu video",
+      mediaIds: [MEDIA_VIDEO, MEDIA_PHOTO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: twoMedia.id,
       }),
     ).rejects.toMatchObject({ code: "POST_MEDIA_TOO_MANY" });
   });

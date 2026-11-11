@@ -86,6 +86,22 @@ export const ChannelProviderSchema = z.enum([
    * identitas lokasi, disinkronkan dari koneksi Google oleh core.
    */
   "google_business",
+  /**
+   * TikTok (Gelombang 4) — provider KHUSUS content schedule, sama
+   * seperti provider Gelombang 1–3 lain: identitasnya memakai enum
+   * bersama agar akun (`external_id` = open_id TikTok), sasaran post,
+   * dan capability berbagi satu sumber, tetapi ia BUKAN channel
+   * inbox: tidak ada webhook pesan, percakapan dua arah, broadcast,
+   * atau jalur connect channel generik untuknya. Satu-satunya
+   * publikasi adalah direct post video Content Posting API.
+   * GERBANG AUDIT: aplikasi yang belum lolos audit TikTok hanya
+   * boleh menerbitkan dengan privasi `SELF_ONLY` — adapter membawa
+   * mode privasi terkonfigurasi (bawaan `SELF_ONLY`) dan tidak
+   * pernah mengklaim postingan publik dari mode itu. Access token
+   * OAuth (scope `video.publish`) tersimpan terenkripsi pada akun
+   * channel, mengikuti pola kredensial channel yang ada.
+   */
+  "tiktok",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 

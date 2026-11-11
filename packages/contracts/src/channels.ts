@@ -120,6 +120,14 @@ export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
  * disinkronkan dari koneksi Google itu oleh core
  * (`syncGoogleBusinessLocationAccounts`). Endpoint generik ini
  * menjawabnya `CHANNEL_NOT_AVAILABLE_YET` yang sama.
+ *
+ * Dan untuk `provider: "tiktok"` (Gelombang 4): identitas akun
+ * linimasa (open_id TikTok + access token OAuth scope
+ * `video.publish`) valid pada skema akun/sasaran, tetapi
+ * provisioning-nya adalah OAuth aplikasi TikTok milik pemilik yang
+ * juga harus lolos audit Content Posting API untuk privasi selain
+ * `SELF_ONLY` — belum dibuka lewat endpoint generik ini dan dijawab
+ * `CHANNEL_NOT_AVAILABLE_YET` yang sama.
  */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,

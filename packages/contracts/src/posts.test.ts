@@ -28,7 +28,7 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("provider-ngawur")).toBeUndefined();
   });
 
-  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube + linkedin + pinterest + google business sejauh ini)", () => {
+  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube + linkedin + pinterest + google business + tiktok)", () => {
     const supported = Object.entries(POST_PROVIDER_CAPABILITIES)
       .filter(([, capability]) => capability.publishSupported)
       .map(([provider]) => provider);
@@ -42,7 +42,21 @@ describe("capability post per provider", () => {
       "linkedin",
       "pinterest",
       "google_business",
+      "tiktok",
     ]);
+  });
+
+  it("tiktok: direct post wajib tepat satu video, caption (judul postingan) maks 2200, foto tidak dinyalakan", () => {
+    const tiktok = getPostProviderCapability("tiktok")!;
+    expect(tiktok.publishSupported).toBe(true);
+    expect(tiktok.mediaRequired).toBe(true);
+    expect(tiktok.maxCaption).toBe(2200);
+    expect(tiktok.maxTitle).toBeNull();
+    expect(tiktok.maxMedia).toBe(1);
+    expect(tiktok.supportsPhotos).toBe(false);
+    expect(tiktok.supportsVideo).toBe(true);
+    expect(tiktok.supportsAlbum).toBe(false);
+    expect(tiktok.supportsDocuments).toBe(false);
   });
 
   it("google_business: postingan lokal per lokasi — teks 1500, satu foto, tanpa video/album", () => {

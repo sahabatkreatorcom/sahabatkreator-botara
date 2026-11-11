@@ -59,6 +59,12 @@ export const channelProviderEnum = pgEnum("channel_provider", [
   // (external_id = nama resource accounts/{}/locations{}); kredensial
   // penerbitan hidup di koneksi Google tenant (pola YouTube).
   "google_business",
+  // Gelombang 4: akun TikTok khusus content schedule (bukan inbox).
+  // Nilai enum ditambahkan oleh migrasi 0020; urutan lama tidak
+  // diubah. Baris akunnya membawa identitas kreator (external_id =
+  // open_id TikTok) + access token OAuth (video.publish) terenkripsi;
+  // sebelum audit TikTok lolos, publikasi hanya berprivasi SELF_ONLY.
+  "tiktok",
 ]);
 
 export const channelAccountStatusEnum = pgEnum("channel_account_status", [

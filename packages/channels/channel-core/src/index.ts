@@ -64,7 +64,16 @@ export type ChannelProvider =
    * di koneksi Google tenant dan baris akun channel ini hanya
    * membawa identitas lokasi (nama resource lokasi).
    */
-  | "google_business";
+  | "google_business"
+  /**
+   * Khusus content schedule (Gelombang 4): TikTok (Content Posting
+   * API, direct post video) sama seperti provider content schedule
+   * lain — tidak mengimplementasikan ChannelAdapter inbox; access
+   * token OAuth-nya (scope `video.publish`) tersimpan terenkripsi di
+   * baris akun channel ini. Sebelum audit TikTok lolos, publikasi
+   * hanya boleh berprivasi `SELF_ONLY` (mode adapter terkonfigurasi).
+   */
+  | "tiktok";
 
 export interface ChannelAccountRef {
   id: string;
@@ -240,5 +249,10 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
     provider: "google_business",
     freeFormWindowHours: null,
     notes: "Bukan channel inbox: khusus publikasi content schedule (postingan lokal Business Profile API per lokasi); tidak ada jendela pesan atau pengiriman DM.",
+  },
+  tiktok: {
+    provider: "tiktok",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule (direct post video Content Posting API); tidak ada jendela pesan atau pengiriman DM.",
   },
 };
