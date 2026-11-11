@@ -45,6 +45,7 @@ import {
   replaceAppointmentAvailability,
   resolveGoogleOAuthClient,
   saveGoogleConnection,
+  syncYouTubeChannelAccount,
   setGoogleConnectionCalendar,
   updateAppointmentService,
   updateAppointmentSettings,
@@ -765,6 +766,17 @@ export function createAppointmentsRoutes(
       });
     } catch {
       return fail("GOOGLE_EXCHANGE_FAILED");
+    }
+    // Gelombang 2: consent yang sama kini juga membawa scope YouTube —
+    // petakan koneksi ini ke akun channel youtube tenant agar kanal
+    // muncul sebagai sasaran content schedule. FAIL-SOFT sepenuhnya:
+    // YouTube tidak boleh menggagalkan koneksi Calendar yang sudah
+    // berhasil disimpan di atas (scope kurang / akun tanpa kanal
+    // dijawab null oleh core dan diabaikan di sini).
+    try {
+      await syncYouTubeChannelAccount(bundle.db, state.tenantId, googleDeps);
+    } catch {
+      /* abaikan — sinkron YouTube bukan syarat koneksi Google */
     }
     return c.redirect(`${webBase}/appointments?google=connected`, 302);
   });

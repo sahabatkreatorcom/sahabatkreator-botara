@@ -52,12 +52,30 @@ export const GOOGLE_DEFAULT_API_BASE = "https://www.googleapis.com";
 export const GOOGLE_DEFAULT_TOKEN_BASE = "https://oauth2.googleapis.com";
 export const GOOGLE_DEFAULT_AUTH_BASE = "https://accounts.google.com";
 
-/** Scope yang diminta: tulis event + baca kalender/freebusy + email akun. */
+/** Scope unggah video YouTube (Gelombang 2) — scope sensitif Google. */
+export const YOUTUBE_UPLOAD_SCOPE =
+  "https://www.googleapis.com/auth/youtube.upload";
+/** Scope baca channel YouTube (Gelombang 2) — untuk channel ID/judul. */
+export const YOUTUBE_READONLY_SCOPE =
+  "https://www.googleapis.com/auth/youtube.readonly";
+
+/**
+ * Scope yang diminta: tulis event + baca kalender/freebusy + email akun
+ * + YouTube (Gelombang 2). SATU koneksi Google per tenant melayani
+ * Calendar DAN YouTube — tidak ada jalur OAuth kedua; consent yang
+ * sama (access_type=offline + include_granted_scopes) menerbitkan
+ * refresh token yang mencakup semuanya. Koneksi lama yang terhubung
+ * sebelum scope YouTube ditambahkan TIDAK memilikinya: penerbitan
+ * YouTube menjawab `youtube_scope_missing` sampai pemilik menghubungkan
+ * ulang Google (consent inkremental menambahkan scope baru).
+ */
 export const GOOGLE_OAUTH_SCOPES = [
   "openid",
   "email",
   "https://www.googleapis.com/auth/calendar.events",
   "https://www.googleapis.com/auth/calendar.readonly",
+  YOUTUBE_UPLOAD_SCOPE,
+  YOUTUBE_READONLY_SCOPE,
 ].join(" ");
 
 export const APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE =

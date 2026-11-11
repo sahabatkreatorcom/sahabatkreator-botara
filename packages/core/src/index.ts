@@ -556,6 +556,8 @@ export {
   fetchGoogleBusyIntervals,
   syncBookingToGoogle,
   GOOGLE_OAUTH_SCOPES,
+  YOUTUBE_UPLOAD_SCOPE,
+  YOUTUBE_READONLY_SCOPE,
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
   type GoogleBases,
   type GoogleDeps,
@@ -567,6 +569,16 @@ export {
   type GoogleSyncAction,
   type GoogleSyncResult,
 } from "./google-calendar";
+export {
+  // YouTube (Gelombang 2): sinkronisasi akun channel dari koneksi
+  // Google + gerbang akses publikasi (scope youtube.upload).
+  fetchYouTubeOwnChannel,
+  syncYouTubeChannelAccount,
+  getYouTubePublishAccess,
+  googleScopesInclude,
+  type YouTubeChannelIdentity,
+  type YouTubePublishAccess,
+} from "./youtube";
 export {
   createApiKey,
   listApiKeys,
