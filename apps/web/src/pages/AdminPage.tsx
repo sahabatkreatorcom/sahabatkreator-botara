@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   IntegrationLogResponse,
+  PlatformContentScheduleInfo,
   PlatformEmailInfo,
   PlatformGoogleInfo,
   PlatformMetaInfo,
@@ -77,9 +78,11 @@ function CopyableUrlRow({
 const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   openrouter_api_key: "admin.openrouterApiKeyLabel",
   openrouter_model: "admin.openrouterModelLabel",
+  openrouter_embedding_model: "admin.openrouterEmbeddingModelLabel",
   r2_access_key_id: "admin.r2AccessKeyIdLabel",
   r2_secret_access_key: "admin.r2SecretAccessKeyLabel",
   meta_app_secret: "admin.metaAppSecretLabel",
+  meta_webhook_verify_token: "admin.metaWebhookVerifyTokenLabel",
   meta_app_id: "admin.metaAppIdLabel",
   meta_ig_config_id: "admin.metaIgConfigIdLabel",
   meta_wa_config_id: "admin.metaWaConfigIdLabel",
@@ -88,6 +91,9 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   resend_from_name: "admin.resendFromNameLabel",
   google_oauth_client_id: "admin.googleOauthClientIdLabel",
   google_oauth_client_secret: "admin.googleOauthClientSecretLabel",
+  post_media_public_base_url: "admin.postMediaPublicBaseUrlLabel",
+  youtube_privacy_status: "admin.youtubePrivacyStatusLabel",
+  tiktok_privacy_level: "admin.tiktokPrivacyLevelLabel",
 };
 
 /**
@@ -109,6 +115,8 @@ export function AdminPage({ t, locale }: AdminPageProps) {
   const [googleInfo, setGoogleInfo] = useState<PlatformGoogleInfo | null>(
     null,
   );
+  const [contentScheduleInfo, setContentScheduleInfo] =
+    useState<PlatformContentScheduleInfo | null>(null);
   const [redirectCopied, setRedirectCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +134,7 @@ export function AdminPage({ t, locale }: AdminPageProps) {
       setMetaInfo(body.meta);
       setEmailInfo(body.email);
       setGoogleInfo(body.google);
+      setContentScheduleInfo(body.contentSchedule);
     } catch (err) {
       if (requestSeq.current !== seq) return;
       setError(translateApiError(t, err));
@@ -185,6 +194,14 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             secret={false}
             onStatusChanged={onStatusChanged}
           />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="openrouter_embedding_model"
+            status={byKey("openrouter_embedding_model")}
+            secret={false}
+            onStatusChanged={onStatusChanged}
+          />
         </div>
       </section>
 
@@ -240,6 +257,25 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             locale={locale}
             settingKey="meta_app_secret"
             status={byKey("meta_app_secret")}
+            onStatusChanged={onStatusChanged}
+          />
+        </div>
+
+        {/*
+          Token verifikasi handshake webhook Meta — nilai yang KITA
+          tentukan (bukan dari Meta). Baris password seperti app secret:
+          nilai tersimpan tidak dirender; owner/admin workspace yang
+          memasang webhook melihat nilai efektifnya di halaman Channel.
+        */}
+        <p className="mt-6 max-w-2xl text-sm text-muted">
+          {t("admin.metaWebhookVerifyTokenBody")}
+        </p>
+        <div className="mt-4 space-y-3">
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="meta_webhook_verify_token"
+            status={byKey("meta_webhook_verify_token")}
             onStatusChanged={onStatusChanged}
           />
         </div>
@@ -480,6 +516,86 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             settingKey="google_oauth_client_secret"
             status={byKey("google_oauth_client_secret")}
             onStatusChanged={onStatusChanged}
+          />
+        </div>
+      </section>
+
+      {/*
+        Pengaturan content schedule multi-platform — BUKAN kredensial:
+        base URL media publik (publik menurut sifatnya) dan dua level
+        privasi enum. Nilai efektif (panel → env → bawaan aman)
+        DITAMPILKAN seperti grup publik lain; barisnya teks biasa dan
+        dimuat ulang sesudah diubah agar tampilan efektifnya segar.
+        Nilai di luar pilihan sah ditolak server saat disimpan.
+      */}
+      <section className="mt-8">
+        <h2 className="text-base font-semibold text-ink">
+          {t("admin.contentScheduleTitle")}
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          {t("admin.contentScheduleBody")}
+        </p>
+        {contentScheduleInfo ? (
+          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.postMediaPublicBaseUrlLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {contentScheduleInfo.publicMediaBaseUrl ?? "—"}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.youtubePrivacyStatusLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {contentScheduleInfo.youtubePrivacyStatus}
+              </dd>
+            </div>
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.tiktokPrivacyLevelLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {contentScheduleInfo.tiktokPrivacyLevel}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+        <div className="mt-4 space-y-3">
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="post_media_public_base_url"
+            status={byKey("post_media_public_base_url")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="youtube_privacy_status"
+            status={byKey("youtube_privacy_status")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="tiktok_privacy_level"
+            status={byKey("tiktok_privacy_level")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
           />
         </div>
       </section>
