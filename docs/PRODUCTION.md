@@ -50,12 +50,14 @@ boot dengan Telegram/webchat saja. Konsekuensinya kegagalan kunci-kunci
 itu **tidak terlihat saat boot** — muncul belakangan sebagai fitur yang
 menolak jalan. Dua yang paling mudah terlewat:
 
-- `META_WEBHOOK_VERIFY_TOKEN` — **hanya dari env**, tidak ada di Panel
-  Admin. Tanpa ini `GET /api/meta/webhook` menjawab 503, dan Panel Admin
-  menampilkan "verify token belum diset, webhook tidak bisa didaftarkan".
-  Nilainya kita yang menentukan (`openssl rand -hex 24` cukup), lalu
-  ditempel ke Meta App Dashboard → Webhooks → Verify token. Owner/admin
-  bisa membacanya lagi lewat `GET /channels/meta-webhook-info`.
+- Token verifikasi webhook Meta — diisi lewat **Panel Admin**
+  (`meta_webhook_verify_token`, grup Meta); env `META_WEBHOOK_VERIFY_TOKEN`
+  hanya fallback (sejak instruksi pemilik 2026-11-12 semua kredensial
+  platform lewat panel). Tanpa nilai efektif di mana pun
+  `GET /api/meta/webhook` menjawab 503. Nilainya kita yang menentukan
+  (`openssl rand -hex 24` cukup), lalu ditempel ke Meta App Dashboard →
+  Webhooks → Verify token. Owner/admin bisa membacanya lagi lewat
+  `GET /channels/meta-webhook-info` (yang juga menyelesaikan panel → env).
 - `META_APP_SECRET` — boleh env, tetapi **lebih baik lewat Panel Admin**
   (`meta_app_secret`), karena resolver panel → env dibaca ulang per
   request. Tanpa ini `POST /api/meta/webhook` menjawab 503; dengan ini

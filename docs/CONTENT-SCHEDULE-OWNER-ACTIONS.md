@@ -13,6 +13,17 @@ penggantinya.
 Format per entri: gelombang · platform · yang dibutuhkan dari pemilik ·
 untuk apa · apa yang sudah dimock sebagai gantinya.
 
+**Cara memasukkan kredensial (instruksi pemilik 2026-11-12):** semua
+kredensial dan pengaturan platform kini diisi lewat **Panel Admin**
+(halaman Admin platform), BUKAN edit env server — env hanya fallback
+bila isian panel kosong. Yang relevan untuk daftar ini: App ID/Secret
+Meta dan klien OAuth Google memang sudah panel sejak awal; base URL
+media publik, status privasi YouTube, dan level privasi TikTok kini
+juga panel (grup "Content schedule"). Jadi setiap baris di bawah yang
+menyebut kredensial/env dibaca sebagai: **isi/ubah di Panel Admin**.
+Yang tetap tindakan pemilik dan TIDAK berubah: kepemilikan akun,
+pengajuan App Review/audit/verifikasi ke masing-masing platform.
+
 ---
 
 ## Gelombang 0 — Fondasi (administrasi paralel)
@@ -131,8 +142,10 @@ hanya bisa diajukan dari akun pemilik:
    untuk SEMUA tenant bersama) — ajukan penambahan kuota ke Google
    atau putuskan tenant besar membawa proyeknya sendiri (keputusan
    terbuka roadmap no. 2); (e) setelah verifikasi selesai, naikkan
-   env `YOUTUBE_PRIVACY_STATUS` dari bawaan `private` ke `unlisted`/
-   `public` bila video terjadwal harus langsung publik. Untuk apa:
+   status privasi YouTube di Panel Admin (grup Content schedule) dari
+   bawaan `private` ke `unlisted`/`public` bila video terjadwal harus
+   langsung publik (env `YOUTUBE_PRIVACY_STATUS` hanya fallback).
+   Untuk apa:
    adapter menukar refresh token koneksi Google tenant menjadi access
    token (scope diperiksa; koneksi lama menjawab
    `youtube_scope_missing` sampai dihubungkan ulang), membaca kanal
@@ -194,8 +207,9 @@ hanya bisa diajukan dari akun pemilik:
    board PERTAMA akun adalah tujuan bawaan Pin (akun tanpa board
    gagal aman `pinterest_board_missing`); (d) untuk gambar berformat
    selain JPEG/PNG (mis. GIF), infrastruktur URL media publik yang
-   sama seperti Instagram (`POST_MEDIA_PUBLIC_BASE_URL`) karena
-   format itu hanya bisa dikirim sebagai `image_url`. Untuk apa:
+   sama seperti Instagram (base URL-nya diisi di Panel Admin grup
+   Content schedule; env `POST_MEDIA_PUBLIC_BASE_URL` hanya fallback)
+   karena format itu hanya bisa dikirim sebagai `image_url`. Untuk apa:
    adapter membuat Pin API v5 (judul dari `title` post maks 100,
    deskripsi dari caption maks 800, tautan tujuan dari URL pertama
    caption) ke board pertama akun. Sudah dimock: provider
@@ -224,8 +238,10 @@ hanya bisa diajukan dari akun pemilik:
    inkremental menambahkan scope business ke koneksi yang sudah
    ada — callback otomatis menyinkronkan semua lokasi akun itu
    menjadi akun lokasi `google_business`, satu sasaran per lokasi);
-   (d) infrastruktur URL media publik (`POST_MEDIA_PUBLIC_BASE_URL`,
-   sama seperti Instagram) bila postingan lokal harus membawa foto —
+   (d) infrastruktur URL media publik (base URL-nya diisi di Panel
+   Admin grup Content schedule; env `POST_MEDIA_PUBLIC_BASE_URL`
+   hanya fallback; sama seperti Instagram) bila postingan lokal
+   harus membawa foto —
    API postingan lokal hanya menerima `sourceUrl` publik, bukan
    biner; postingan teks terbit tanpa kebutuhan ini. Untuk apa:
    adapter membuat postingan lokal STANDARD per lokasi
@@ -255,9 +271,10 @@ hanya bisa diajukan dari akun pemilik:
    sendiri), dan adapter memang berjalan dengan bawaan itu; (c)
    OAuth akun TikTok contoh dengan scope `user.info.basic` +
    `video.publish` agar open_id + access token terekam sebagai
-   akun channel `tiktok`; (d) SETELAH audit lolos, naikkan env
-   platform `TIKTOK_PRIVACY_LEVEL` dari `SELF_ONLY` ke level yang
-   dikehendaki (`PUBLIC_TO_EVERYONE` dsb.) — adapter memvalidasi
+   akun channel `tiktok`; (d) SETELAH audit lolos, naikkan level
+   privasi TikTok di Panel Admin (grup Content schedule) dari
+   `SELF_ONLY` ke level yang dikehendaki (`PUBLIC_TO_EVERYONE` dsb.;
+   env `TIKTOK_PRIVACY_LEVEL` hanya fallback) — adapter memvalidasi
    level itu terhadap `privacy_level_options` akun dan menolak
    dengan `tiktok_privacy_option_mismatch` bila akun belum
    mengizinkannya. Untuk apa: adapter menerbitkan direct post
