@@ -113,6 +113,48 @@ hanya bisa diajukan dari akun pemilik:
    per akun yang belum dibangun (default mengasumsikan akun
    ter-hosting Bluesky).
 
+## Gelombang 2 — YouTube
+
+1. **YouTube** — dibutuhkan: (a) proyek Google Cloud milik pemilik
+   dengan YouTube Data API v3 aktif dan klien OAuth yang sama dengan
+   yang dipakai Google Calendar (client ID/secret dikelola Panel
+   Admin / env platform — TIDAK perlu aplikasi kedua); (b) verifikasi
+   aplikasi OAuth Google untuk scope sensitif `youtube.upload` +
+   `youtube.readonly` (layar consent terverifikasi; selama belum
+   terverifikasi, Google membatasi consent dan video yang diunggah
+   lewat API dikunci `private`); (c) channel YouTube contoh milik
+   pemilik dan menghubungkan ulang Google dari dashboard (consent
+   inkremental menambahkan scope YouTube ke koneksi yang sudah ada —
+   callback otomatis menyinkronkan akun channel youtube dari koneksi
+   itu); (d) keputusan strategi kuota: kuota bawaan 10.000 unit/hari
+   per proyek dan `videos.insert` berharga 1.600 unit (≈ 6 video/hari
+   untuk SEMUA tenant bersama) — ajukan penambahan kuota ke Google
+   atau putuskan tenant besar membawa proyeknya sendiri (keputusan
+   terbuka roadmap no. 2); (e) setelah verifikasi selesai, naikkan
+   env `YOUTUBE_PRIVACY_STATUS` dari bawaan `private` ke `unlisted`/
+   `public` bila video terjadwal harus langsung publik. Untuk apa:
+   adapter menukar refresh token koneksi Google tenant menjadi access
+   token (scope diperiksa; koneksi lama menjawab
+   `youtube_scope_missing` sampai dihubungkan ulang), membaca kanal
+   dari `channels.list?mine=true` saat sinkronisasi, dan mengunggah
+   video dengan `videos.insert` resumable; kuota habis terpetakan ke
+   `youtube_quota_exceeded`. Sudah dimock: provider `youtube`
+   ditambahkan end-to-end sebatas akun/sasaran linimasa + capability
+   + adapter (migrasi 0016), scope ditambahkan ke consent Google yang
+   ada, sinkronisasi akun + gerbang scope diuji di core
+   (`youtube.test.ts`, fetch fake), dan seluruh protokol resumable
+   diverifikasi melawan fake Google API (`verify:youtube-post`,
+   12 PASS) dengan access token uji; TIDAK dibutuhkan URL media
+   publik (video diunggah sebagai biner dari object store privat).
+   Catatan batas: provisioning YouTube BUKAN connect channel generik
+   (dijawab `CHANNEL_NOT_AVAILABLE_YET`) — jalurnya adalah
+   menghubungkan Google; judul video diambil dari `title` post
+   (maks 100, divalidasi core) dan deskripsi dari caption (maks
+   5000); unggahan memakai satu PUT penuh ke sesi resumable —
+   kelanjutan chunked setelah PUT 308 belum dibangun (postingan
+   gagal dengan `youtube_upload_incomplete` dan dijadwalkan ulang
+   manual).
+
 ## Gelombang berikutnya
 
 _(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_
