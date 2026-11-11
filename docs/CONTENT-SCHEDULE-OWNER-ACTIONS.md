@@ -306,9 +306,13 @@ hanya bisa diajukan dari akun pemilik:
    paling lama: TANPA audit lolos, TikTok hanya mengizinkan
    postingan API berprivasi `SELF_ONLY` (hanya terlihat kreator
    sendiri), dan adapter memang berjalan dengan bawaan itu; (c)
-   OAuth akun TikTok contoh dengan scope `user.info.basic` +
-   `video.publish` agar open_id + access token terekam sebagai
-   akun channel `tiktok`; (d) SETELAH audit lolos, naikkan level
+   daftarkan Redirect URI yang ditampilkan blok TikTok di halaman
+   Channels persis seperti tertulis di aplikasi TikTok (Login
+   Kit), lalu hubungkan akun TikTok contoh dari halaman Channels
+   (Hubungkan → TikTok → "Hubungkan dengan TikTok") — alur connect
+   OAuth-nya SUDAH dibangun (gelombang Semua OAuth, lihat bagian
+   terakhir dokumen ini) dengan scope `user.info.basic` +
+   `video.publish`; (d) SETELAH audit lolos, naikkan level
    privasi TikTok di Panel Admin (grup Content schedule) dari
    `SELF_ONLY` ke level yang dikehendaki (`PUBLIC_TO_EVERYONE` dsb.;
    env `TIKTOK_PRIVACY_LEVEL` hanya fallback) — adapter memvalidasi
@@ -349,22 +353,77 @@ hanya bisa diajukan dari akun pemilik:
    tindakan pemilik pada butir (e) di atas; foto yang diterima
    TikTok berformat JPEG/WebP (PNG ditolak platform, konversi
    belum dibangun); access
-   token TikTok berumur ±24 jam dan penyegaran otomatis BELUM
-   dibangun (repo belum punya kolom refresh token generik di luar
-   lifecycle token Meta) — token kedaluwarsa menjawab
-   `tiktok_unauthorized` dan akun perlu dihubungkan ulang, atau
-   pemilik meminta pengembangan lanjutan penyegaran memakai
-   refresh token OAuth TikTok (±365 hari); bila scope yang
+   token TikTok berumur ±24 jam dan — sejak gelombang Semua
+   OAuth — penyegaran otomatisnya SUDAH dibangun: connect
+   menyimpan refresh token (±365 hari) terenkripsi dan worker
+   lifecycle menyegarkannya sebelum kedaluwarsa (rotasi penuh);
+   token yang tetap kedaluwarsa (refresh dicabut/ditolak)
+   menjawab `tiktok_unauthorized` dan akun ditandai error agar
+   dihubungkan ulang dari Channels; bila scope yang
    diberikan ternyata `video.upload` (bukan `video.publish`),
    konten mendarat sebagai draf di inbox kreator
    (`SEND_TO_USER_INBOX`) untuk ditinjau manual, bukan terbit
-   langsung; provisioning TikTok belum dibuka di endpoint connect
-   generik (dijawab `CHANNEL_NOT_AVAILABLE_YET`) — pendaftaran
-   akun nyata menunggu alur OAuth TikTok khusus atau penyemaian
-   akun oleh operator.
+   langsung; provisioning TikTok tetap tidak dibuka di endpoint
+   connect generik (dijawab `CHANNEL_NOT_AVAILABLE_YET`) — jalur
+   resminya adalah blok connect TikTok khusus di Channels.
+
+## Gelombang Semua OAuth — Connect TikTok/LinkedIn/Pinterest/Bluesky/Google
+
+Semua alur connect di bawah SUDAH dibangun & terverifikasi melawan
+API tiruan (verify:tiktok-oauth 11 grup, verify:tiktok-token-lifecycle
+20 PASS, verify:linkedin-oauth, verify:pinterest-oauth,
+verify:bluesky-connect, verify:google-channels, plus lifecycle
+masing-masing). Yang tersisa murni tindakan pemilik per platform:
+
+1. **TikTok** — (a) buat aplikasi di TikTok for Developers dengan
+   produk Login Kit + Content Posting API; (b) isi Client Key &
+   Client Secret di Panel Admin (grup TikTok) — SUDAH bisa sejak
+   pengembangan foto/carousel; (c) daftarkan Redirect URI dari blok
+   TikTok di Channels ke aplikasi (Login Kit → Redirect URI);
+   (d) ajukan audit Content Posting API (tanpa audit, postingan
+   API hanya `SELF_ONLY`); (e) hubungkan akun contoh dari Channels.
+2. **LinkedIn** — (a) buat aplikasi di LinkedIn Developers dan
+   aktifkan produk "Sign In with LinkedIn using OpenID Connect" +
+   "Share on LinkedIn" (scope `openid profile w_member_social`);
+   (b) isi Client ID & Client Secret di Panel Admin (grup LinkedIn
+   — formulirnya BARU ditambahkan gelombang ini; fallback env
+   `LINKEDIN_CLIENT_ID`/`LINKEDIN_CLIENT_SECRET`); (c) daftarkan
+   Redirect URI dari blok LinkedIn di Channels sebagai Authorized
+   Redirect URL aplikasi; (d) hubungkan profil contoh dari
+   Channels. KEJUJURAN LIFECYCLE: LinkedIn TIDAK menerbitkan
+   refresh token untuk program standar — token ±60 hari; worker
+   lifecycle hanya MENANDAI akun menjelang kedaluwarsa dan
+   menandainya 'error' (`linkedin_token_expired`) sesudah lewat,
+   agar pemilik menghubungkan ulang; tidak ada penyegaran diam-diam.
+   Company Page tetap di luar jangkauan (program Community
+   Management terpisah).
+3. **Pinterest** — (a) buat aplikasi di Pinterest Developers;
+   (b) isi App ID & App Secret di Panel Admin (grup Pinterest —
+   formulirnya BARU ditambahkan gelombang ini; fallback env
+   `PINTEREST_APP_ID`/`PINTEREST_APP_SECRET`); (c) daftarkan
+   Redirect URI dari blok Pinterest di Channels ke aplikasi;
+   (d) ajukan akses penuh (Standard) bila masih Trial — Pin dari
+   aplikasi Trial hanya terlihat oleh pemiliknya; (e) hubungkan
+   akun contoh dari Channels. Token ±30 hari disegarkan otomatis
+   memakai refresh token; Pin diterbitkan ke board PERTAMA akun.
+4. **Bluesky** — tidak ada aplikasi/platform yang perlu dibuat:
+   pemilik akun cukup membuat App Password di Bluesky (Pengaturan
+   → Privasi dan Keamanan → Kata Sandi Aplikasi) lalu mengisi
+   handle + App Password di blok Bluesky pada halaman Channels.
+   App password tidak kedaluwarsa; cabut dari Bluesky bila tidak
+   dipakai lagi (akun akan gagal terbit dan perlu dihubungkan
+   ulang dengan app password baru).
+5. **Google (YouTube + Google Business)** — tidak ada OAuth baru:
+   blok Google di Channels memakai koneksi Google yang sama
+   seperti Kalender. Tindakan pemilik tetap seperti Gelombang
+   2/3: verifikasi aplikasi Google + scope sensitif
+   (youtube.upload, business.manage) agar consent tidak ditolak
+   Google, lalu hubungkan akun Google contoh dari Channels atau
+   Kalender — kanal YouTube + lokasi bisnis tersinkron otomatis
+   sebagai akun channel.
 
 ---
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
-content schedule). Entri baru hanya ditambahkan bila ada
-pengembangan lanjutan di luar roadmap._
+content schedule) + gelombang Semua OAuth. Entri baru hanya
+ditambahkan bila ada pengembangan lanjutan di luar roadmap._

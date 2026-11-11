@@ -59,11 +59,13 @@ import {
  *   log integrasi, dan providerMessageId jatuh ke `publish_id` bila
  *   postingan tidak punya id publik (kasus SELF_ONLY) — postingan
  *   privat TIDAK pernah dicatat atau diklaim sebagai publik.
- * - Access token OAuth pada akun channel berumur ±24 jam dan repo
- *   belum punya penyegaran token generik untuk TikTok: token yang
- *   kedaluwarsa dipetakan klien ke `tiktok_unauthorized` agar
- *   operator menghubungkan ulang akun (batasan terdokumentasi di
- *   paket channel-tiktok + OWNER-ACTIONS).
+ * - Access token OAuth pada akun channel berumur ±24 jam; sejak
+ *   gelombang Semua OAuth, connect menyimpan refresh token
+ *   terenkripsi dan worker lifecycle (src/tiktok-token-lifecycle.ts)
+ *   menyegarkannya dengan grant `refresh_token` SEBELUM kedaluwarsa
+ *   (rotasi penuh access+refresh). Token yang tetap kedaluwarsa —
+ *   misalnya refresh token dicabut — dipetakan klien ke
+ *   `tiktok_unauthorized` agar operator menghubungkan ulang akun.
  *
  * Satu-satunya percakapan yang disentuh adalah sasaran sintetis
  * `kind='channel'` milik akun TikTok itu sendiri.

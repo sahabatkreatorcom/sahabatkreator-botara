@@ -47,6 +47,7 @@ import {
 } from "@sahabat-kreator/core";
 import { runMetaTokenLifecycle } from "./meta-token-lifecycle";
 import { runThreadsTokenLifecycle } from "./threads-token-lifecycle";
+import { runTikTokTokenLifecycle } from "./tiktok-token-lifecycle";
 import { startMediaIngestLoop } from "./media-ingest";
 import { MEDIA_GC_INTERVAL_MS, startMediaGcLoop } from "./media-gc";
 import {
@@ -1350,6 +1351,43 @@ const threadsTokenLifecycleTimer = setInterval(
 void threadsTokenLifecycleTick();
 
 // ---------------------------------------------------------------------------
+// Lifecycle token TikTok (gelombang Semua OAuth): putaran sejajar
+// Threads di atas — access token TikTok hanya ±24 jam, jadi runner
+// menyegarkannya dengan grant `refresh_token` SEBELUM kedaluwarsa
+// (jendela default 7 hari menutupi masa aktifnya) dan menyimpan
+// rotasi access+refresh atomik (lihat src/tiktok-token-lifecycle.ts).
+// Tick terpisah, penjaga anti-tumpang-tindih sendiri, interval sama.
+// Jalan run-once: `pnpm --filter @sahabat-kreator/worker
+// tiktok:token-lifecycle` (skrip scripts/tiktok-token-lifecycle.ts).
+let tiktokTokenLifecycleRunning = false;
+async function tiktokTokenLifecycleTick(): Promise<void> {
+  if (tiktokTokenLifecycleRunning) return;
+  tiktokTokenLifecycleRunning = true;
+  try {
+    const result = await runTikTokTokenLifecycle({
+      db,
+      platform: platformSettingsOptions,
+      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+      tiktokApiBase: env.TIKTOK_API_BASE,
+    });
+    if (result.scanned > 0) {
+      console.log(
+        `[worker] lifecycle token TikTok: ${result.scanned} akun terpindai — refresh=${result.refreshed} warned=${result.warned} authError=${result.authErrored} failed=${result.failed}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] lifecycle token TikTok gagal (akan dicoba lagi):", err);
+  } finally {
+    tiktokTokenLifecycleRunning = false;
+  }
+}
+const tiktokTokenLifecycleTimer = setInterval(
+  () => void tiktokTokenLifecycleTick(),
+  TOKEN_LIFECYCLE_INTERVAL_MS,
+);
+void tiktokTokenLifecycleTick();
+
+// ---------------------------------------------------------------------------
 // Poller pengiriman pesan outbound (Telegram + Meta).
 //
 // DIPINDAHKAN dari proses API ke worker (rekomendasi analisis). Selama
@@ -1448,6 +1486,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(broadcastReconcileTimer);
   clearInterval(tokenLifecycleTimer);
   clearInterval(threadsTokenLifecycleTimer);
+  clearInterval(tiktokTokenLifecycleTimer);
   // Hentikan poller pengiriman SEBELUM menutup pool: tick yang sedang
   // berjalan memakai `db`, dan memutus pool di bawahnya mengubah
   // pengiriman yang sedang berlangsung menjadi kegagalan palsu yang

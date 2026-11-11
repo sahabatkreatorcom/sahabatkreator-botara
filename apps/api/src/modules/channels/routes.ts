@@ -49,6 +49,7 @@ import {
   MetaGraphError,
   ThreadsGraphClient,
 } from "@sahabat-kreator/channel-messenger";
+import { TikTokClient } from "@sahabat-kreator/channel-tiktok";
 import {
   WhatsAppCloudClient,
   WhatsAppGraphError,
@@ -304,7 +305,7 @@ const oauthPhotoBackfillInFlight = new Set<string>();
 const oauthPhotoBackfillNegative = new Map<string, number>();
 
 /** Provider yang foto profilnya bisa diselesaikan dari API platform. */
-const OAUTH_PHOTO_PROVIDERS = new Set(["threads"]);
+const OAUTH_PHOTO_PROVIDERS = new Set(["threads", "tiktok"]);
 
 async function resolveOAuthProfilePictureUrl(
   opts: ChannelsModuleOptions,
@@ -318,6 +319,12 @@ async function resolveOAuthProfilePictureUrl(
         accessToken: credential,
       }).getThreadsProfile();
       return profile.profilePictureUrl;
+    }
+    case "tiktok": {
+      const info = await new TikTokClient({
+        baseUrl: opts.tiktokApiBase,
+      }).getTikTokUserInfo(credential);
+      return info.avatarUrl;
     }
     default:
       return null;
@@ -426,6 +433,8 @@ export interface ChannelsModuleOptions {
   metaApiBase?: string;
   /** Base URL Threads API (env THREADS_API_BASE) — backfill foto Threads. */
   threadsApiBase?: string;
+  /** Base URL TikTok API (env TIKTOK_API_BASE) — backfill foto TikTok. */
+  tiktokApiBase?: string;
   /**
    * Verify token webhook Meta — nilai yang KITA tentukan; dibagikan ke
    * owner/admin lewat endpoint meta-webhook-info agar bisa ditempel ke

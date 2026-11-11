@@ -35,12 +35,24 @@ importers:
       '@hono/node-server':
         specifier: ^1.13.7
         version: 1.19.18(hono@4.13.16)
+      '@sahabat-kreator/channel-bluesky':
+        specifier: workspace:*
+        version: link:../../packages/channels/channel-bluesky
+      '@sahabat-kreator/channel-linkedin':
+        specifier: workspace:*
+        version: link:../../packages/channels/channel-linkedin
       '@sahabat-kreator/channel-messenger':
         specifier: workspace:*
         version: link:../../packages/channels/channel-messenger
+      '@sahabat-kreator/channel-pinterest':
+        specifier: workspace:*
+        version: link:../../packages/channels/channel-pinterest
       '@sahabat-kreator/channel-telegram':
         specifier: workspace:*
         version: link:../../packages/channels/channel-telegram
+      '@sahabat-kreator/channel-tiktok':
+        specifier: workspace:*
+        version: link:../../packages/channels/channel-tiktok
       '@sahabat-kreator/channel-webchat':
         specifier: workspace:*
         version: link:../../packages/channels/channel-webchat

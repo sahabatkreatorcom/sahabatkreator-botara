@@ -35,6 +35,34 @@ export const ErrorCodeSchema = z.enum([
   "THREADS_OAUTH_EXCHANGE_FAILED",
   "THREADS_OAUTH_CANCELLED",
   "THREADS_ACCOUNT_ALREADY_CONNECTED",
+  // Gelombang Semua OAuth: koneksi TikTok via Login Kit, LinkedIn,
+  // dan Pinterest via OAuth — keluarga kode per provider seperti
+  // Threads (aplikasi & callback masing-masing terpisah). Kode-kode
+  // ini juga menjadi nilai penanda redirect callback
+  // (?<provider>_oauth_error=<KODE>).
+  "TIKTOK_OAUTH_NOT_CONFIGURED",
+  "TIKTOK_OAUTH_STATE_INVALID",
+  "TIKTOK_OAUTH_EXCHANGE_FAILED",
+  "TIKTOK_OAUTH_CANCELLED",
+  "TIKTOK_ACCOUNT_ALREADY_CONNECTED",
+  "LINKEDIN_OAUTH_NOT_CONFIGURED",
+  "LINKEDIN_OAUTH_STATE_INVALID",
+  "LINKEDIN_OAUTH_EXCHANGE_FAILED",
+  "LINKEDIN_OAUTH_CANCELLED",
+  "LINKEDIN_ACCOUNT_ALREADY_CONNECTED",
+  "PINTEREST_OAUTH_NOT_CONFIGURED",
+  "PINTEREST_OAUTH_STATE_INVALID",
+  "PINTEREST_OAUTH_EXCHANGE_FAILED",
+  "PINTEREST_OAUTH_CANCELLED",
+  "PINTEREST_ACCOUNT_ALREADY_CONNECTED",
+  // Bluesky connect BUKAN OAuth (formulir handle + App Password):
+  // kredensial ditolak Bluesky → 422; server tidak bisa menjangkau
+  // entryway Bluesky → 502; penyimpanan kredensial belum
+  // terkonfigurasi di server → 503.
+  "BLUESKY_CREDENTIALS_INVALID",
+  "BLUESKY_ACCOUNT_ALREADY_CONNECTED",
+  "BLUESKY_UNREACHABLE",
+  "BLUESKY_CONNECT_NOT_CONFIGURED",
   "CHANNEL_DELETE_CONFIRMATION_MISMATCH",
   "CHANNEL_ALREADY_TRASHED",
   "CHANNEL_NOT_TRASHED",

@@ -44,6 +44,7 @@ import { createTelegramRoutes } from "./modules/telegram/routes";
 import { createMetaRoutes } from "./modules/meta/routes";
 import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
 import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
+import { createTikTokOAuthRoutes } from "./modules/tiktok-oauth/routes";
 import { createAvatarsRoutes } from "./modules/avatars/routes";
 import { createMediaRoutes } from "./modules/media/routes";
 import { createAdminRoutes } from "./modules/admin/routes";
@@ -378,6 +379,7 @@ routes.route(
     publicBaseUrl: env.BETTER_AUTH_URL,
     metaApiBase: env.META_API_BASE,
     threadsApiBase: env.THREADS_API_BASE,
+    tiktokApiBase: env.TIKTOK_API_BASE,
     // Token verifikasi efektif (Panel Admin → env) agar info webhook
     // yang dilihat owner/admin workspace selalu token yang berlaku —
     // pola yang sama seperti metaAppSecretConfigured di bawah.
@@ -565,6 +567,22 @@ routes.route(
     platform: platformOptions,
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
     threadsApiBase: env.THREADS_API_BASE,
+    publicBaseUrl: env.BETTER_AUTH_URL,
+    redisUrl: env.REDIS_URL,
+    stateSecret: env.BETTER_AUTH_SECRET,
+  }),
+);
+// Modul TikTok OAuth Connect (gelombang Semua OAuth) — "Hubungkan
+// dengan TikTok" via Login Kit: start ber-state sekali pakai +
+// callback tunggal publik /tiktok/oauth/callback + info
+// ketersediaan. Kredensial aplikasi dari Panel Admin
+// (tiktok_client_key/secret; env hanya fallback).
+routes.route(
+  "/",
+  createTikTokOAuthRoutes(authBundle, {
+    platform: platformOptions,
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    tiktokApiBase: env.TIKTOK_API_BASE,
     publicBaseUrl: env.BETTER_AUTH_URL,
     redisUrl: env.REDIS_URL,
     stateSecret: env.BETTER_AUTH_SECRET,

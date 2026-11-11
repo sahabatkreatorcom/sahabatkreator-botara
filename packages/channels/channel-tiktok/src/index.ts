@@ -69,11 +69,13 @@
  * KREDENSIAL: access token OAuth TikTok (scope `video.publish`)
  * diserahkan pemanggil per panggilan dari akun channel terenkripsi.
  * Access token TikTok berumur ±24 jam; refresh token berumur lebih
- * lama (±365 hari) TETAPI repo belum punya kolom refresh token
- * generik di luar lifecycle token Meta — jadi penyegaran otomatis
- * BELUM dibangun di sini (dicatat di OWNER-ACTIONS sebagai
- * pengembangan lanjutan). Token yang kedaluwarsa/dicabut dipetakan
- * ke `tiktok_unauthorized` agar operator menghubungkan ulang akun.
+ * lama (±365 hari). Sejak gelombang Semua OAuth, connect Login Kit
+ * menyimpan KEDUA token terenkripsi (migrasi 0022) dan worker
+ * lifecycle menyegarkan access token via grant `refresh_token`
+ * SEBELUM kedaluwarsa (metode OAuth di bawah) — batas lama yang
+ * dicatat Gelombang 4 di sini sudah tertutup. Token yang
+ * kedaluwarsa/dicabut tetap dipetakan ke `tiktok_unauthorized` agar
+ * operator menghubungkan ulang akun (mis. refresh token ikut mati).
  *
  * KEAMANAN: access token TIDAK PERNAH masuk pesan error/log —
  * `TikTokApiError` hanya membawa status HTTP + kode/pesan resmi
@@ -186,6 +188,29 @@ export interface TikTokClientOptions {
   uploadTimeoutMs?: number | undefined;
 }
 
+/** Hasil grant token Login Kit (exchange code / refresh). */
+export interface TikTokOAuthTokenResult {
+  accessToken: string;
+  /** open_id kreator pemilik token (identitas akun channel). */
+  openId: string | null;
+  /** Sisa umur access token (detik) dari provider; bawaan TikTok 86400. */
+  expiresInSeconds: number | null;
+  /** Refresh token BARU (rotasi penuh tiap grant); null bila tak diterbitkan. */
+  refreshToken: string | null;
+  /** Sisa umur refresh token (detik); bawaan TikTok 31536000. */
+  refreshExpiresInSeconds: number | null;
+  /** Scope yang benar-benar diberikan (string koma dari provider). */
+  scope: string | null;
+}
+
+/** Profil kreator pemilik token (`GET /v2/user/info/`). */
+export interface TikTokUserInfo {
+  openId: string;
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+}
+
 export interface TikTokCreatorInfo {
   creatorUsername: string | null;
   /** Level privasi yang diizinkan untuk akun ini SAAT INI. */
@@ -285,6 +310,157 @@ export class TikTokClient {
       );
     }
     return envelope.data ?? {};
+  }
+
+  // -------------------------------------------------------------------------
+  // OAuth Login Kit (gelombang Semua OAuth): token endpoint + user info
+  // -------------------------------------------------------------------------
+
+  /**
+   * Satu panggilan ke token endpoint Login Kit
+   * (`POST /v2/oauth/token/`, form-urlencoded). Berbeda dari API
+   * posting di atas, respons token endpoint TIDAK ber-envelope
+   * `data/error.code`: sukses adalah JSON datar berisi token, gagal
+   * adalah HTTP 4xx dengan `error` + `error_description` resmi.
+   * client_secret & token TIDAK PERNAH masuk error yang dibangun.
+   */
+  private async oauthTokenRequest(
+    form: URLSearchParams,
+  ): Promise<TikTokOAuthTokenResult> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/v2/oauth/token/`, {
+        method: "POST",
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: form.toString(),
+      });
+    } catch {
+      throw new TikTokApiError(0, "", "network_error");
+    }
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await response.json()) as Record<string, unknown>;
+    } catch {
+      /* body bukan JSON — error generik di bawah */
+    }
+    const accessToken = asString(body.access_token);
+    if (!response.ok || !accessToken) {
+      const providerCode = asString(body.error) ?? "";
+      const description =
+        asString(body.error_description)?.slice(0, 200) ??
+        `tiktok_oauth_error_${response.status}`;
+      throw new TikTokApiError(response.status, providerCode, description);
+    }
+    return {
+      accessToken,
+      openId: asString(body.open_id),
+      expiresInSeconds: asNumber(body.expires_in),
+      refreshToken: asString(body.refresh_token),
+      refreshExpiresInSeconds: asNumber(body.refresh_expires_in),
+      scope: asString(body.scope),
+    };
+  }
+
+  /**
+   * Tukar authorization code Login Kit → access token (±24 jam) +
+   * refresh token (±365 hari) + open_id: grant `authorization_code`
+   * dengan redirect_uri yang IDENTIK dengan dialog authorize.
+   */
+  async exchangeTikTokCode(input: {
+    clientKey: string;
+    clientSecret: string;
+    code: string;
+    redirectUri: string;
+  }): Promise<TikTokOAuthTokenResult> {
+    return this.oauthTokenRequest(
+      new URLSearchParams({
+        client_key: input.clientKey,
+        client_secret: input.clientSecret,
+        code: input.code,
+        grant_type: "authorization_code",
+        redirect_uri: input.redirectUri,
+      }),
+    );
+  }
+
+  /**
+   * Segarkan access token dari refresh token: grant `refresh_token`.
+   * TikTok menerbitkan access token BARU dan refresh token BARU
+   * (rotasi penuh) — pemanggil wajib menyimpan keduanya. Refresh
+   * token yang mati/dicabut dijawab error `refresh_token_invalid`
+   * (dipetakan lifecycle ke akun 'error' agar operator menghubungkan
+   * ulang — TIDAK ada jalur diam-diam lain).
+   */
+  async refreshTikTokAccessToken(input: {
+    clientKey: string;
+    clientSecret: string;
+    refreshToken: string;
+  }): Promise<TikTokOAuthTokenResult> {
+    return this.oauthTokenRequest(
+      new URLSearchParams({
+        client_key: input.clientKey,
+        client_secret: input.clientSecret,
+        grant_type: "refresh_token",
+        refresh_token: input.refreshToken,
+      }),
+    );
+  }
+
+  /**
+   * Info kreator pemilik token (`GET /v2/user/info/?fields=…`, scope
+   * `user.info.basic`): open_id (identitas akun), username, nama
+   * tampil. Respons ber-envelope `data.user` seperti API lain,
+   * tetapi metodenya GET — jadi helper ini mem-parse envelope-nya
+   * sendiri dengan aturan yang sama (sukses = `error.code` "ok").
+   */
+  async getTikTokUserInfo(accessToken: string): Promise<TikTokUserInfo> {
+    const fields = "open_id,username,display_name,avatar_url";
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/v2/user/info/?fields=${fields}`,
+        {
+          method: "GET",
+          signal: AbortSignal.timeout(this.timeoutMs),
+          headers: { Authorization: `Bearer ${accessToken}` },
+        },
+      );
+    } catch {
+      throw new TikTokApiError(0, "", "network_error");
+    }
+    let envelope: TikTokEnvelope = {};
+    try {
+      envelope = (await response.json()) as TikTokEnvelope;
+    } catch {
+      /* body bukan JSON — error generik di bawah */
+    }
+    const providerCode =
+      typeof envelope.error?.code === "string" ? envelope.error.code : "";
+    if (!response.ok || providerCode !== "ok") {
+      const providerMessage =
+        typeof envelope.error?.message === "string"
+          ? envelope.error.message.slice(0, 200)
+          : "";
+      throw new TikTokApiError(
+        response.status,
+        providerCode,
+        providerMessage || `tiktok_api_error_${response.status}`,
+      );
+    }
+    const user = (envelope.data?.user ?? {}) as Record<string, unknown>;
+    const openId = asString(user.open_id);
+    if (!openId) {
+      throw new TikTokApiError(200, "", "missing_open_id");
+    }
+    return {
+      openId,
+      username: asString(user.username),
+      displayName: asString(user.display_name),
+      avatarUrl: asString(user.avatar_url),
+    };
   }
 
   /** Info kreator — WAJIB dipanggil sebelum init (aturan platform). */
