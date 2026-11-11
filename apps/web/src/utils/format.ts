@@ -170,12 +170,13 @@ export function formatIdrId(amount: number): string {
   }).format(amount);
 }
 
-/** Jam menit untuk meta gelembung pesan. */
-export function formatTime(iso: string, locale: Locale): string {
+/** Jam menit untuk meta gelembung pesan; `timeZone` opsional seperti formatDateTime. */
+export function formatTime(iso: string, locale: Locale, timeZone?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return new Intl.DateTimeFormat(intlLocale(locale), {
     hour: "2-digit",
     minute: "2-digit",
+    ...(timeZone ? { timeZone } : {}),
   }).format(d);
 }
