@@ -1132,6 +1132,13 @@ export async function listQueuedMetaDeliveries(
       )
       .orderBy(asc(messages.createdAt))
       .limit(limit);
-    return rows.map((r) => ({ ...r, provider: r.provider as MetaDeliveryProvider }));
+    return rows.map((r) => ({
+      ...r,
+      provider: r.provider as MetaDeliveryProvider,
+      // Saringan provider di atas menjamin akun Meta — varian token
+      // Threads (threads_user_token, migrasi 0021) tidak pernah
+      // muncul di antrean ini.
+      tokenType: r.tokenType as MetaChannelTokenType | null,
+    }));
   });
 }

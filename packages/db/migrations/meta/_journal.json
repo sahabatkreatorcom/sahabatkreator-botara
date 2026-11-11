@@ -148,6 +148,13 @@
       "when": 1793870118816,
       "tag": "0020_tiktok_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1793870118817,
+      "tag": "0021_threads_token_type",
+      "breakpoints": true
     }
   ]
 }

@@ -90,6 +90,11 @@ export const channelTokenTypeEnum = pgEnum("channel_token_type", [
   "page_access_token",
   "system_user_token",
   "business_token",
+  // Token pengguna Threads berumur panjang (±60 hari) dari OAuth
+  // aplikasi Threads (integrasi Threads): refreshable via grant
+  // `th_refresh_token` di graph.threads.net TANPA app secret — beda
+  // keluarga dari varian Meta di atas, jadi nilainya sendiri.
+  "threads_user_token",
 ]);
 
 /**

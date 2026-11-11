@@ -1573,13 +1573,39 @@ export class ThreadsGraphError extends GraphApiError {
   }
 }
 
+/** Hasil exchange/refresh token Threads: token + sisa umur dari provider. */
+export interface ThreadsOAuthTokenResult {
+  accessToken: string;
+  /** Threads user ID pemilik token (hanya dari exchange code). */
+  userId: string | null;
+  expiresInSeconds: number | null;
+}
+
+/** Profil akun Threads pemilik token (`GET /me`). */
+export interface ThreadsProfile {
+  id: string;
+  username: string | null;
+  name: string | null;
+}
+
 /**
- * Klien Threads API untuk PUBLIKASI SAJA.
+ * Klien Threads API: publikasi + OAuth connect (BUKAN inbox).
  *
  * Ia berbagi plumbing HTTP Graph dengan MetaGraphClient, tetapi bukan
  * adapter inbox dan tidak punya metode pesan/webhook. Threads memakai
  * host `graph.threads.net` dan versi v1.0; tokennya adalah Threads
  * user access token dari aplikasi Threads yang terpisah.
+ *
+ * Endpoint OAuth Threads TIDAK berversi (dokumentasi resmi):
+ * `POST /oauth/access_token`, `GET /access_token` (th_exchange_token),
+ * dan `GET /refresh_access_token` (th_refresh_token) hidup di root
+ * host, sedangkan permukaan Graph biasa (termasuk `/me`) di bawah
+ * `/v1.0`. Karena plumbing bersama selalu menyisipkan versi, metode
+ * OAuth memakai helper mentah di kelas ini. Khusus Threads, token
+ * pada dua grant GET memang WAJIB dikirim sebagai query `access_token`
+ * (satu-satunya bentuk yang diterima API Threads — tidak ada varian
+ * header); token tetap tidak pernah masuk log/error paket ini, yang
+ * hanya membawa status + kode/pesan resmi provider.
  */
 export class ThreadsGraphClient extends GraphHttpClient {
   constructor(options: GraphClientOptions = {}) {
@@ -1646,6 +1672,156 @@ export class ThreadsGraphClient extends GraphHttpClient {
     );
     if (!body.id) throw new ThreadsGraphError(200, null, "missing_post_id");
     return { providerPostId: body.id };
+  }
+
+  // -------------------------------------------------------------------------
+  // OAuth (integrasi Threads): endpoint TANPA versi di root graph.threads.net
+  // -------------------------------------------------------------------------
+
+  /** Satu panggilan ke endpoint OAuth tak-berversi (root host). */
+  private async oauthRequest<T>(
+    path: string,
+    init: { method: "GET" | "POST"; form?: URLSearchParams },
+  ): Promise<T> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/${path}`, {
+        method: init.method,
+        headers: init.form
+          ? { "content-type": "application/x-www-form-urlencoded" }
+          : {},
+        body: init.form?.toString(),
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      throw this.createError(0, null, "network_error", null);
+    }
+    if (!response.ok) throw await this.parseError(response);
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw this.createError(response.status, null, "invalid_response", null);
+    }
+  }
+
+  /**
+   * Tukar authorization code → token berumur pendek (±1 jam) + Threads
+   * user ID: `POST /oauth/access_token` (form: client_id,
+   * client_secret, grant_type=authorization_code, redirect_uri yang
+   * IDENTIK dengan dialog authorize, code).
+   */
+  async exchangeThreadsCode(input: {
+    clientId: string;
+    clientSecret: string;
+    code: string;
+    redirectUri: string;
+  }): Promise<ThreadsOAuthTokenResult> {
+    const form = new URLSearchParams({
+      client_id: input.clientId,
+      client_secret: input.clientSecret,
+      grant_type: "authorization_code",
+      redirect_uri: input.redirectUri,
+      code: input.code,
+    });
+    const body = await this.oauthRequest<{
+      access_token?: string;
+      user_id?: string | number;
+    }>("oauth/access_token", { method: "POST", form });
+    if (typeof body.access_token !== "string" || !body.access_token) {
+      throw new ThreadsGraphError(200, null, "missing_access_token");
+    }
+    return {
+      accessToken: body.access_token,
+      userId:
+        typeof body.user_id === "string" || typeof body.user_id === "number"
+          ? String(body.user_id)
+          : null,
+      expiresInSeconds: null,
+    };
+  }
+
+  /**
+   * Tukar token berumur pendek → token berumur panjang (±60 hari):
+   * `GET /access_token?grant_type=th_exchange_token&client_secret=…&
+   * access_token=…` (bentuk resmi Threads; secret & token memang
+   * parameter query di grant ini).
+   */
+  async exchangeThreadsLongLivedToken(input: {
+    clientSecret: string;
+    shortLivedToken: string;
+  }): Promise<ThreadsOAuthTokenResult> {
+    const query = new URLSearchParams({
+      grant_type: "th_exchange_token",
+      client_secret: input.clientSecret,
+      access_token: input.shortLivedToken,
+    });
+    const body = await this.oauthRequest<{
+      access_token?: string;
+      expires_in?: number;
+    }>(`access_token?${query.toString()}`, { method: "GET" });
+    if (typeof body.access_token !== "string" || !body.access_token) {
+      throw new ThreadsGraphError(200, null, "missing_access_token");
+    }
+    return {
+      accessToken: body.access_token,
+      userId: null,
+      expiresInSeconds:
+        typeof body.expires_in === "number" ? body.expires_in : null,
+    };
+  }
+
+  /**
+   * Segarkan token berumur panjang (grant `th_refresh_token`): token
+   * BARU berumur ±60 hari sejak penyegaran. Token saat ini dibaca dari
+   * konstruktor klien (accessToken) dan dikirim sebagai query
+   * `access_token` — satu-satunya bentuk grant ini; app secret TIDAK
+   * diperlukan (beda dari refresh `tbft` Meta). Syarat provider: token
+   * masih sah, berumur ≥24 jam, dan belum kedaluwarsa; pelanggaran
+   * dijawab error Graph (190 untuk token mati → hubungkan ulang).
+   */
+  async refreshThreadsToken(): Promise<ThreadsOAuthTokenResult> {
+    if (!this.accessToken) {
+      throw new ThreadsGraphError(0, null, "missing_access_token");
+    }
+    const query = new URLSearchParams({
+      grant_type: "th_refresh_token",
+      access_token: this.accessToken,
+    });
+    const body = await this.oauthRequest<{
+      access_token?: string;
+      expires_in?: number;
+    }>(`refresh_access_token?${query.toString()}`, { method: "GET" });
+    if (typeof body.access_token !== "string" || !body.access_token) {
+      throw new ThreadsGraphError(200, null, "missing_access_token");
+    }
+    return {
+      accessToken: body.access_token,
+      userId: null,
+      expiresInSeconds:
+        typeof body.expires_in === "number" ? body.expires_in : null,
+    };
+  }
+
+  /**
+   * Profil akun pemilik token (`GET /v1.0/me?fields=id,username,name`)
+   * — permukaan berversi biasa, token sebagai Bearer (klien dibangun
+   * dengan token berumur panjang). Dipakai connect untuk external_id
+   * (id) + display_name (name) + public_handle (username).
+   */
+  async getThreadsProfile(): Promise<ThreadsProfile> {
+    const body = await this.getJsonParams<{
+      id?: string;
+      username?: string;
+      name?: string;
+    }>("me", { fields: "id,username,name" });
+    if (typeof body.id !== "string" || !body.id) {
+      throw new ThreadsGraphError(200, null, "missing_profile_id");
+    }
+    return {
+      id: body.id,
+      username: typeof body.username === "string" ? body.username : null,
+      name: typeof body.name === "string" ? body.name : null,
+    };
   }
 }
 

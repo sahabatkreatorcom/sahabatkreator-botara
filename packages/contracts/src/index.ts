@@ -15,6 +15,7 @@ export * from "./contacts";
 export * from "./inbox";
 export * from "./channels";
 export * from "./meta-oauth";
+export * from "./threads-oauth";
 export * from "./webchat";
 export * from "./automations";
 export * from "./automation-templates";

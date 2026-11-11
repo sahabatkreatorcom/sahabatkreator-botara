@@ -382,6 +382,16 @@ export {
   type MetaTokenLifecycleRef,
 } from "./meta";
 export {
+  createThreadsChannelAccount,
+  updateThreadsChannelAccountCredentials,
+  threadsTokenLifecycleDecision,
+  listExpiringThreadsTokens,
+  type ThreadsChannelTokenType,
+  type CreateThreadsChannelInput,
+  type UpdateThreadsCredentialsInput,
+  type ThreadsTokenLifecycleRef,
+} from "./threads";
+export {
   WHATSAPP_CONTACT_FALLBACK_NAME,
   whatsAppProviderMessageId,
   createWhatsAppChannelAccount,
