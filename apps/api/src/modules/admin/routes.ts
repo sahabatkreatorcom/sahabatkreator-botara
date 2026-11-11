@@ -18,6 +18,7 @@ import {
   listPlatformSettingStatuses,
   recordPlatformSettingTest,
   resolvePostMediaPublicBaseUrl,
+  resolveR2Identity,
   resolveTikTokPrivacyLevel,
   resolveYouTubePrivacyStatus,
   setPlatformSetting,
@@ -36,8 +37,12 @@ export interface AdminRoutesOptions {
   platformAdminEmails?: string;
   /** Kunci induk env PLATFORM_SETTINGS_SECRET + fallback env per kunci. */
   platform: PlatformSettingsOptions;
-  /** Info R2 bukan rahasia (dari @sahabat-kreator/config) untuk status & probe. */
-  r2: { accountId: string; endpoint: string; bucket: string };
+  /**
+   * Identitas R2 TIDAK lagi dioper sebagai info statis: status & probe
+   * me-resolve `resolveR2Identity` per request dari core (panel → env
+   * → bawaan kode), jadi perubahan identitas di panel berlaku tanpa
+   * restart dalam jendela cache resolver (±60 detik).
+   */
   /**
    * Redirect URI OAuth Meta (Fase 7D) — callback tunggal yang ditampilkan
    * read-only di grup Meta panel agar pemilik mendaftarkannya persis di
@@ -74,6 +79,12 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   openrouter_model: 128,
   r2_access_key_id: 512,
   r2_secret_access_key: 512,
+  // Identitas R2 publik: account id tepat 32 heksadesimal, nama bucket
+  // maks 63 (aturan S3), endpoint URL https — bentuk ditegakkan
+  // isValidPlatformSettingValue; batas ini hanya pagar panjang.
+  r2_account_id: 64,
+  r2_endpoint: 512,
+  r2_bucket: 64,
   meta_app_secret: 512,
   // Fase 7D: identifier publik Meta (App ID + config ID Login for
   // Business) — pendek, bukan kredensial; nilainya DITAMPILKAN di panel.
@@ -206,7 +217,10 @@ export function createAdminRoutes(
     );
     const body = PlatformSettingsResponseSchema.parse({
       settings: statuses.map(serializeStatus),
-      r2: options.r2,
+      // Identitas R2 efektif dari resolver core (panel → env →
+      // bawaan) — selalu terisi penuh, menggantikan info statis
+      // config yang sebelumnya dioper pemanggil.
+      r2: await resolveR2Identity(bundle.db, options.platform),
       meta: {
         appId: publicConfig.meta_app_id,
         igConfigId: publicConfig.meta_ig_config_id,
@@ -341,9 +355,13 @@ export function createAdminRoutes(
         getProviderSecret(bundle.db, "r2_access_key_id", options.platform),
         getProviderSecret(bundle.db, "r2_secret_access_key", options.platform),
       ]);
+      // Target probe = identitas efektif SAAT INI (resolver, bukan
+      // nilai boot): uji koneksi harus menguji bucket yang benar-
+      // benar akan dipakai konsumen setelah perubahan panel.
+      const identity = await resolveR2Identity(bundle.db, options.platform);
       result = await probeR2Bucket(
         { accessKeyId, secretAccessKey },
-        { endpoint: options.r2.endpoint, bucket: options.r2.bucket },
+        { endpoint: identity.endpoint, bucket: identity.bucket },
       );
     }
 

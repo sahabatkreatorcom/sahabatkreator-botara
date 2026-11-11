@@ -81,6 +81,11 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   openrouter_embedding_model: "admin.openrouterEmbeddingModelLabel",
   r2_access_key_id: "admin.r2AccessKeyIdLabel",
   r2_secret_access_key: "admin.r2SecretAccessKeyLabel",
+  // Label baris identitas memakai ulang label kartu info di atasnya
+  // (pola Meta: metaAppIdLabel dipakai kartu sekaligus baris).
+  r2_account_id: "admin.r2AccountLabel",
+  r2_endpoint: "admin.r2EndpointLabel",
+  r2_bucket: "admin.r2BucketLabel",
   meta_app_secret: "admin.metaAppSecretLabel",
   meta_webhook_verify_token: "admin.metaWebhookVerifyTokenLabel",
   meta_app_id: "admin.metaAppIdLabel",
@@ -205,11 +210,20 @@ export function AdminPage({ t, locale }: AdminPageProps) {
         </div>
       </section>
 
+      {/*
+        Grup R2 SATU kesatuan (instruksi pemilik 2026-11-12): identitas
+        bucket (account id, endpoint, bucket — publik, baris teks,
+        nilai efektif ditampilkan di kartu), kredensial access key
+        (rahasia, baris password + uji koneksi), dan base URL media
+        publik yang memang alamat publik dari bucket yang sama (dulu
+        di grup Content schedule). Baris publik dimuat ulang sesudah
+        diubah agar kartu efektifnya segar — pola identifier Meta.
+      */}
       <section className="mt-8">
         <h2 className="text-base font-semibold text-ink">{t("admin.r2Title")}</h2>
         <p className="mt-1 max-w-2xl text-sm text-muted">{t("admin.r2Body")}</p>
         {r2Info ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-3">
+          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-2">
             <div className="rounded-xl bg-surface p-3">
               <dt className="text-xs text-muted">{t("admin.r2AccountLabel")}</dt>
               <dd className="mt-0.5 break-all font-mono text-xs text-ink">
@@ -228,9 +242,50 @@ export function AdminPage({ t, locale }: AdminPageProps) {
                 {r2Info.bucket}
               </dd>
             </div>
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.postMediaPublicBaseUrlLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {contentScheduleInfo?.publicMediaBaseUrl ?? "—"}
+              </dd>
+            </div>
           </dl>
         ) : null}
         <div className="mt-4 space-y-3">
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="r2_account_id"
+            status={byKey("r2_account_id")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="r2_endpoint"
+            status={byKey("r2_endpoint")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="r2_bucket"
+            status={byKey("r2_bucket")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
           <SettingRow
             t={t}
             locale={locale}
@@ -244,6 +299,17 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             settingKey="r2_secret_access_key"
             status={byKey("r2_secret_access_key")}
             onStatusChanged={onStatusChanged}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="post_media_public_base_url"
+            status={byKey("post_media_public_base_url")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
           />
         </div>
       </section>
@@ -522,11 +588,12 @@ export function AdminPage({ t, locale }: AdminPageProps) {
 
       {/*
         Pengaturan content schedule multi-platform — BUKAN kredensial:
-        base URL media publik (publik menurut sifatnya) dan dua level
-        privasi enum. Nilai efektif (panel → env → bawaan aman)
-        DITAMPILKAN seperti grup publik lain; barisnya teks biasa dan
-        dimuat ulang sesudah diubah agar tampilan efektifnya segar.
-        Nilai di luar pilihan sah ditolak server saat disimpan.
+        dua level privasi enum (base URL media publik PINDAH ke grup
+        Cloudflare R2 di atas — ia alamat publik bucket yang sama).
+        Nilai efektif (panel → env → bawaan aman) DITAMPILKAN seperti
+        grup publik lain; barisnya teks biasa dan dimuat ulang sesudah
+        diubah agar tampilan efektifnya segar. Nilai di luar pilihan
+        sah ditolak server saat disimpan.
       */}
       <section className="mt-8">
         <h2 className="text-base font-semibold text-ink">
@@ -536,15 +603,7 @@ export function AdminPage({ t, locale }: AdminPageProps) {
           {t("admin.contentScheduleBody")}
         </p>
         {contentScheduleInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-3">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.postMediaPublicBaseUrlLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {contentScheduleInfo.publicMediaBaseUrl ?? "—"}
-              </dd>
-            </div>
+          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-2">
             <div className="rounded-xl bg-surface p-3">
               <dt className="text-xs text-muted">
                 {t("admin.youtubePrivacyStatusLabel")}
@@ -564,17 +623,6 @@ export function AdminPage({ t, locale }: AdminPageProps) {
           </dl>
         ) : null}
         <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="post_media_public_base_url"
-            status={byKey("post_media_public_base_url")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
           <SettingRow
             t={t}
             locale={locale}

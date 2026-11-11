@@ -11,6 +11,12 @@
  *     (bukan mock); setelah kunci DICABUT → null → provider mock lagi.
  *  4. Audit `platform_settings.*` tertulis TANPA nilai (meta hanya key).
  *  5. Allowlist admin: pencocokan email case-insensitive + koma.
+ *  6. Kunci berbentuk 2026-11-12 (verify token, privasi, base URL):
+ *     resolver bertipe menerapkan bawaan aman & mengabaikan nilai
+ *     tidak sah ke fallback env.
+ *  7. Identitas R2 (account id, endpoint, bucket): panel → env →
+ *     bawaan kode yang identik dengan perilaku sebelum panel ada;
+ *     endpoint kosong diturunkan dari account id efektif.
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:platform-settings
  * (Nilai dummy di skrip ini adalah fixture uji yang jelas-jelas palsu.)
@@ -27,8 +33,10 @@ import { drizzle } from "drizzle-orm/pglite";
 import * as schema from "@sahabat-kreator/db/schema";
 import type { Database } from "@sahabat-kreator/db";
 import {
+  R2_DEFAULT_ACCOUNT_ID,
   clearPlatformSetting,
   clearPlatformSettingsCache,
+  getPlatformPublicConfig,
   getProviderSecret,
   isPlatformAdminEmail,
   isValidPlatformSettingValue,
@@ -36,10 +44,16 @@ import {
   recordPlatformSettingTest,
   resolveOpenRouterConfig,
   resolvePostMediaPublicBaseUrl,
+  resolveR2Identity,
   resolveTikTokPrivacyLevel,
   resolveYouTubePrivacyStatus,
   setPlatformSetting,
 } from "@sahabat-kreator/core";
+import {
+  R2_ACCOUNT_ID,
+  R2_BUCKET_NAMES,
+  R2_ENDPOINT,
+} from "@sahabat-kreator/config";
 import { createLlmProvider } from "@sahabat-kreator/ai";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -258,6 +272,115 @@ assert.equal(isValidPlatformSettingValue("openrouter_api_key", "apa-saja"), true
 const csStatuses = await listPlatformSettingStatuses(db, csOpts);
 assert.ok(!JSON.stringify(csStatuses).includes(PANEL_VERIFY_TOKEN));
 console.log("[6b] resolver bertipe: bawaan aman, panel sah menang, nilai tidak sah diabaikan → env; status bebas nilai: OK");
+
+// ---------- 7. Identitas R2: panel → env → bawaan kode ----------
+// Bawaan resolver core adalah cerminan konstanta config — jaga tetap sama.
+assert.equal(R2_DEFAULT_ACCOUNT_ID, R2_ACCOUNT_ID);
+
+const PANEL_ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
+const PANEL_ENDPOINT = "https://endpoint-panel.invalid/s3";
+const r2EnvOpts = {
+  masterSecret: MASTER,
+  env: { r2_bucket: "bucket-dari-env" },
+};
+
+// Tanpa panel & tanpa env → PERSIS perilaku sebelum kunci ini ada:
+// account id konstanta, endpoint turunannya, bucket staging.
+clearPlatformSettingsCache();
+assert.deepEqual(await resolveR2Identity(db, baseOpts), {
+  accountId: R2_ACCOUNT_ID,
+  endpoint: R2_ENDPOINT,
+  bucket: R2_BUCKET_NAMES.staging,
+});
+console.log("[7a] tanpa panel & tanpa env → identitas bawaan kode (konstanta + turunan + staging): OK");
+
+// Env bucket saja → bucket env menang (jalur produksi saat ini:
+// R2_BUCKET=sahabat-kreator-prod lewat env), sisanya bawaan.
+assert.deepEqual(await resolveR2Identity(db, r2EnvOpts), {
+  accountId: R2_ACCOUNT_ID,
+  endpoint: R2_ENDPOINT,
+  bucket: "bucket-dari-env",
+});
+console.log("[7b] env R2_BUCKET → bucket env menang, account/endpoint bawaan: OK");
+
+// Panel account id → menang; endpoint yang belum diisi DITURUNKAN
+// dari account id efektif (bukan dari account bawaan).
+await setPlatformSetting(
+  db,
+  { key: "r2_account_id", value: PANEL_ACCOUNT_ID, updatedByUserId: ADMIN_USER },
+  r2EnvOpts,
+);
+clearPlatformSettingsCache();
+assert.deepEqual(await resolveR2Identity(db, r2EnvOpts), {
+  accountId: PANEL_ACCOUNT_ID,
+  endpoint: `https://${PANEL_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  bucket: "bucket-dari-env",
+});
+console.log("[7c] panel account id → menang; endpoint kosong → turunan dari account efektif: OK");
+
+// Panel endpoint eksplisit → menang atas turunan; panel bucket →
+// menang atas env. Konfigurasi publik memuat nilai mentah panel.
+await setPlatformSetting(
+  db,
+  { key: "r2_endpoint", value: PANEL_ENDPOINT, updatedByUserId: ADMIN_USER },
+  r2EnvOpts,
+);
+await setPlatformSetting(
+  db,
+  { key: "r2_bucket", value: "bucket-dari-panel", updatedByUserId: ADMIN_USER },
+  r2EnvOpts,
+);
+clearPlatformSettingsCache();
+assert.deepEqual(await resolveR2Identity(db, r2EnvOpts), {
+  accountId: PANEL_ACCOUNT_ID,
+  endpoint: PANEL_ENDPOINT,
+  bucket: "bucket-dari-panel",
+});
+const r2Public = await getPlatformPublicConfig(db, r2EnvOpts);
+assert.equal(r2Public.r2_account_id, PANEL_ACCOUNT_ID);
+assert.equal(r2Public.r2_endpoint, PANEL_ENDPOINT);
+assert.equal(r2Public.r2_bucket, "bucket-dari-panel");
+const r2Statuses = await listPlatformSettingStatuses(db, r2EnvOpts);
+for (const key of ["r2_account_id", "r2_endpoint", "r2_bucket"] as const) {
+  assert.equal(r2Statuses.find((s) => s.key === key)?.source, "panel");
+}
+console.log("[7d] panel endpoint & bucket → menang atas turunan & env; konfigurasi publik memuatnya: OK");
+
+// Nilai panel TIDAK sah (ditulis di luar API) diabaikan resolver:
+// account jatuh ke bawaan, bucket jatuh ke env.
+await setPlatformSetting(
+  db,
+  { key: "r2_account_id", value: "bukan-id-heks", updatedByUserId: ADMIN_USER },
+  r2EnvOpts,
+);
+await setPlatformSetting(
+  db,
+  { key: "r2_bucket", value: "Bucket_Tidak_Sah!", updatedByUserId: ADMIN_USER },
+  r2EnvOpts,
+);
+clearPlatformSettingsCache();
+const afterInvalid = await resolveR2Identity(db, r2EnvOpts);
+assert.equal(afterInvalid.accountId, R2_ACCOUNT_ID);
+assert.equal(afterInvalid.bucket, "bucket-dari-env");
+assert.equal(afterInvalid.endpoint, PANEL_ENDPOINT);
+assert.equal(isValidPlatformSettingValue("r2_account_id", PANEL_ACCOUNT_ID), true);
+assert.equal(isValidPlatformSettingValue("r2_account_id", "bukan-id-heks"), false);
+assert.equal(isValidPlatformSettingValue("r2_endpoint", "https://x.invalid"), true);
+assert.equal(isValidPlatformSettingValue("r2_endpoint", "http://x.invalid"), false);
+assert.equal(isValidPlatformSettingValue("r2_endpoint", "bukan-url"), false);
+assert.equal(isValidPlatformSettingValue("r2_bucket", "bucket-sah-1"), true);
+assert.equal(isValidPlatformSettingValue("r2_bucket", "Bucket"), false);
+assert.equal(isValidPlatformSettingValue("r2_bucket", "ab"), false);
+for (const key of ["r2_account_id", "r2_endpoint", "r2_bucket"] as const) {
+  await clearPlatformSetting(db, { key, updatedByUserId: ADMIN_USER });
+}
+clearPlatformSettingsCache();
+assert.deepEqual(await resolveR2Identity(db, r2EnvOpts), {
+  accountId: R2_ACCOUNT_ID,
+  endpoint: R2_ENDPOINT,
+  bucket: "bucket-dari-env",
+});
+console.log("[7e] nilai tidak sah diabaikan → fallback; cabut panel → env/bawaan lagi: OK");
 
 await client.close();
 console.log("verify platform-settings (PGlite): SEMUA LULUS");

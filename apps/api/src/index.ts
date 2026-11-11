@@ -11,12 +11,9 @@ import {
 import {
   APP_VERSION,
   META_GRAPH_API_VERSION,
-  R2_ACCOUNT_ID,
-  R2_ENDPOINT,
   createLogger,
   loadEnv,
   resolveMediaStorageRoot,
-  resolveR2Bucket,
 } from "@sahabat-kreator/config";
 import { createAuthBundle, type AuthBundle } from "./auth";
 import { createRedisRateLimitStorage } from "./rate-limit-store";
@@ -95,6 +92,12 @@ const platformOptions: PlatformSettingsOptions = {
     openrouter_model: env.OPENROUTER_MODEL,
     r2_access_key_id: env.R2_ACCESS_KEY_ID,
     r2_secret_access_key: env.R2_SECRET_ACCESS_KEY,
+    // Identitas R2: bucket adalah satu-satunya yang punya env
+    // (R2_BUCKET) — account id & endpoint tidak punya env; fallback
+    // mereka adalah bawaan kode di resolver core `resolveR2Identity`
+    // (konstanta account id / endpoint turunan), persis perilaku
+    // sebelum identitas ini bisa diisi panel.
+    r2_bucket: env.R2_BUCKET,
     // Fase 7A.1: App Secret Meta ikut dikelola panel; env placeholder
     // staging tetap fallback sampai pemilik mengisi panel.
     meta_app_secret: env.META_APP_SECRET,
@@ -498,11 +501,8 @@ routes.route(
   createAdminRoutes(authBundle, {
     platformAdminEmails: env.PLATFORM_ADMIN_EMAILS,
     platform: platformOptions,
-    r2: {
-      accountId: R2_ACCOUNT_ID,
-      endpoint: R2_ENDPOINT,
-      bucket: resolveR2Bucket(env.R2_BUCKET),
-    },
+    // Identitas R2 tidak dioper lagi: modul admin me-resolve-nya per
+    // request lewat `resolveR2Identity` (panel → env → bawaan kode).
     // Fase 7D: redirect URI OAuth tunggal ditampilkan read-only di panel.
     metaOAuthRedirectUri: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}/api/meta/oauth/callback`,
     // Fase 11B: base URL API Resend untuk probe uji koneksi panel.

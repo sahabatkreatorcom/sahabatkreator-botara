@@ -14,6 +14,15 @@ export const PlatformSettingKeySchema = z.enum([
   "openrouter_model",
   "r2_access_key_id",
   "r2_secret_access_key",
+  // Identitas R2 BUKAN rahasia (instruksi pemilik 2026-11-12): account
+  // id, endpoint, dan bucket kini juga diisi lewat panel agar satu grup
+  // dengan kredensial R2 + base URL media publik — pola identifier
+  // publik Meta (nilai efektif ditampilkan lewat PlatformR2Info).
+  // Resolusi: panel → env (khusus bucket: R2_BUCKET) → bawaan kode
+  // (konstanta account id / turunan endpoint / logika resolveR2Bucket).
+  "r2_account_id",
+  "r2_endpoint",
+  "r2_bucket",
   // Fase 7A.1: App Secret Meta App platform — memverifikasi tanda tangan
   // webhook Instagram/Messenger. Sengaja TANPA uji koneksi: Meta tidak
   // menyediakan validasi app secret yang berdiri sendiri.
@@ -77,7 +86,13 @@ export type PlatformSettingStatus = z.infer<
   typeof PlatformSettingStatusSchema
 >;
 
-/** Info R2 BUKAN rahasia (konfigurasi tetap) yang ditampilkan panel. */
+/**
+ * Info R2 BUKAN rahasia yang ditampilkan panel: identitas efektif
+ * (panel → env → bawaan kode) hasil `resolveR2Identity` di core —
+ * selalu terisi penuh karena resolver menerapkan bawaan yang sama
+ * seperti sebelum panel ada (account id konstanta, endpoint turunan,
+ * bucket hasil logika resolveR2Bucket).
+ */
 export const PlatformR2InfoSchema = z.object({
   accountId: z.string(),
   endpoint: z.string(),

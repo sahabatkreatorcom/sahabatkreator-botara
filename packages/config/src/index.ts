@@ -234,7 +234,7 @@ const EnvSchema = z.object({
    */
   R2_ACCESS_KEY_ID: z.string().min(1).optional(),
   R2_SECRET_ACCESS_KEY: z.string().min(1).optional(),
-  /** Override nama bucket R2; default diturunkan dari NODE_ENV (lihat R2_BUCKET_NAMES). */
+  /** Override env nama bucket R2 (lihat resolveR2Bucket); di atas env ada Panel Admin `r2_bucket`. */
   R2_BUCKET: z.string().min(1).optional(),
   /**
    * Akar penyimpanan media di disk (Fase 18).
@@ -351,9 +351,15 @@ const EnvSchema = z.object({
 });
 
 /**
- * Cloudflare R2 (keputusan user 2026-11-01) — konfigurasi BUKAN rahasia:
- * account id & nama bucket boleh tampil di UI Panel Admin sebagai info
- * tetap. Endpoint S3-compatible diturunkan dari account id. Yang rahasia
+ * Cloudflare R2 (keputusan user 2026-11-01) — konfigurasi BUKAN rahasia.
+ * Konstanta di sini sekarang berperan sebagai BAWAAN KODE paling bawah:
+ * sejak instruksi pemilik 2026-11-12, account id, endpoint, dan bucket
+ * bisa diisi dari Panel Admin (kunci `r2_account_id` / `r2_endpoint` /
+ * `r2_bucket`), dan resolver core `resolveR2Identity` menerapkannya
+ * dengan urutan panel → env (bucket: R2_BUCKET) → bawaan di sini.
+ * Account id bawaan di sini DICERMINKAN resolver core (core tidak
+ * mengimpor config); verify:platform-settings menjaga keduanya sama.
+ * Endpoint S3-compatible diturunkan dari account id. Yang rahasia
  * hanya Access Key ID + Secret Access Key (panel/env, lihat di atas).
  */
 export const R2_ACCOUNT_ID = "bb2c1b6af93981fdd0a97da3b26aa82c";
@@ -364,10 +370,12 @@ export const R2_BUCKET_NAMES = {
 } as const;
 
 /**
- * Bucket aktif: override env `R2_BUCKET` menang; tanpa override defaultnya
- * bucket STAGING. Sengaja TIDAK diturunkan dari NODE_ENV — di server
- * staging pun NODE_ENV=production (mode runtime), jadi turunan dari sana
- * akan salah sasaran. Deployment production WAJIB men-set R2_BUCKET ke
+ * Bucket aktif (lapis env/bawaan — di atasnya kini ada lapis Panel
+ * Admin `r2_bucket`, lihat `resolveR2Identity` di core): override env
+ * `R2_BUCKET` menang; tanpa override defaultnya bucket STAGING.
+ * Sengaja TIDAK diturunkan dari NODE_ENV — di server staging pun
+ * NODE_ENV=production (mode runtime), jadi turunan dari sana akan
+ * salah sasaran. Deployment production WAJIB men-set R2_BUCKET ke
  * bucket prod secara eksplisit (arah gagal yang aman: ke bucket dev).
  */
 export function resolveR2Bucket(override?: string): string {

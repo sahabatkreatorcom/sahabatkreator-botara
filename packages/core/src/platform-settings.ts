@@ -45,6 +45,17 @@ export const PLATFORM_SETTING_KEYS = [
   "openrouter_model",
   "r2_access_key_id",
   "r2_secret_access_key",
+  // Identitas R2 — BUKAN rahasia (pola identifier publik Meta di
+  // bawah): account id, endpoint, dan bucket milik platform. Dulu
+  // account id konstanta tertulis di @sahabat-kreator/config dan
+  // bucket hanya env R2_BUCKET; instruksi pemilik 2026-11-12 meminta
+  // ketiganya bisa diisi dari panel (satu grup dengan kredensial R2
+  // dan base URL media publik). Resolusinya lewat resolver bertipe
+  // `resolveR2Identity`: panel → env (bucket) → bawaan kode yang
+  // PERSIS mempertahankan perilaku sebelum panel ada.
+  "r2_account_id",
+  "r2_endpoint",
+  "r2_bucket",
   // Fase 7A.1: App Secret Meta App platform (verifikasi tanda tangan
   // webhook Meta) ikut dikelola panel; env META_APP_SECRET hanya fallback
   // (di staging saat ini placeholder acak sampai pemilik mengisi panel).
@@ -106,6 +117,14 @@ export const PLATFORM_SETTING_KEYS = [
 
 /** Kunci platform yang nilainya identifier PUBLIK (Fase 7D, lihat atas). */
 export const PLATFORM_PUBLIC_CONFIG_KEYS = [
+  // Identitas R2: account id tampil di setiap endpoint S3-compatible,
+  // endpoint & nama bucket adalah alamat publik menurut sifatnya —
+  // sama seperti identifier Meta di bawah, nilainya boleh ditampilkan
+  // panel untuk verifikasi pemilik (lewat PlatformR2Info hasil
+  // resolver, yang menerapkan turunan endpoint + bawaan bucket).
+  "r2_account_id",
+  "r2_endpoint",
+  "r2_bucket",
   "meta_app_id",
   "meta_ig_config_id",
   "meta_wa_config_id",
@@ -150,6 +169,9 @@ export async function getPlatformPublicConfig(
   opts: PlatformSettingsOptions,
 ): Promise<PlatformPublicConfig> {
   const [
+    r2AccountId,
+    r2Endpoint,
+    r2Bucket,
     appId,
     igConfigId,
     waConfigId,
@@ -160,6 +182,9 @@ export async function getPlatformPublicConfig(
     youtubePrivacyStatus,
     tiktokPrivacyLevel,
   ] = await Promise.all([
+    getProviderSecret(db, "r2_account_id", opts),
+    getProviderSecret(db, "r2_endpoint", opts),
+    getProviderSecret(db, "r2_bucket", opts),
     getProviderSecret(db, "meta_app_id", opts),
     getProviderSecret(db, "meta_ig_config_id", opts),
     getProviderSecret(db, "meta_wa_config_id", opts),
@@ -171,6 +196,12 @@ export async function getPlatformPublicConfig(
     getProviderSecret(db, "tiktok_privacy_level", opts),
   ]);
   return {
+    // Nilai MENTAH panel → env → null per kunci (pola fungsi ini);
+    // tampilan panel memakai `resolveR2Identity` yang menerapkan
+    // turunan endpoint + bawaan agar selalu terisi penuh.
+    r2_account_id: r2AccountId,
+    r2_endpoint: r2Endpoint,
+    r2_bucket: r2Bucket,
     meta_app_id: appId,
     meta_ig_config_id: igConfigId,
     meta_wa_config_id: waConfigId,
@@ -478,6 +509,20 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isHttpsUrl(value: string): boolean {
+  try {
+    return new URL(value).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Account ID Cloudflare: 32 karakter heksadesimal. */
+const R2_ACCOUNT_ID_PATTERN = /^[0-9a-fA-F]{32}$/;
+
+/** Nama bucket S3/R2: 3–63 huruf kecil/angka/strip, awal & akhir alfanumerik. */
+const R2_BUCKET_PATTERN = /^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/;
+
 /**
  * Validasi bentuk untuk kunci yang nilainya bukan teks bebas. Dipakai
  * lapisan API saat PUT (nilai tidak sah ditolak 400) DAN resolver
@@ -496,6 +541,16 @@ export function isValidPlatformSettingValue(
       return (YOUTUBE_PRIVACY_STATUSES as readonly string[]).includes(value);
     case "tiktok_privacy_level":
       return (TIKTOK_PRIVACY_LEVELS as readonly string[]).includes(value);
+    case "r2_account_id":
+      return R2_ACCOUNT_ID_PATTERN.test(value);
+    case "r2_endpoint":
+      // Endpoint S3-compatible selalu https; nilai KOSONG tidak pernah
+      // sampai ke sini (skema PUT menolak string kosong) — kekosongan
+      // diwakili ketiadaan nilai, dan resolver menurunkannya dari
+      // account id efektif (lihat resolveR2Identity).
+      return isHttpsUrl(value);
+    case "r2_bucket":
+      return R2_BUCKET_PATTERN.test(value);
     default:
       return true;
   }
@@ -544,6 +599,72 @@ export async function resolveTikTokPrivacyLevel(
 ): Promise<TikTokPrivacyLevel> {
   const value = await resolveValidatedSetting(db, "tiktok_privacy_level", opts);
   return (value as TikTokPrivacyLevel | null) ?? "SELF_ONLY";
+}
+
+// ---------------------------------------------------------------------------
+// Identitas R2: resolver bertipe (panel → env → bawaan kode)
+// ---------------------------------------------------------------------------
+
+/**
+ * Bawaan account id — CERMINAN konstanta `R2_ACCOUNT_ID` di
+ * @sahabat-kreator/config (core sengaja tidak mengimpor config; pola
+ * yang sama seperti enum privasi di atas yang mencerminkan config).
+ * verify:platform-settings menegaskan kedua nilai tetap sama.
+ */
+export const R2_DEFAULT_ACCOUNT_ID = "bb2c1b6af93981fdd0a97da3b26aa82c";
+
+/**
+ * Bawaan bucket — CERMINAN `R2_BUCKET_NAMES.staging` di config, yaitu
+ * hasil `resolveR2Bucket(undefined)` ketika env R2_BUCKET kosong:
+ * SENGAJA bucket staging (arah gagal yang aman), bukan turunan
+ * NODE_ENV. Env R2_BUCKET sendiri mengalir lewat `opts.env.r2_bucket`
+ * yang dipetakan pemanggil dari env prosesnya.
+ */
+export const R2_DEFAULT_BUCKET = "sahabat-kreator-staging";
+
+/** Endpoint S3-compatible R2 dari account id (rumus `R2_ENDPOINT` di config). */
+export function r2EndpointForAccountId(accountId: string): string {
+  return `https://${accountId}.r2.cloudflarestorage.com`;
+}
+
+export interface R2Identity {
+  accountId: string;
+  endpoint: string;
+  bucket: string;
+}
+
+/**
+ * Identitas R2 efektif untuk konsumen (info panel, probe uji koneksi,
+ * dan konstruksi klien R2/S3 kelak):
+ * - accountId: panel `r2_account_id` → bawaan konstanta kode. (Tidak
+ *   ada env untuk kunci ini — persis seperti sebelum panel ada.)
+ * - endpoint: panel `r2_endpoint` → DITURUNKAN dari account id
+ *   efektif. Mengosongkan endpoint di panel (Hapus) berarti kembali
+ *   ke turunan ini, bukan ke endpoint kosong.
+ * - bucket: panel `r2_bucket` → env R2_BUCKET (lewat `opts.env`) →
+ *   logika `resolveR2Bucket` (bawaan staging).
+ * Nilai panel/env yang tidak sah bentuknya diabaikan lapis resolver
+ * (pola resolveValidatedSetting). Hasil SELALU terisi penuh, dan saat
+ * panel kosong perilakunya identik dengan sebelum kunci ini ada:
+ * account id konstanta, endpoint turunannya, bucket dari env/staging.
+ * Resolver membaca lewat getProviderSecret (cache ±60 dtk per proses),
+ * jadi perubahan panel berlaku tanpa restart dalam jendela itu —
+ * konsumen me-resolve per request/per pemakaian, bukan sekali di boot.
+ */
+export async function resolveR2Identity(
+  db: Database,
+  opts: PlatformSettingsOptions,
+): Promise<R2Identity> {
+  const accountId =
+    (await resolveValidatedSetting(db, "r2_account_id", opts)) ??
+    R2_DEFAULT_ACCOUNT_ID;
+  const endpoint =
+    (await resolveValidatedSetting(db, "r2_endpoint", opts)) ??
+    r2EndpointForAccountId(accountId);
+  const bucket =
+    (await resolveValidatedSetting(db, "r2_bucket", opts)) ??
+    R2_DEFAULT_BUCKET;
+  return { accountId, endpoint, bucket };
 }
 
 // ---------------------------------------------------------------------------

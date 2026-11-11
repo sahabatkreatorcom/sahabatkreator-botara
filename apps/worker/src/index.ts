@@ -255,6 +255,12 @@ const platformSettingsOptions: PlatformSettingsOptions = {
     post_media_public_base_url: env.POST_MEDIA_PUBLIC_BASE_URL,
     youtube_privacy_status: env.YOUTUBE_PRIVACY_STATUS,
     tiktok_privacy_level: env.TIKTOK_PRIVACY_LEVEL,
+    // Identitas R2: bucket adalah satu-satunya kunci identitas yang
+    // punya fallback env (R2_BUCKET) — dipetakan agar objek opsi
+    // proses ini lengkap bila konsumen worker me-resolve
+    // `resolveR2Identity` (semantik panel → env → bawaan yang sama
+    // seperti API). Account id & endpoint memang tanpa env.
+    r2_bucket: env.R2_BUCKET,
   },
 };
 
