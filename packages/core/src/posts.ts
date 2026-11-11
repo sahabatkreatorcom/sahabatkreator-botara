@@ -186,10 +186,11 @@ async function loadMedia(
  * Berbeda dari Telegram — yang sasaran channel-nya baru diketahui saat
  * bot ditambahkan ke sebuah channel oleh admin — Page, akun IG
  * Business, akun Threads, akun Bluesky, channel YouTube, profil
- * LinkedIn, dan akun Pinterest sudah membawa alamat terbitnya sejak
- * connect: `external_id`
+ * LinkedIn, akun Pinterest, dan lokasi Google Business sudah
+ * membawa alamat terbitnya sejak connect: `external_id`
  * akun adalah Page ID / IG user ID / Threads user ID / DID Bluesky /
- * channel ID YouTube / member ID LinkedIn / Pinterest user ID. Karena itu tidak ada tabel
+ * channel ID YouTube / member ID LinkedIn / Pinterest user ID / nama
+ * resource lokasi Google Business. Karena itu tidak ada tabel
  * sasaran baru: sasaran dimaterialisasi sebagai percakapan
  * `kind='channel'` dengan `provider_chat_id = external_id`, persis
  * bentuk yang sudah dipakai state machine post. Untuk Threads,
@@ -198,7 +199,9 @@ async function loadMedia(
  * memakai baris percakapan channel. Khusus YouTube, baris akunnya
  * sendiri disinkronkan dari koneksi Google tenant oleh
  * `syncYouTubeChannelAccount` (core/youtube) — kredensial penerbitan
- * tetap hidup di koneksi Google, bukan di akun channel.
+ * tetap hidup di koneksi Google, bukan di akun channel. Hal yang sama
+ * berlaku untuk lokasi Google Business lewat
+ * `syncGoogleBusinessLocationAccounts` (core/google-business).
  */
 const TIMELINE_ACCOUNT_PROVIDERS = [
   "messenger",
@@ -208,6 +211,7 @@ const TIMELINE_ACCOUNT_PROVIDERS = [
   "youtube",
   "linkedin",
   "pinterest",
+  "google_business",
 ] as const;
 
 /**
@@ -328,7 +332,7 @@ async function ensureTimelineTargets(
  * Channel yang bisa dituju: percakapan `kind='channel'` pada akun yang
  * masih terhubung. Percakapan channel Telegram dibuat saat bot
  * ditambahkan sebagai admin (webhook `my_chat_member` / `channel_post`);
- * sasaran Page/IG/Threads/Bluesky/YouTube/LinkedIn/Pinterest dimaterialisasi dari akun terhubung oleh
+ * sasaran Page/IG/Threads/Bluesky/YouTube/LinkedIn/Pinterest/Google Business dimaterialisasi dari akun terhubung oleh
  * `ensureTimelineTargets` di atas. Daftar kosong berarti belum ada
  * channel/akun linimasa yang terhubung, dan UI menampilkan instruksi
  * alih-alih pemilih kosong.

@@ -112,6 +112,14 @@ export type ChannelHealth = z.infer<typeof ChannelHealthSchema>;
  * aplikasi Pinterest milik pemilik (akses trial → persetujuan akses
  * penuh) — belum dibuka lewat endpoint generik ini dan dijawab
  * `CHANNEL_NOT_AVAILABLE_YET` yang sama.
+ *
+ * Dan untuk `provider: "google_business"` (Gelombang 3):
+ * provisioning-nya BUKAN connect channel sama sekali — tenant
+ * menghubungkan Google (modul janji temu, Fase 13G) dengan scope
+ * `business.manage` tambahan, lalu akun lokasi google_business
+ * disinkronkan dari koneksi Google itu oleh core
+ * (`syncGoogleBusinessLocationAccounts`). Endpoint generik ini
+ * menjawabnya `CHANNEL_NOT_AVAILABLE_YET` yang sama.
  */
 export const CreateChannelRequestSchema = z.object({
   provider: ChannelProviderSchema,

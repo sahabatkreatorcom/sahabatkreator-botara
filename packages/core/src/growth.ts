@@ -180,6 +180,12 @@ export function buildGrowthTargetUrl(
       // tidak ada tautan DM/atribusi growth untuk akun linimasa ini.
       return null;
     }
+    case "google_business": {
+      // Google Business khusus content schedule, bukan channel
+      // percakapan: tidak ada tautan DM/atribusi growth untuk akun
+      // linimasa ini.
+      return null;
+    }
   }
 }
 

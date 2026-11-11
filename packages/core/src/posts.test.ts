@@ -47,6 +47,8 @@ const BLUESKY_ACCOUNT = "8a040000-0000-4000-8000-000000000023";
 const YOUTUBE_ACCOUNT = "8a050000-0000-4000-8000-000000000023";
 const LINKEDIN_ACCOUNT = "8a060000-0000-4000-8000-000000000023";
 const PINTEREST_ACCOUNT = "8a070000-0000-4000-8000-000000000023";
+const GBP_ACCOUNT = "8a080000-0000-4000-8000-000000000023";
+const GBP_LOCATION_NAME = "accounts/123456/locations/789012";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
@@ -114,6 +116,12 @@ beforeAll(async () => {
        (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
      VALUES ($1, $2, 'pinterest', 'pin_user_123', 'Pinterest Promo', 'connected', 'v1:pinterest-token', 'pinterestpromo')`,
     [PINTEREST_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'google_business', $3, 'Toko Kopi Promo', 'connected', NULL, NULL)`,
+    [GBP_ACCOUNT, TEST_TENANT_ID, GBP_LOCATION_NAME],
   );
   await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
@@ -507,6 +515,78 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
         postId: longTitle.id,
       }),
     ).rejects.toMatchObject({ code: "POST_TITLE_TOO_LONG" });
+  });
+
+  it("lokasi Google Business menjadi sasaran publikasi (nama resource lokasi); teks+foto terjadwal, video ditolak", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const gbp = targets.find((target) => target.provider === "google_business");
+    expect(gbp?.channelAccountId).toBe(GBP_ACCOUNT);
+    expect(gbp?.providerChatId).toBe(GBP_LOCATION_NAME);
+    expect(gbp?.title).toBe("Toko Kopi Promo");
+
+    const text = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: gbp!.conversationId,
+      title: "Promo lokasi",
+      caption: "w".repeat(1700),
+      mediaIds: [],
+    });
+    expect(text.caption).toHaveLength(1500);
+    const scheduledText = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: text.id,
+    });
+    expect(scheduledText.post.status).toBe("scheduled");
+    expect(scheduledText.post.target.provider).toBe("google_business");
+
+    const photo = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: gbp!.conversationId,
+      title: "Foto lokasi",
+      caption: "Foto etalase baru",
+      mediaIds: [MEDIA_PHOTO],
+    });
+    const scheduledPhoto = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: photo.id,
+    });
+    expect(scheduledPhoto.post.status).toBe("scheduled");
+
+    const video = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: gbp!.conversationId,
+      title: "Video lokasi",
+      caption: "Postingan lokal tidak menerima video",
+      mediaIds: [MEDIA_VIDEO],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: video.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_KIND_UNSUPPORTED" });
+
+    const twoPhotos = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: gbp!.conversationId,
+      title: "Dua foto lokasi",
+      caption: "Postingan lokal hanya membawa satu foto",
+      mediaIds: [MEDIA_PHOTO, MEDIA_PHOTO_2],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: twoPhotos.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_TOO_MANY" });
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

@@ -42,6 +42,9 @@ export const PROVIDER_NAMES: Record<ChannelProvider, string> = {
   // Nama tampil saja: Pinterest juga khusus content schedule, bukan
   // channel broadcast/inbox.
   pinterest: "Pinterest",
+  // Nama tampil saja: Google Business juga khusus content schedule,
+  // bukan channel broadcast/inbox.
+  google_business: "Google Business",
 };
 
 export const SUPPORTED_PROVIDERS: ReadonlySet<ChannelProvider> = new Set([

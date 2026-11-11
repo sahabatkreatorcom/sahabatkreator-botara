@@ -28,7 +28,7 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("provider-ngawur")).toBeUndefined();
   });
 
-  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube + linkedin + pinterest sejauh ini)", () => {
+  it("hanya provider beradapter yang publishSupported (telegram + keluarga meta + bluesky + youtube + linkedin + pinterest + google business sejauh ini)", () => {
     const supported = Object.entries(POST_PROVIDER_CAPABILITIES)
       .filter(([, capability]) => capability.publishSupported)
       .map(([provider]) => provider);
@@ -41,7 +41,21 @@ describe("capability post per provider", () => {
       "youtube",
       "linkedin",
       "pinterest",
+      "google_business",
     ]);
+  });
+
+  it("google_business: postingan lokal per lokasi — teks 1500, satu foto, tanpa video/album", () => {
+    const gbp = getPostProviderCapability("google_business")!;
+    expect(gbp.publishSupported).toBe(true);
+    expect(gbp.mediaRequired).toBe(false);
+    expect(gbp.maxCaption).toBe(1500);
+    expect(gbp.maxTitle).toBeNull();
+    expect(gbp.maxMedia).toBe(1);
+    expect(gbp.supportsPhotos).toBe(true);
+    expect(gbp.supportsVideo).toBe(false);
+    expect(gbp.supportsAlbum).toBe(false);
+    expect(gbp.supportsDocuments).toBe(false);
   });
 
   it("pinterest: satu Pin wajib tepat satu gambar, judul 100, deskripsi 800, video ditunda", () => {

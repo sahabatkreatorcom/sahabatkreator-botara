@@ -1,0 +1,26 @@
+-- 0019_google_business_provider.sql
+--
+-- Provider Google Business Profile untuk content schedule
+-- (Gelombang 3).
+--
+-- Google Business ditambahkan ke enum `channel_provider` agar akun
+-- lokasi, identitasnya, dan sasaran post memakai model
+-- `channel_accounts` / percakapan `kind='channel'` yang sama seperti
+-- provider content schedule sebelumnya. Ini BUKAN penambahan channel
+-- inbox: tidak ada tabel, webhook, atau jalur pesan baru. Nilai enum
+-- saja sudah cukup karena baris akunnya hanya membawa IDENTITAS
+-- LOKASI: external_id = nama resource lokasi
+-- (`accounts/{accountId}/locations/{locationId}` — sekaligus alamat
+-- kirim `provider_chat_id` untuk local posts), display_name = nama
+-- lokasi. Kredensial penerbitan TIDAK disimpan di akun channel —
+-- access token ditukar dari refresh token koneksi Google tenant
+-- (google_calendar_connections, Fase 13G) yang scope-nya diperluas
+-- dengan business.manage; akun lokasi disinkronkan dari koneksi itu
+-- oleh core (syncGoogleBusinessLocationAccounts), persis pola
+-- YouTube di Gelombang 2.
+--
+-- Catatan gerbang: kuota Business Profile API bernilai 0 sampai
+-- Google menyetujui pengajuan akses pemilik — migrasi ini hanya
+-- menyiapkan identitas; persetujuan itu dicatat di OWNER-ACTIONS.
+
+ALTER TYPE "public"."channel_provider" ADD VALUE IF NOT EXISTS 'google_business';

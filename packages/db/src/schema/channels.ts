@@ -53,6 +53,12 @@ export const channelProviderEnum = pgEnum("channel_provider", [
   // user ID) + access token OAuth API v5 terenkripsi; board tujuan
   // Pin adalah board pertama akun (dibaca adapter saat publikasi).
   "pinterest",
+  // Gelombang 3: akun lokasi Google Business khusus content schedule
+  // (bukan inbox). Nilai enum ditambahkan oleh migrasi 0019; urutan
+  // lama tidak diubah. Baris akunnya hanya membawa identitas lokasi
+  // (external_id = nama resource accounts/{}/locations{}); kredensial
+  // penerbitan hidup di koneksi Google tenant (pola YouTube).
+  "google_business",
 ]);
 
 export const channelAccountStatusEnum = pgEnum("channel_account_status", [

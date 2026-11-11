@@ -56,7 +56,15 @@ export type ChannelProvider =
    * lain — tidak mengimplementasikan ChannelAdapter inbox; access
    * token OAuth-nya tersimpan terenkripsi di baris akun channel ini.
    */
-  | "pinterest";
+  | "pinterest"
+  /**
+   * Khusus content schedule (Gelombang 3): Google Business Profile
+   * (postingan lokal per lokasi) sama seperti YouTube — tidak
+   * mengimplementasikan ChannelAdapter inbox; kredensialnya hidup
+   * di koneksi Google tenant dan baris akun channel ini hanya
+   * membawa identitas lokasi (nama resource lokasi).
+   */
+  | "google_business";
 
 export interface ChannelAccountRef {
   id: string;
@@ -227,5 +235,10 @@ export const MESSAGING_WINDOW_POLICIES: Record<ChannelProvider, MessagingWindowP
     provider: "pinterest",
     freeFormWindowHours: null,
     notes: "Bukan channel inbox: khusus publikasi content schedule (Pin API v5 ke board akun); tidak ada jendela pesan atau pengiriman DM.",
+  },
+  google_business: {
+    provider: "google_business",
+    freeFormWindowHours: null,
+    notes: "Bukan channel inbox: khusus publikasi content schedule (postingan lokal Business Profile API per lokasi); tidak ada jendela pesan atau pengiriman DM.",
   },
 };

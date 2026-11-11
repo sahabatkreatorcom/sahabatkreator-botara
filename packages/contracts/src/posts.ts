@@ -308,6 +308,29 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
   },
+  google_business: {
+    // Google Business Profile (Gelombang 3): postingan lokal
+    // (localPosts, topicType STANDARD) PER LOKASI — sasaran adalah
+    // lokasi bisnis, bukan akun. Teks (summary) maks 1500 karakter;
+    // media maksimal SATU foto dari URL publik (API hanya menerima
+    // sourceUrl — pola resolver Instagram, gagal aman tanpa URL
+    // publik); video dan album tidak dikenal postingan lokal.
+    // Tombol CTA disusun adapter dari URL pertama di caption
+    // (LEARN_MORE) sebatas field yang ada. Kuota API bernilai 0
+    // sampai pengajuan akses pemilik disetujui Google — capability
+    // menyatakan permukaan yang dibangun, bukan kuota yang tersedia.
+    publishSupported: true,
+    mediaRequired: false,
+    maxCaption: 1500,
+    maxTitle: null,
+    maxMedia: 1,
+    supportsAlbum: false,
+    supportsPhotos: true,
+    supportsVideo: false,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
     // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.

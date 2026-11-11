@@ -134,6 +134,13 @@
       "when": 1793870118814,
       "tag": "0018_pinterest_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1793870118815,
+      "tag": "0019_google_business_provider",
+      "breakpoints": true
     }
   ]
 }

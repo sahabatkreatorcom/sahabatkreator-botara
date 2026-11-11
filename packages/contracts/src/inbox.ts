@@ -71,6 +71,21 @@ export const ChannelProviderSchema = z.enum([
    * token OAuth tersimpan terenkripsi pada akun channel.
    */
   "pinterest",
+  /**
+   * Google Business Profile (Gelombang 3) — provider KHUSUS content
+   * schedule, sama seperti provider Gelombang 1–3 lain: identitasnya
+   * memakai enum bersama agar akun (`external_id` = nama resource
+   * lokasi `accounts/{id}/locations/{id}`), sasaran post, dan
+   * capability berbagi satu sumber, tetapi ia BUKAN channel inbox:
+   * tidak ada webhook pesan, percakapan dua arah, broadcast, atau
+   * jalur connect channel generik untuknya. Sasaran post adalah
+   * LOKASI bisnis (satu postingan lokal per lokasi), bukan akun.
+   * Kredensialnya BUKAN token pada akun channel — ia adalah koneksi
+   * Google tenant yang sudah ada (Fase 13G, dipakai Google Calendar
+   * dan YouTube); akun channel google_business hanya membawa
+   * identitas lokasi, disinkronkan dari koneksi Google oleh core.
+   */
+  "google_business",
 ]);
 export type ChannelProvider = z.infer<typeof ChannelProviderSchema>;
 
