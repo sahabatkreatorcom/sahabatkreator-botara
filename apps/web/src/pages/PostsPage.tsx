@@ -50,12 +50,12 @@ interface PostsPageProps {
 type Translate = PostsPageProps["t"];
 
 const STATUS_STYLE: Record<PostStatus, string> = {
-  draft: "bg-neutral-100 text-neutral-700",
-  scheduled: "bg-amber-100 text-amber-800",
-  publishing: "bg-blue-100 text-blue-800",
-  published: "bg-emerald-100 text-emerald-800",
-  failed: "bg-red-100 text-red-800",
-  cancelled: "bg-neutral-100 text-neutral-500",
+  draft: "bg-elevated text-muted",
+  scheduled: "bg-warning/15 text-warning",
+  publishing: "bg-accent/15 text-accent",
+  published: "bg-success/15 text-success",
+  failed: "bg-danger/15 text-danger",
+  cancelled: "bg-elevated text-muted opacity-60",
 };
 
 const STATUS_KEY: Record<PostStatus, Parameters<Translate>[0]> = {
@@ -368,8 +368,8 @@ export function PostsPage({ t, locale }: PostsPageProps) {
       onClick={() => setView(mode)}
       className={`rounded-md px-3 py-1.5 text-xs font-medium ${
         view === mode
-          ? "bg-neutral-900 text-white"
-          : "border border-neutral-300 text-neutral-700"
+          ? "bg-accent text-white"
+          : "border border-line bg-surface text-ink"
       }`}
     >
       {label}
@@ -380,39 +380,39 @@ export function PostsPage({ t, locale }: PostsPageProps) {
     <div className="space-y-4">
       <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
         <div>
-          <h1 className="text-xl font-semibold text-neutral-900">{t("posts.title")}</h1>
-          <p className="mt-0.5 text-sm text-neutral-600">{t("posts.subtitle")}</p>
+          <h1 className="text-xl font-semibold text-ink">{t("posts.title")}</h1>
+          <p className="mt-0.5 text-sm text-muted">{t("posts.subtitle")}</p>
         </div>
-        <p className="text-xs text-neutral-500">
+        <p className="text-xs text-muted">
           {t("posts.timezoneNote", { timezone })}
         </p>
       </header>
 
       {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <div className="rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </div>
       )}
 
       {targets.length === 0 && !loading && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm text-warning">
           {t("posts.targetEmpty")}
         </div>
       )}
 
       <div className="grid items-start gap-5 lg:grid-cols-12">
-        <section className="rounded-xl border border-neutral-200 bg-white p-5 lg:col-span-5 xl:col-span-4">
-          <h2 className="text-sm font-semibold text-neutral-900">{t("posts.newPost")}</h2>
+        <section className="rounded-xl border border-line bg-surface p-5 lg:col-span-5 xl:col-span-4">
+          <h2 className="text-sm font-semibold text-ink">{t("posts.newPost")}</h2>
           <div className="mt-3 space-y-3">
             <div>
-              <span className="text-xs font-medium text-neutral-600">
+              <span className="text-xs font-medium text-muted">
                 {t("posts.targets")}
               </span>
               <div className="mt-1 space-y-1">
                 {targets.map((target) => (
                   <label
                     key={target.conversationId}
-                    className="flex items-center gap-2 text-sm text-neutral-800"
+                    className="flex items-center gap-2 text-sm text-ink"
                   >
                     <input
                       type="checkbox"
@@ -423,19 +423,19 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                     <span className="truncate">
                       {target.title ?? target.providerChatId ?? target.conversationId}
                     </span>
-                    <span className="text-xs text-neutral-400">{target.provider}</span>
+                    <span className="text-xs text-muted">{target.provider}</span>
                   </label>
                 ))}
               </div>
               {selectedTargets.length > 1 && (
-                <p className="mt-1 text-xs text-neutral-500">{t("posts.groupHint")}</p>
+                <p className="mt-1 text-xs text-muted">{t("posts.groupHint")}</p>
               )}
             </div>
 
             <label className="block">
-              <span className="text-xs font-medium text-neutral-600">{t("posts.internalTitle")}</span>
+              <span className="text-xs font-medium text-muted">{t("posts.internalTitle")}</span>
               <input
-                className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink"
                 value={title}
                 maxLength={255}
                 onChange={(event) => setTitle(event.target.value)}
@@ -444,44 +444,44 @@ export function PostsPage({ t, locale }: PostsPageProps) {
             </label>
 
             <label className="block">
-              <span className="text-xs font-medium text-neutral-600">{t("posts.caption")}</span>
+              <span className="text-xs font-medium text-muted">{t("posts.caption")}</span>
               <textarea
-                className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink"
                 rows={7}
                 value={caption}
                 onChange={(event) => setCaption(event.target.value)}
                 disabled={!canManage}
               />
-              <span className="mt-1 flex items-start justify-between gap-2 text-xs text-neutral-500">
+              <span className="mt-1 flex items-start justify-between gap-2 text-xs text-muted">
                 <span>{t("posts.captionHint", { max: captionMax })}</span>
-                <span className={`shrink-0 ${captionLeft < 0 ? "text-red-600" : ""}`}>
+                <span className={`shrink-0 ${captionLeft < 0 ? "text-danger" : ""}`}>
                   {captionLeft}
                 </span>
               </span>
             </label>
 
             <div>
-              <span className="text-xs font-medium text-neutral-600">{t("posts.media")}</span>
-              <p className="text-xs text-neutral-500">{t("posts.mediaHint")}</p>
+              <span className="text-xs font-medium text-muted">{t("posts.media")}</span>
+              <p className="text-xs text-muted">{t("posts.mediaHint")}</p>
               <input
                 type="file"
                 multiple
-                className="mt-2 block w-full text-xs"
+                className="mt-2 block w-full text-xs text-muted"
                 onChange={(event) => void onUpload(event.target.files)}
                 disabled={!canManage || busy}
               />
               {mediaIds.length > 0 && (
-                <p className="mt-2 text-xs text-neutral-600">
+                <p className="mt-2 text-xs text-muted">
                   {t("posts.mediaCount", { count: mediaIds.length })}
                 </p>
               )}
             </div>
 
             <label className="block">
-              <span className="text-xs font-medium text-neutral-600">{t("posts.scheduleAt")}</span>
+              <span className="text-xs font-medium text-muted">{t("posts.scheduleAt")}</span>
               <input
                 type="datetime-local"
-                className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink"
                 value={scheduleAt}
                 onChange={(event) => setScheduleAt(event.target.value)}
                 disabled={!canManage}
@@ -491,7 +491,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                className="rounded-md bg-neutral-900 px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
+                className="rounded-md bg-accent px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
                 onClick={() => void onSchedule()}
                 disabled={!canSubmit || busy}
               >
@@ -499,7 +499,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
               </button>
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-3 py-2 text-xs font-medium text-neutral-700 disabled:opacity-40"
+                className="rounded-md border border-line bg-surface px-3 py-2 text-xs font-medium text-ink disabled:opacity-40"
                 onClick={() => void onSaveDraft()}
                 disabled={!canSubmit || busy}
               >
@@ -507,7 +507,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
               </button>
             </div>
             {!canManage && (
-              <p className="text-xs text-neutral-500">{t("posts.ownerOnly")}</p>
+              <p className="text-xs text-muted">{t("posts.ownerOnly")}</p>
             )}
           </div>
         </section>
@@ -519,14 +519,14 @@ export function PostsPage({ t, locale }: PostsPageProps) {
             {viewButton("list", t("posts.viewList"))}
             {view !== "list" && (
               <>
-                <span className="mx-1 text-sm font-medium text-neutral-800">
+                <span className="mx-1 text-sm font-medium text-ink">
                   {view === "month"
                     ? monthTitle
                     : `${dayKey(weekStart)} — ${dayKey(addDays(weekStart, 6))}`}
                 </span>
                 <button
                   type="button"
-                  className="rounded-md border border-neutral-300 px-2 py-1.5 text-xs text-neutral-700"
+                  className="rounded-md border border-line bg-surface px-2 py-1.5 text-xs text-ink"
                   onClick={() => {
                     if (view === "month") {
                       const prev = addDays({ y: monthCursor.y, m: monthCursor.m, d: 1 }, -1);
@@ -540,7 +540,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border border-neutral-300 px-2 py-1.5 text-xs text-neutral-700"
+                  className="rounded-md border border-line bg-surface px-2 py-1.5 text-xs text-ink"
                   onClick={() => {
                     setMonthCursor(todayTuple);
                     setWeekCursor(todayTuple);
@@ -550,7 +550,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                 </button>
                 <button
                   type="button"
-                  className="rounded-md border border-neutral-300 px-2 py-1.5 text-xs text-neutral-700"
+                  className="rounded-md border border-line bg-surface px-2 py-1.5 text-xs text-ink"
                   onClick={() => {
                     if (view === "month") {
                       const next = addDays(
@@ -570,16 +570,16 @@ export function PostsPage({ t, locale }: PostsPageProps) {
           </div>
 
           {view !== "list" && unscheduledCount > 0 && (
-            <p className="mb-2 text-xs text-neutral-500">
+            <p className="mb-2 text-xs text-muted">
               {t("posts.unscheduledNote", { count: unscheduledCount })}
             </p>
           )}
 
           {loading && posts.length === 0 ? (
-            <p className="text-sm text-neutral-500">…</p>
+            <p className="text-sm text-muted">…</p>
           ) : view === "list" ? (
             posts.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-neutral-300 p-8 text-center text-sm text-neutral-500">
+              <div className="rounded-xl border border-dashed border-line p-8 text-center text-sm text-muted">
                 {t("posts.empty")}
               </div>
             ) : (
@@ -670,13 +670,17 @@ function CalendarGrid({
     return map;
   }, [postsByDay]);
 
+  // Sorotan sel tujuan saat chip diseret di atasnya — murni presentasi,
+  // tidak mengubah logika jatuhan (drop tetap lewat onDrop di bawah).
+  const [dragOverKey, setDragOverKey] = useState<string | null>(null);
+
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-200 bg-white">
-      <div className="grid grid-cols-7 border-b border-neutral-200 bg-neutral-50">
+    <div className="overflow-hidden rounded-xl border border-line bg-surface">
+      <div className="grid grid-cols-7 border-b border-line bg-elevated">
         {weekdayLabels.map((label, i) => (
           <div
             key={i}
-            className="px-2 py-1.5 text-center text-xs font-medium text-neutral-500"
+            className="px-2 py-1.5 text-center text-xs font-medium text-muted"
           >
             {label}
           </div>
@@ -696,14 +700,23 @@ function CalendarGrid({
           return (
             <div
               key={key}
-              className={`${view === "week" ? "min-h-44" : "min-h-28"} border-b border-r border-neutral-100 p-1.5 ${
-                inMonth ? "" : "bg-neutral-50 text-neutral-400"
-              } ${key === todayKey ? "bg-amber-50" : ""}`}
+              className={`${view === "week" ? "min-h-44" : "min-h-28"} border-b border-r border-line p-1.5 ${
+                inMonth ? "" : "bg-elevated/50 text-muted"
+              } ${key === todayKey ? "bg-warning/10" : ""} ${
+                dragOverKey === key ? "bg-accent/10" : ""
+              }`}
               onDragOver={(event) => {
-                if (canManage) event.preventDefault();
+                if (canManage) {
+                  event.preventDefault();
+                  setDragOverKey(key);
+                }
+              }}
+              onDragLeave={() => {
+                setDragOverKey((current) => (current === key ? null : current));
               }}
               onDrop={(event) => {
                 event.preventDefault();
+                setDragOverKey(null);
                 const postId = event.dataTransfer.getData("text/post-id");
                 const post = postId ? postById.get(postId) : undefined;
                 if (post) onDropPost(post, day);
@@ -735,7 +748,7 @@ function CalendarGrid({
                       </span>{" "}
                       <span className="break-words">{post.title}</span>
                       {post.groupId && (
-                        <span className="ml-1 rounded bg-white/60 px-1">
+                        <span className="ml-1 rounded bg-surface/60 px-1">
                           {t("posts.groupBadge")}
                         </span>
                       )}
@@ -743,7 +756,7 @@ function CalendarGrid({
                   );
                 })}
                 {items.length > visibleItems.length && (
-                  <div className="px-1.5 text-[11px] font-medium text-neutral-500">
+                  <div className="px-1.5 text-[11px] font-medium text-muted">
                     {t("posts.moreCount", {
                       count: items.length - visibleItems.length,
                     })}
@@ -793,7 +806,7 @@ function PostCard({
     post.status === "draft" || post.status === "scheduled" || post.status === "failed";
 
   return (
-    <li className="rounded-xl border border-neutral-200 bg-white p-4">
+    <li className="rounded-xl border border-line bg-surface p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -803,24 +816,24 @@ function PostCard({
               {t(STATUS_KEY[post.status])}
             </span>
             {post.groupId && (
-              <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800">
+              <span className="rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">
                 {t("posts.groupBadge")}
               </span>
             )}
-            <span className="truncate text-sm font-medium text-neutral-900">
+            <span className="truncate text-sm font-medium text-ink">
               {post.title}
             </span>
           </div>
-          <p className="mt-1 text-xs text-neutral-500">
+          <p className="mt-1 text-xs text-muted">
             {post.target.title ?? post.target.providerChatId}
             {post.media.length > 0
               ? ` · ${t("posts.mediaCount", { count: post.media.length })}`
               : ""}
           </p>
           {post.caption && (
-            <p className="mt-2 line-clamp-2 text-sm text-neutral-700">{post.caption}</p>
+            <p className="mt-2 line-clamp-2 text-sm text-ink">{post.caption}</p>
           )}
-          <p className="mt-2 text-xs text-neutral-500">
+          <p className="mt-2 text-xs text-muted">
             {post.status === "published" && post.publishedAt
               ? formatDateTime(post.publishedAt, locale, timezone)
               : post.scheduledAt
@@ -829,7 +842,7 @@ function PostCard({
             {post.errorCode ? ` · ${post.errorCode}` : ""}
           </p>
           {post.errorCode === "publish_outcome_unknown" && (
-            <p className="mt-1 text-xs text-amber-700">
+            <p className="mt-1 text-xs text-warning">
               {t("posts.outcomeUnknownHint")}
             </p>
           )}
@@ -840,7 +853,7 @@ function PostCard({
             {post.status === "draft" && (
               <button
                 type="button"
-                className="rounded-md bg-neutral-900 px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+                className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
                 disabled={busy}
                 onClick={() =>
                   void run(() => api.posts.schedule(tenantId, post.id, null))
@@ -852,7 +865,7 @@ function PostCard({
             {post.status === "failed" && (
               <button
                 type="button"
-                className="rounded-md bg-red-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+                className="rounded-md bg-danger px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
                 disabled={busy}
                 onClick={() =>
                   void run(() => api.posts.retry(tenantId, post.id, toIso(moveAt)))
@@ -864,7 +877,7 @@ function PostCard({
             {post.status === "publishing" && (
               <button
                 type="button"
-                className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 disabled:opacity-40"
+                className="rounded-md border border-danger/40 bg-surface px-2 py-1 text-xs font-medium text-danger disabled:opacity-40"
                 disabled={busy}
                 onClick={() => {
                   if (!confirmingRelease) {
@@ -882,7 +895,7 @@ function PostCard({
             )}
             <button
               type="button"
-              className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 disabled:opacity-40"
+              className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink disabled:opacity-40"
               disabled={busy}
               onClick={() => void run(() => api.posts.duplicate(tenantId, post.id))}
             >
@@ -891,7 +904,7 @@ function PostCard({
             {(post.status === "draft" || post.status === "scheduled") && (
               <button
                 type="button"
-                className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 disabled:opacity-40"
+                className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink disabled:opacity-40"
                 disabled={busy}
                 onClick={() => void run(() => api.posts.cancel(tenantId, post.id))}
               >
@@ -901,7 +914,7 @@ function PostCard({
             {(post.status === "draft" || post.status === "cancelled") && (
               <button
                 type="button"
-                className="rounded-md px-2 py-1 text-xs text-red-700 disabled:opacity-40"
+                className="rounded-md px-2 py-1 text-xs text-danger disabled:opacity-40"
                 disabled={busy}
                 onClick={() => {
                   if (!confirmingDelete) {
@@ -916,18 +929,18 @@ function PostCard({
               </button>
             )}
             {movable && (
-              <label className="flex items-center gap-1 text-xs text-neutral-500">
+              <label className="flex items-center gap-1 text-xs text-muted">
                 <span>{t("posts.moveTo")}</span>
                 <input
                   type="datetime-local"
-                  className="rounded-md border border-neutral-300 px-1.5 py-1 text-xs"
+                  className="rounded-md border border-line bg-surface px-1.5 py-1 text-xs text-ink"
                   value={moveAt}
                   onChange={(event) => setMoveAt(event.target.value)}
                   disabled={busy}
                 />
                 <button
                   type="button"
-                  className="rounded-md border border-neutral-300 px-2 py-1 text-xs text-neutral-700 disabled:opacity-40"
+                  className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink disabled:opacity-40"
                   disabled={busy || !moveAt}
                   onClick={() => {
                     const iso = toIso(moveAt);
