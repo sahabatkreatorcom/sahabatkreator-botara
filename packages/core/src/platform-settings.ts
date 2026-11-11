@@ -75,6 +75,33 @@ export const PLATFORM_SETTING_KEYS = [
   // Google menjawab GOOGLE_NOT_CONFIGURED secara jujur (pola Resend).
   "google_oauth_client_id",
   "google_oauth_client_secret",
+  // Instruksi pemilik 2026-11-12: SEMUA kredensial integrasi platform
+  // diisi lewat Panel Admin, env hanya fallback — kunci-kunci di bawah
+  // menutup sisa pembacaan env langsung agar perlakuannya konsisten.
+  // Token verifikasi handshake webhook Meta: nilai bebas yang KITA
+  // tentukan dan ditempel pemilik ke dashboard Meta App. Dulu env-only
+  // (META_WEBHOOK_VERIFY_TOKEN); sekarang panel dengan env fallback.
+  // Ia tetap dibagikan ke owner/admin workspace lewat endpoint
+  // meta-webhook-info (memang harus diketahui pemasang webhook), tetapi
+  // tidak pernah ditampilkan di panel sebagai konfigurasi publik.
+  "meta_webhook_verify_token",
+  // Model embedding OpenRouter: dulu env-only (OPENROUTER_EMBEDDING_MODEL)
+  // padahal model LLM chat-nya (openrouter_model) sudah panel sejak 6C.
+  "openrouter_embedding_model",
+  // Pengaturan content schedule (bukan kredensial, tetapi nilai platform
+  // yang pemilik ubah dari tempat yang sama agar konsisten — lihat
+  // PLATFORM_PUBLIC_CONFIG_KEYS untuk sifat tampilnya):
+  // - base URL publik media untuk adapter yang mewajibkan URL publik
+  //   (Instagram/Threads/Google Business/Pinterest); dulu env-only
+  //   (POST_MEDIA_PUBLIC_BASE_URL).
+  // - status privasi bawaan unggahan YouTube; dulu env-only
+  //   (YOUTUBE_PRIVACY_STATUS) — pemilik menaikkannya dari panel setelah
+  //   verifikasi aplikasi Google, tanpa edit env + restart.
+  // - level privasi direct post TikTok; dulu env-only
+  //   (TIKTOK_PRIVACY_LEVEL) — gerbang audit TikTok, pola yang sama.
+  "post_media_public_base_url",
+  "youtube_privacy_status",
+  "tiktok_privacy_level",
 ] as const;
 
 /** Kunci platform yang nilainya identifier PUBLIK (Fase 7D, lihat atas). */
@@ -90,6 +117,17 @@ export const PLATFORM_PUBLIC_CONFIG_KEYS = [
   // di setiap URL dialog OAuth Google (sifatnya sama seperti Meta App
   // ID). Client secret TIDAK ikut: rahasia penuh seperti kunci lain.
   "google_oauth_client_id",
+  // Pengaturan content schedule: base URL publik menurut definisinya
+  // PUBLIK (itulah gunanya — provider mengambil media dari sana), dan
+  // dua status privasi adalah pilihan enum yang memang harus terlihat
+  // agar pemilik sadar level yang sedang berlaku (mis. TikTok masih
+  // SELF_ONLY selama audit belum lolos). Ketiganya ditampilkan panel
+  // lewat getPlatformPublicConfig. meta_webhook_verify_token TIDAK
+  // ikut: token itu dibagikan hanya lewat endpoint meta-webhook-info
+  // ke owner/admin workspace, bukan daftar konfigurasi publik panel.
+  "post_media_public_base_url",
+  "youtube_privacy_status",
+  "tiktok_privacy_level",
 ] as const;
 
 export type PlatformPublicConfigKey =
@@ -118,6 +156,9 @@ export async function getPlatformPublicConfig(
     resendFromEmail,
     resendFromName,
     googleClientId,
+    postMediaPublicBaseUrl,
+    youtubePrivacyStatus,
+    tiktokPrivacyLevel,
   ] = await Promise.all([
     getProviderSecret(db, "meta_app_id", opts),
     getProviderSecret(db, "meta_ig_config_id", opts),
@@ -125,6 +166,9 @@ export async function getPlatformPublicConfig(
     getProviderSecret(db, "resend_from_email", opts),
     getProviderSecret(db, "resend_from_name", opts),
     getProviderSecret(db, "google_oauth_client_id", opts),
+    getProviderSecret(db, "post_media_public_base_url", opts),
+    getProviderSecret(db, "youtube_privacy_status", opts),
+    getProviderSecret(db, "tiktok_privacy_level", opts),
   ]);
   return {
     meta_app_id: appId,
@@ -133,6 +177,9 @@ export async function getPlatformPublicConfig(
     resend_from_email: resendFromEmail,
     resend_from_name: resendFromName,
     google_oauth_client_id: googleClientId,
+    post_media_public_base_url: postMediaPublicBaseUrl,
+    youtube_privacy_status: youtubePrivacyStatus,
+    tiktok_privacy_level: tiktokPrivacyLevel,
   };
 }
 
@@ -403,6 +450,100 @@ export async function resolveOpenRouterConfig(
   if (!apiKey) return null;
   const model = await getProviderSecret(db, "openrouter_model", opts);
   return { apiKey, model: model ?? undefined };
+}
+
+// ---------------------------------------------------------------------------
+// Kunci berbentuk (enum / URL): validasi saat tulis + resolver bertipe
+// ---------------------------------------------------------------------------
+
+/** Status privasi unggahan YouTube yang sah (cermin enum env di config). */
+export const YOUTUBE_PRIVACY_STATUSES = ["private", "unlisted", "public"] as const;
+export type YouTubePrivacyStatus = (typeof YOUTUBE_PRIVACY_STATUSES)[number];
+
+/** Level privasi direct post TikTok yang sah (cermin enum env di config). */
+export const TIKTOK_PRIVACY_LEVELS = [
+  "PUBLIC_TO_EVERYONE",
+  "MUTUAL_FOLLOW_FRIENDS",
+  "FOLLOWER_OF_CREATOR",
+  "SELF_ONLY",
+] as const;
+export type TikTokPrivacyLevel = (typeof TIKTOK_PRIVACY_LEVELS)[number];
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Validasi bentuk untuk kunci yang nilainya bukan teks bebas. Dipakai
+ * lapisan API saat PUT (nilai tidak sah ditolak 400) DAN resolver
+ * bertipe di bawah (nilai panel/env yang tidak sah diabaikan) — dua
+ * lapis agar baris yang ditulis di luar API (mis. SQL manual) tidak
+ * pernah mengalir mentah ke adapter platform.
+ */
+export function isValidPlatformSettingValue(
+  key: PlatformSettingKey,
+  value: string,
+): boolean {
+  switch (key) {
+    case "post_media_public_base_url":
+      return isHttpUrl(value);
+    case "youtube_privacy_status":
+      return (YOUTUBE_PRIVACY_STATUSES as readonly string[]).includes(value);
+    case "tiktok_privacy_level":
+      return (TIKTOK_PRIVACY_LEVELS as readonly string[]).includes(value);
+    default:
+      return true;
+  }
+}
+
+/**
+ * Resolusi kunci berbentuk: nilai efektif panel → env yang SAH menang;
+ * bila nilai efektif tidak sah (hanya mungkin lewat tulisan di luar
+ * API), env yang sah dicoba sekali lagi sebelum menyerah ke `null`.
+ */
+async function resolveValidatedSetting(
+  db: Database,
+  key: PlatformSettingKey,
+  opts: PlatformSettingsOptions,
+): Promise<string | null> {
+  const effective = await getProviderSecret(db, key, opts);
+  if (effective !== null && isValidPlatformSettingValue(key, effective)) {
+    return effective;
+  }
+  const envValue = opts.env[key];
+  if (envValue && isValidPlatformSettingValue(key, envValue)) return envValue;
+  return null;
+}
+
+/** Base URL publik media efektif (panel → env → null) untuk adapter container. */
+export async function resolvePostMediaPublicBaseUrl(
+  db: Database,
+  opts: PlatformSettingsOptions,
+): Promise<string | null> {
+  return resolveValidatedSetting(db, "post_media_public_base_url", opts);
+}
+
+/** Status privasi YouTube efektif; bawaan aman `private` (pola env Gelombang 2). */
+export async function resolveYouTubePrivacyStatus(
+  db: Database,
+  opts: PlatformSettingsOptions,
+): Promise<YouTubePrivacyStatus> {
+  const value = await resolveValidatedSetting(db, "youtube_privacy_status", opts);
+  return (value as YouTubePrivacyStatus | null) ?? "private";
+}
+
+/** Level privasi TikTok efektif; bawaan gerbang audit `SELF_ONLY` (pola env Gelombang 4). */
+export async function resolveTikTokPrivacyLevel(
+  db: Database,
+  opts: PlatformSettingsOptions,
+): Promise<TikTokPrivacyLevel> {
+  const value = await resolveValidatedSetting(db, "tiktok_privacy_level", opts);
+  return (value as TikTokPrivacyLevel | null) ?? "SELF_ONLY";
 }
 
 // ---------------------------------------------------------------------------

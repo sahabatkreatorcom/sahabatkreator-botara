@@ -82,6 +82,9 @@ const EnvSchema = z.object({
    * Endpoint media internal repo tetap privat dan bersesi — JANGAN
    * mengisi nilai ini dengan URL API internal. Kosong berarti adapter
    * container gagal aman dengan kode `*_public_media_url_unavailable`.
+   * FALLBACK env saja (instruksi pemilik 2026-11-12); sumber utama
+   * adalah Panel Admin (kunci `post_media_public_base_url` di
+   * platform_settings, resolusi panel → env lewat resolver core).
    */
   POST_MEDIA_PUBLIC_BASE_URL: z.string().url().optional(),
   /**
@@ -136,7 +139,10 @@ const EnvSchema = z.object({
    * KITA tentukan dan ditempel pemilik platform ke dashboard Meta App
    * (Webhook > Verify Token). Bukan rahasia dari Meta — ia dibagikan ke
    * owner/admin workspace lewat endpoint meta-webhook-info agar mereka
-   * bisa memasang webhook. Hanya di env server.
+   * bisa memasang webhook. FALLBACK env saja (instruksi pemilik
+   * 2026-11-12); sumber utama adalah Panel Admin (kunci
+   * `meta_webhook_verify_token` di platform_settings, resolusi
+   * panel → env per request lewat resolver core).
    */
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(1).optional(),
   /**
@@ -186,7 +192,13 @@ const EnvSchema = z.object({
    *   tidak pernah gagal keras seperti LLM_PROVIDER).
    */
   EMBEDDING_PROVIDER: z.enum(["mock", "openrouter"]).optional(),
-  /** Model embedding OpenRouter (wajib 1536 dimensi); default di kode provider. */
+  /**
+   * Model embedding OpenRouter (wajib 1536 dimensi); default di kode
+   * provider. FALLBACK env saja (instruksi pemilik 2026-11-12); sumber
+   * utama adalah Panel Admin (kunci `openrouter_embedding_model` di
+   * platform_settings, resolusi panel → env — pola yang sama dengan
+   * OPENROUTER_MODEL untuk model chat).
+   */
   OPENROUTER_EMBEDDING_MODEL: z.string().min(1).optional(),
   /**
    * Jendela batching balasan AI (Fase 9A): job `agent.respond` untuk
@@ -307,8 +319,10 @@ const EnvSchema = z.object({
    * terverifikasi, video yang diunggah lewat API memang dikunci
    * Google ke private — bawaan ini membuat perilaku konsisten dan
    * aman di semua keadaan. Pemilik platform menaikkan ke `unlisted`
-   * atau `public` lewat env ini setelah verifikasi aplikasi Google
-   * selesai (lihat OWNER-ACTIONS roadmap content schedule).
+   * atau `public` setelah verifikasi aplikasi Google selesai (lihat
+   * OWNER-ACTIONS roadmap content schedule) — lewat Panel Admin (kunci
+   * `youtube_privacy_status`); env ini hanya FALLBACK (instruksi
+   * pemilik 2026-11-12), resolusi panel → env lewat resolver core.
    */
   YOUTUBE_PRIVACY_STATUS: z
     .enum(["private", "unlisted", "public"])
@@ -320,9 +334,11 @@ const EnvSchema = z.object({
    * Content Posting API, API hanya mengizinkan postingan privat
    * untuk kreator sendiri — level lain akan ditolak TikTok (dan
    * ditolak lebih awal oleh adapter bila akun tidak mencantumkannya
-   * di `privacy_level_options`). Pemilik platform menaikkan env ini
+   * di `privacy_level_options`). Pemilik platform menaikkan level ini
    * setelah audit lolos (lihat OWNER-ACTIONS roadmap content
-   * schedule).
+   * schedule) — lewat Panel Admin (kunci `tiktok_privacy_level`);
+   * env ini hanya FALLBACK (instruksi pemilik 2026-11-12), resolusi
+   * panel → env lewat resolver core.
    */
   TIKTOK_PRIVACY_LEVEL: z
     .enum([

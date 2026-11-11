@@ -31,9 +31,13 @@ import {
   clearPlatformSettingsCache,
   getProviderSecret,
   isPlatformAdminEmail,
+  isValidPlatformSettingValue,
   listPlatformSettingStatuses,
   recordPlatformSettingTest,
   resolveOpenRouterConfig,
+  resolvePostMediaPublicBaseUrl,
+  resolveTikTokPrivacyLevel,
+  resolveYouTubePrivacyStatus,
   setPlatformSetting,
 } from "@sahabat-kreator/core";
 import { createLlmProvider } from "@sahabat-kreator/ai";
@@ -167,6 +171,93 @@ assert.equal(isPlatformAdminEmail("orang@lain.id", "mas@romo.com"), false);
 assert.equal(isPlatformAdminEmail("mas@romo.com", undefined), false);
 assert.equal(isPlatformAdminEmail("mas@romo.com", ""), false);
 console.log("[5] allowlist: case-insensitive, koma-terpisah, kosong = terkunci: OK");
+
+// ---------- 6. Kunci baru 2026-11-12: verify token + pengaturan berbentuk ----------
+// Semua kredensial integrasi lewat panel dengan env fallback yang sama:
+// verify token Meta mengikuti urutan panel > env > null persis kunci lain.
+const ENV_VERIFY_TOKEN = "dummy-env-verify-token-bukan-asli";
+const PANEL_VERIFY_TOKEN = "dummy-panel-verify-token-bukan-asli";
+const csOpts = {
+  masterSecret: MASTER,
+  env: {
+    meta_webhook_verify_token: ENV_VERIFY_TOKEN,
+    youtube_privacy_status: "unlisted",
+    tiktok_privacy_level: "SELF_ONLY",
+    post_media_public_base_url: "https://media-contoh.invalid/env",
+  },
+};
+clearPlatformSettingsCache();
+assert.equal(
+  await getProviderSecret(db, "meta_webhook_verify_token", csOpts),
+  ENV_VERIFY_TOKEN,
+);
+await setPlatformSetting(
+  db,
+  { key: "meta_webhook_verify_token", value: PANEL_VERIFY_TOKEN, updatedByUserId: ADMIN_USER },
+  csOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(
+  await getProviderSecret(db, "meta_webhook_verify_token", csOpts),
+  PANEL_VERIFY_TOKEN,
+);
+await clearPlatformSetting(db, { key: "meta_webhook_verify_token", updatedByUserId: ADMIN_USER });
+clearPlatformSettingsCache();
+assert.equal(
+  await getProviderSecret(db, "meta_webhook_verify_token", csOpts),
+  ENV_VERIFY_TOKEN,
+);
+console.log("[6a] meta_webhook_verify_token: env → panel menang → cabut → env lagi: OK");
+
+// Resolver bertipe: bawaan aman tanpa apa pun; env sah dipakai; panel sah
+// menang; nilai panel TIDAK sah (ditulis di luar API) diabaikan → env.
+assert.equal(await resolveYouTubePrivacyStatus(db, baseOpts), "private");
+assert.equal(await resolveTikTokPrivacyLevel(db, baseOpts), "SELF_ONLY");
+assert.equal(await resolvePostMediaPublicBaseUrl(db, baseOpts), null);
+assert.equal(await resolveYouTubePrivacyStatus(db, csOpts), "unlisted");
+await setPlatformSetting(
+  db,
+  { key: "youtube_privacy_status", value: "public", updatedByUserId: ADMIN_USER },
+  csOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(await resolveYouTubePrivacyStatus(db, csOpts), "public");
+await setPlatformSetting(
+  db,
+  { key: "youtube_privacy_status", value: "bukan-status-sah", updatedByUserId: ADMIN_USER },
+  csOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(await resolveYouTubePrivacyStatus(db, csOpts), "unlisted");
+await setPlatformSetting(
+  db,
+  { key: "post_media_public_base_url", value: "bukan-url", updatedByUserId: ADMIN_USER },
+  csOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(
+  await resolvePostMediaPublicBaseUrl(db, csOpts),
+  "https://media-contoh.invalid/env",
+);
+await setPlatformSetting(
+  db,
+  { key: "post_media_public_base_url", value: "https://cdn-contoh.invalid/panel", updatedByUserId: ADMIN_USER },
+  csOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(
+  await resolvePostMediaPublicBaseUrl(db, csOpts),
+  "https://cdn-contoh.invalid/panel",
+);
+assert.equal(isValidPlatformSettingValue("youtube_privacy_status", "public"), true);
+assert.equal(isValidPlatformSettingValue("youtube_privacy_status", "publik"), false);
+assert.equal(isValidPlatformSettingValue("tiktok_privacy_level", "SELF_ONLY"), true);
+assert.equal(isValidPlatformSettingValue("post_media_public_base_url", "https://x.invalid"), true);
+assert.equal(isValidPlatformSettingValue("post_media_public_base_url", "bukan-url"), false);
+assert.equal(isValidPlatformSettingValue("openrouter_api_key", "apa-saja"), true);
+const csStatuses = await listPlatformSettingStatuses(db, csOpts);
+assert.ok(!JSON.stringify(csStatuses).includes(PANEL_VERIFY_TOKEN));
+console.log("[6b] resolver bertipe: bawaan aman, panel sah menang, nilai tidak sah diabaikan → env; status bebas nilai: OK");
 
 await client.close();
 console.log("verify platform-settings (PGlite): SEMUA LULUS");

@@ -14,8 +14,12 @@ import {
   getProviderSecret,
   isPlatformAdmin,
   isPlatformSettingKey,
+  isValidPlatformSettingValue,
   listPlatformSettingStatuses,
   recordPlatformSettingTest,
+  resolvePostMediaPublicBaseUrl,
+  resolveTikTokPrivacyLevel,
+  resolveYouTubePrivacyStatus,
   setPlatformSetting,
   type PlatformSettingKey,
   type PlatformSettingsOptions,
@@ -86,6 +90,17 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   // format Google (client ID ±72 char, secret ±40 char) + ruang aman.
   google_oauth_client_id: 256,
   google_oauth_client_secret: 512,
+  // Token verifikasi webhook Meta: nilai bebas yang ditempel ke
+  // dashboard Meta App; panjang mengikuti kunci rahasia lain.
+  meta_webhook_verify_token: 512,
+  // Nama model embedding — pendek seperti openrouter_model.
+  openrouter_embedding_model: 128,
+  // Pengaturan content schedule: URL publik (batas URL wajar) dan dua
+  // enum privasi (nilai sahnya jauh di bawah batas ini; keabsahan
+  // bentuk ditegakkan isValidPlatformSettingValue di handler PUT).
+  post_media_public_base_url: 512,
+  youtube_privacy_status: 32,
+  tiktok_privacy_level: 32,
 };
 
 /**
@@ -210,6 +225,24 @@ export function createAdminRoutes(
         clientId: publicConfig.google_oauth_client_id,
         oauthRedirectUri: options.googleOAuthRedirectUri ?? "",
       },
+      // Pengaturan content schedule efektif — diselesaikan lewat
+      // resolver BERTIPE core (panel → env tervalidasi → bawaan aman),
+      // bukan nilai mentah, agar tampilan panel selalu menunjukkan
+      // level yang benar-benar akan dipakai adapter.
+      contentSchedule: {
+        publicMediaBaseUrl: await resolvePostMediaPublicBaseUrl(
+          bundle.db,
+          options.platform,
+        ),
+        youtubePrivacyStatus: await resolveYouTubePrivacyStatus(
+          bundle.db,
+          options.platform,
+        ),
+        tiktokPrivacyLevel: await resolveTikTokPrivacyLevel(
+          bundle.db,
+          options.platform,
+        ),
+      },
     });
     return c.json(body);
   });
@@ -231,6 +264,12 @@ export function createAdminRoutes(
     }
     if (parsed.data.value.length > KEY_MAX_LENGTH[key]) {
       return apiError(c, 400, "VALIDATION_ERROR", "Value is too long for this setting");
+    }
+    // Kunci berbentuk (enum privasi / URL publik): bentuk tidak sah
+    // ditolak di sini agar nilai panel selalu bisa dipakai resolver;
+    // resolver core tetap memvalidasi ulang sebagai lapis kedua.
+    if (!isValidPlatformSettingValue(key, parsed.data.value)) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Value is not valid for this setting");
     }
     try {
       await setPlatformSetting(

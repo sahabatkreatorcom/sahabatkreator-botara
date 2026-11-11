@@ -43,6 +43,22 @@ export const PlatformSettingKeySchema = z.enum([
   // menjawab GOOGLE_NOT_CONFIGURED secara jujur (pola Resend 11B).
   "google_oauth_client_id",
   "google_oauth_client_secret",
+  // Instruksi pemilik 2026-11-12: semua kredensial integrasi diisi lewat
+  // Panel Admin, env hanya fallback. `meta_webhook_verify_token` adalah
+  // token handshake webhook Meta (nilai yang KITA tentukan) — RAHASIA
+  // bersama dengan dashboard Meta App; pola kunci lain (hanya status).
+  // `openrouter_embedding_model` adalah nama model (bukan rahasia, pola
+  // openrouter_model: hanya status yang dipertukarkan di daftar ini).
+  "meta_webhook_verify_token",
+  "openrouter_embedding_model",
+  // Pengaturan content schedule — BUKAN kredensial, tetapi nilai
+  // platform yang diubah pemilik dari panel yang sama agar konsisten.
+  // Nilai efektif ketiganya DITAMPILKAN lewat PlatformContentScheduleInfo
+  // (base URL publik menurut definisinya publik; dua status privasi
+  // adalah enum yang harus terlihat level berlakunya).
+  "post_media_public_base_url",
+  "youtube_privacy_status",
+  "tiktok_privacy_level",
 ]);
 export type PlatformSettingKey = z.infer<typeof PlatformSettingKeySchema>;
 
@@ -111,12 +127,34 @@ export const PlatformGoogleInfoSchema = z.object({
 });
 export type PlatformGoogleInfo = z.infer<typeof PlatformGoogleInfoSchema>;
 
+/**
+ * Info content schedule BUKAN rahasia: nilai efektif pengaturan
+ * publikasi multi-platform (panel → env) DITAMPILKAN agar pemilik bisa
+ * memverifikasi level yang sedang berlaku. Dua status privasi selalu
+ * terisi karena server menerapkan bawaan aman yang sama seperti env
+ * (YouTube `private`, TikTok `SELF_ONLY`) bila belum diatur di mana pun.
+ */
+export const PlatformContentScheduleInfoSchema = z.object({
+  publicMediaBaseUrl: z.string().nullable(),
+  youtubePrivacyStatus: z.enum(["private", "unlisted", "public"]),
+  tiktokPrivacyLevel: z.enum([
+    "PUBLIC_TO_EVERYONE",
+    "MUTUAL_FOLLOW_FRIENDS",
+    "FOLLOWER_OF_CREATOR",
+    "SELF_ONLY",
+  ]),
+});
+export type PlatformContentScheduleInfo = z.infer<
+  typeof PlatformContentScheduleInfoSchema
+>;
+
 export const PlatformSettingsResponseSchema = z.object({
   settings: z.array(PlatformSettingStatusSchema),
   r2: PlatformR2InfoSchema,
   meta: PlatformMetaInfoSchema,
   email: PlatformEmailInfoSchema,
   google: PlatformGoogleInfoSchema,
+  contentSchedule: PlatformContentScheduleInfoSchema,
 });
 export type PlatformSettingsResponse = z.infer<
   typeof PlatformSettingsResponseSchema
