@@ -150,8 +150,10 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsFirstComment: false,
   },
   instagram: {
-    // Content Publishing API: wajib media, karousel maks 10, caption 2200.
-    publishSupported: false,
+    // Content Publishing API (Gelombang 1): wajib media, karousel
+    // maks 10, caption 2200, video diterbitkan sebagai Reels. First
+    // comment belum dinyalakan karena model post belum membawa isinya.
+    publishSupported: true,
     mediaRequired: true,
     maxCaption: 2200,
     maxMedia: 10,
@@ -159,7 +161,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
-    supportsFirstComment: true,
+    supportsFirstComment: false,
   },
   messenger: {
     // Facebook Page (Gelombang 1): feed teks/tautan, foto tunggal,

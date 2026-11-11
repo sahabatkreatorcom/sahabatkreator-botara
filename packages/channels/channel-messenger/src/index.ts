@@ -1478,6 +1478,82 @@ export class MetaGraphClient extends GraphHttpClient {
     return { providerPostId: body.id };
   }
 
+  /**
+   * Content Publishing Instagram, tahap 1: buat SATU media container.
+   * API ini tidak menerima unggahan multipart — Meta mengambil media
+   * dari `imageUrl`/`videoUrl` yang dapat dijangkau publik. Pemanggil
+   * bertanggung jawab menyediakan URL itu; klien ini hanya menjalankan
+   * protokol Graph-nya. Untuk video, `mediaType: "REELS"` adalah jalur
+   * publikasi video yang didukung adapter content schedule.
+   */
+  async createInstagramMediaContainer(input: {
+    instagramAccountId: string;
+    imageUrl?: string;
+    videoUrl?: string;
+    caption?: string;
+    mediaType?: "REELS";
+    isCarouselItem?: boolean;
+  }): Promise<{ containerId: string }> {
+    const payload: Record<string, string | boolean> = {};
+    if (input.imageUrl) payload.image_url = input.imageUrl;
+    if (input.videoUrl) {
+      payload.video_url = input.videoUrl;
+      // Item karousel bukan Reels: media_type REELS hanya untuk video
+      // tunggal. Karousel menentukan jenisnya dari container induk.
+      if (!input.isCarouselItem) {
+        payload.media_type = input.mediaType ?? "REELS";
+      }
+    }
+    if (input.isCarouselItem) payload.is_carousel_item = true;
+    if (input.caption && !input.isCarouselItem) {
+      payload.caption = input.caption;
+    }
+    const body = await this.postJson<{ id?: string }>(
+      `${encodeURIComponent(input.instagramAccountId)}/media`,
+      payload,
+    );
+    if (!body.id) throw new MetaGraphError(200, null, "missing_container_id");
+    return { containerId: body.id };
+  }
+
+  /** Content Publishing Instagram: buat container karousel dari container item. */
+  async createInstagramCarouselContainer(input: {
+    instagramAccountId: string;
+    children: string[];
+    caption?: string;
+  }): Promise<{ containerId: string }> {
+    const body = await this.postJson<{ id?: string }>(
+      `${encodeURIComponent(input.instagramAccountId)}/media`,
+      {
+        media_type: "CAROUSEL",
+        children: input.children.join(","),
+        ...(input.caption ? { caption: input.caption } : {}),
+      },
+    );
+    if (!body.id) throw new MetaGraphError(200, null, "missing_container_id");
+    return { containerId: body.id };
+  }
+
+  /** Baca status pemrosesan container Instagram sampai provider melaporkannya. */
+  async getInstagramContainerStatus(containerId: string): Promise<string> {
+    const body = await this.getJson<{ status_code?: string; status?: string }>(
+      `${encodeURIComponent(containerId)}?fields=status_code,status`,
+    );
+    return body.status_code ?? body.status ?? "UNKNOWN";
+  }
+
+  /** Content Publishing Instagram, tahap 2: terbitkan container yang siap. */
+  async publishInstagramContainer(input: {
+    instagramAccountId: string;
+    containerId: string;
+  }): Promise<{ providerPostId: string }> {
+    const body = await this.postJson<{ id?: string }>(
+      `${encodeURIComponent(input.instagramAccountId)}/media_publish`,
+      { creation_id: input.containerId },
+    );
+    if (!body.id) throw new MetaGraphError(200, null, "missing_post_id");
+    return { providerPostId: body.id };
+  }
 }
 
 // ---------------------------------------------------------------------------

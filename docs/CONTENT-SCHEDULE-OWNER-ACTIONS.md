@@ -59,6 +59,20 @@ hanya bisa diajukan dari akun pemilik:
    Graph API (`verify:meta-post`) dengan token uji; sasaran Page
    dimaterialisasi dari `channel_accounts` terhubung tanpa migrasi.
 
+2. **Instagram** — dibutuhkan: Meta App milik pemilik dengan izin
+   `instagram_content_publish` lolos App Review, akun Instagram
+   Business/Creator contoh yang terhubung ke Page, token hasil connect
+   nyata, dan infrastruktur URL media publik yang dapat diambil Meta
+   (CDN/pemetaan publik untuk media terjadwal; endpoint media internal
+   repo bersesi dan sengaja tidak dipakai). Untuk apa: Content
+   Publishing API membuat container dari `image_url`/`video_url`,
+   menunggu status `FINISHED`, lalu memanggil `media_publish`; tanpa
+   URL publik adapter gagal aman dengan
+   `instagram_public_media_url_unavailable`. Sudah dimock: sasaran IG
+   dimaterialisasi dari akun `instagram` terhubung, dan seluruh alur
+   container foto/Reels/karousel diverifikasi melawan fake Graph API
+   (`verify:meta-post`) dengan URL CDN contoh.
+
 ## Gelombang berikutnya
 
 _(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_

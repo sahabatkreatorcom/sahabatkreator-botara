@@ -76,6 +76,15 @@ const EnvSchema = z.object({
    */
   META_API_BASE: z.string().url().optional(),
   /**
+   * Base URL PUBLIK opsional untuk media content schedule: URL final
+   * adalah `{base}/{r2Key}`. Dipakai hanya oleh API publikasi yang
+   * mewajibkan provider mengambil media dari URL (Instagram/Threads).
+   * Endpoint media internal repo tetap privat dan bersesi — JANGAN
+   * mengisi nilai ini dengan URL API internal. Kosong berarti adapter
+   * container gagal aman dengan kode `*_public_media_url_unavailable`.
+   */
+  POST_MEDIA_PUBLIC_BASE_URL: z.string().url().optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta

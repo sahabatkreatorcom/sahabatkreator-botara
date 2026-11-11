@@ -4,7 +4,10 @@ import {
   type MediaObjectStore,
 } from "@sahabat-kreator/core";
 import { telegramPostPublisher } from "./telegram-post";
-import { facebookPagePostPublisher } from "./meta-post";
+import {
+  facebookPagePostPublisher,
+  instagramPostPublisher,
+} from "./meta-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -54,6 +57,10 @@ export interface PostPublisherOptions {
   resolvePublicMediaUrl?: (
     media: { r2Key: string; mimeType: string | null; fileName: string | null },
   ) => string | null;
+  /** Jeda polling status container Meta; default 3000 ms. */
+  metaContainerPollIntervalMs?: number | undefined;
+  /** Batas polling status container Meta; default 20 kali. */
+  metaContainerMaxPolls?: number | undefined;
 }
 
 export interface PublishPostResult {
@@ -76,6 +83,7 @@ export interface PostPublisherAdapter {
 const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   telegramPostPublisher,
   facebookPagePostPublisher,
+  instagramPostPublisher,
 ];
 
 export function getPostPublisher(

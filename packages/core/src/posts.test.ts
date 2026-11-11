@@ -41,6 +41,7 @@ import { createTestDb, TEST_TENANT_ID, type TestDb } from "./testing/pglite";
 
 const CH_ACCOUNT = "8a000000-0000-4000-8000-000000000023";
 const FB_ACCOUNT = "8a010000-0000-4000-8000-000000000023";
+const IG_ACCOUNT = "8a020000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
@@ -70,6 +71,12 @@ beforeAll(async () => {
        (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
      VALUES ($1, $2, 'messenger', '1234567890', 'Page Promo', 'connected', 'v1:page-token', 'pagepromo')`,
     [FB_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'instagram', '17841400000000000', 'IG Promo', 'connected', 'v1:ig-token', 'igpromo')`,
+    [IG_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
@@ -142,6 +149,44 @@ describe("sasaran Meta (Gelombang 1)", () => {
     const pages = second.filter((target) => target.provider === "messenger");
     expect(pages).toHaveLength(1);
     expect(pages[0]?.conversationId).toBe(page?.conversationId);
+  });
+
+  it("akun IG Business terhubung menjadi sasaran; teks saja ditolak, foto terjadwal", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const ig = targets.find((target) => target.provider === "instagram");
+    expect(ig?.channelAccountId).toBe(IG_ACCOUNT);
+    expect(ig?.providerChatId).toBe("17841400000000000");
+
+    const textOnly = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: ig!.conversationId,
+      title: "IG teks",
+      caption: "Tidak akan terjadwal",
+      mediaIds: [],
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: textOnly.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_MEDIA_REQUIRED" });
+
+    const photo = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: ig!.conversationId,
+      title: "IG foto",
+      caption: "Halo dari Instagram",
+      mediaIds: [MEDIA_PHOTO],
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: photo.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
   });
 
   it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {

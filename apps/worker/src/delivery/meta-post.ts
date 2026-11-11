@@ -33,6 +33,34 @@ import type {
 export interface MetaPostMediaFile extends MetaPublishFile {
   kind: "photo" | "video" | "document";
   r2Key: string;
+  mimeType: string | null;
+  fileName: string | null;
+}
+
+/**
+ * Resolusi URL media publik untuk API container (Instagram/Threads).
+ *
+ * Media repo TIDAK pernah diekspos apa adanya: object store privat dan
+ * endpoint API media memeriksa sesi + tenant. Fungsi ini hanya memakai
+ * resolver khusus (rantai uji / integrasi CDN bertanda tangan di luar
+ * repo) atau base URL publik yang secara eksplisit dikonfigurasi
+ * operator sebagai pemetaan `{base}/{r2Key}`. Tanpa keduanya ia
+ * mengembalikan null dan adapter gagal SEBELUM memanggil provider —
+ * bukan menebak URL internal yang pasti ditolak Meta.
+ */
+export function resolvePublicMediaUrl(
+  opts: PostPublisherOptions,
+  media: { r2Key: string; mimeType: string | null; fileName: string | null },
+): string | null {
+  const custom = opts.resolvePublicMediaUrl?.(media);
+  if (custom) return custom;
+  if (!opts.publicMediaBaseUrl) return null;
+  const base = opts.publicMediaBaseUrl.replace(/\/+$/, "");
+  const path = media.r2Key
+    .split("/")
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+  return `${base}/${path}`;
 }
 
 type MetaPublishSender = (
@@ -123,6 +151,8 @@ async function publishMetaPost(
           item.mimeType ?? object.contentType ?? "application/octet-stream",
         kind: item.kind,
         r2Key: item.r2Key,
+        mimeType: item.mimeType,
+        fileName: item.fileName,
       });
     }
   } else {
@@ -135,6 +165,8 @@ async function publishMetaPost(
         contentType: item.mimeType ?? "application/octet-stream",
         kind: item.kind,
         r2Key: item.r2Key,
+        mimeType: item.mimeType,
+        fileName: item.fileName,
       });
     }
   }
@@ -220,6 +252,101 @@ async function sendFacebookPagePost(
   // hanya sebagian lampiran.
   throw new Error("facebook_media_combination_unsupported");
 }
+
+async function waitForInstagramContainer(
+  client: MetaGraphClient,
+  containerId: string,
+  opts: PostPublisherOptions,
+): Promise<void> {
+  const maxPolls = opts.metaContainerMaxPolls ?? 20;
+  const intervalMs = opts.metaContainerPollIntervalMs ?? 3_000;
+  for (let attempt = 0; attempt < maxPolls; attempt += 1) {
+    const status = await client.getInstagramContainerStatus(containerId);
+    if (status === "FINISHED") return;
+    if (status === "ERROR" || status === "EXPIRED") {
+      throw new Error("instagram_container_failed");
+    }
+    if (attempt + 1 < maxPolls && intervalMs > 0) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+  }
+  throw new Error("instagram_container_timeout");
+}
+
+/** Kirim Instagram: container per media → tunggu siap → publish. */
+async function sendInstagramPost(
+  client: MetaGraphClient,
+  payload: PostPublishPayload,
+  files: MetaPostMediaFile[],
+  opts: PostPublisherOptions,
+): Promise<string> {
+  if (files.length === 0) {
+    // Capability seharusnya menolak ini di core (mediaRequired), tetapi
+    // adapter tetap gagal aman bila baris lama menyelinap.
+    throw new Error("instagram_media_required");
+  }
+  if (files.some((file) => file.kind === "document")) {
+    throw new Error("instagram_media_kind_unsupported");
+  }
+
+  const urls = files.map((file) => {
+    const url = resolvePublicMediaUrl(opts, file);
+    if (!url) throw new Error("instagram_public_media_url_unavailable");
+    return url;
+  });
+
+  if (files.length === 1) {
+    const file = files[0]!;
+    const container = await client.createInstagramMediaContainer({
+      instagramAccountId: payload.chatId,
+      ...(file.kind === "video"
+        ? { videoUrl: urls[0]!, mediaType: "REELS" as const }
+        : { imageUrl: urls[0]! }),
+      caption: payload.caption,
+    });
+    await waitForInstagramContainer(client, container.containerId, opts);
+    const published = await client.publishInstagramContainer({
+      instagramAccountId: payload.chatId,
+      containerId: container.containerId,
+    });
+    return published.providerPostId;
+  }
+
+  const children: string[] = [];
+  for (const [index, file] of files.entries()) {
+    const child = await client.createInstagramMediaContainer({
+      instagramAccountId: payload.chatId,
+      ...(file.kind === "video"
+        ? { videoUrl: urls[index]! }
+        : { imageUrl: urls[index]! }),
+      isCarouselItem: true,
+    });
+    await waitForInstagramContainer(client, child.containerId, opts);
+    children.push(child.containerId);
+  }
+  const carousel = await client.createInstagramCarouselContainer({
+    instagramAccountId: payload.chatId,
+    children,
+    caption: payload.caption,
+  });
+  await waitForInstagramContainer(client, carousel.containerId, opts);
+  const published = await client.publishInstagramContainer({
+    instagramAccountId: payload.chatId,
+    containerId: carousel.containerId,
+  });
+  return published.providerPostId;
+}
+
+export const instagramPostPublisher: PostPublisherAdapter = {
+  provider: "instagram",
+  publish: (db, input, opts) =>
+    publishMetaPost(db, input, opts, {
+      provider: "instagram",
+      label: "instagram",
+      loadMediaBytes: false,
+      send: sendInstagramPost,
+    }),
+};
 
 export const facebookPagePostPublisher: PostPublisherAdapter = {
   provider: "messenger",

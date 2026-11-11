@@ -8,7 +8,9 @@
  *  (c) album mengunggah foto published=false lalu merangkainya lewat
  *      attached_media pada SATU feed;
  *  (d) video memakai multipart /{page-id}/videos dengan description;
- *  (e) error Graph tetap menjadi MetaGraphError berkode resmi, tanpa
+ *  (e) Instagram memakai container dua tahap: media/Reels/karousel
+ *      dibuat, statusnya dibaca, lalu `media_publish` menerbitkannya;
+ *  (f) error Graph tetap menjadi MetaGraphError berkode resmi, tanpa
  *      token pada pesan/log harness.
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:meta-post
@@ -61,6 +63,21 @@ function fakeFetch(captured: Captured[]): typeof fetch {
           : { id: "media_single", post_id: "page_post_photo" },
       );
     }
+    if (url.includes("fields=status_code")) {
+      return jsonResponse({ status_code: "FINISHED" });
+    }
+    if (url.endsWith("/media_publish")) {
+      return jsonResponse({ id: "ig_post_1" });
+    }
+    if (url.endsWith("/media")) {
+      if (json?.is_carousel_item === true) {
+        return jsonResponse({ id: `child_${captured.length}` });
+      }
+      if (json?.media_type === "CAROUSEL") {
+        return jsonResponse({ id: "carousel_1" });
+      }
+      return jsonResponse({ id: "container_1" });
+    }
     if (url.endsWith("/videos")) {
       return jsonResponse({ id: "page_video_1" });
     }
@@ -72,6 +89,7 @@ function fakeFetch(captured: Captured[]): typeof fetch {
 }
 
 const PAGE_ID = "1234567890";
+const IG_ID = "17841400000000000";
 const file = (name: string, type = "image/jpeg") => ({
   data: new TextEncoder().encode(`bytes-${name}`),
   filename: name,
@@ -168,6 +186,86 @@ async function main(): Promise<void> {
         source instanceof File &&
         source.type === "video/mp4" &&
         captured[0]?.form?.get("description") === "Video promo",
+    );
+  }
+
+  {
+    const captured: Captured[] = [];
+    const client = new MetaGraphClient({
+      accessToken: "token-uji",
+      fetchImpl: fakeFetch(captured),
+    });
+    const container = await client.createInstagramMediaContainer({
+      instagramAccountId: IG_ID,
+      imageUrl: "https://cdn.example.test/media/photo.jpg",
+      caption: "Halo IG",
+    });
+    const status = await client.getInstagramContainerStatus(container.containerId);
+    const published = await client.publishInstagramContainer({
+      instagramAccountId: IG_ID,
+      containerId: container.containerId,
+    });
+    check("IG foto: container → FINISHED → publish", published.providerPostId === "ig_post_1" && status === "FINISHED");
+    check(
+      "IG foto: body image_url/caption dan creation_id",
+      captured[0]?.url.endsWith(`/v26.0/${IG_ID}/media`) === true &&
+        captured[0]?.json?.image_url === "https://cdn.example.test/media/photo.jpg" &&
+        captured[0]?.json?.caption === "Halo IG" &&
+        captured.at(-1)?.json?.creation_id === "container_1",
+      JSON.stringify(captured.map((request) => request.json)),
+    );
+  }
+
+  {
+    const captured: Captured[] = [];
+    const client = new MetaGraphClient({
+      accessToken: "token-uji",
+      fetchImpl: fakeFetch(captured),
+    });
+    await client.createInstagramMediaContainer({
+      instagramAccountId: IG_ID,
+      videoUrl: "https://cdn.example.test/media/reel.mp4",
+      caption: "Reels",
+    });
+    check(
+      "IG video: video_url + media_type REELS",
+      captured[0]?.json?.video_url === "https://cdn.example.test/media/reel.mp4" &&
+        captured[0]?.json?.media_type === "REELS",
+      JSON.stringify(captured[0]?.json),
+    );
+  }
+
+  {
+    const captured: Captured[] = [];
+    const client = new MetaGraphClient({
+      accessToken: "token-uji",
+      fetchImpl: fakeFetch(captured),
+    });
+    const childA = await client.createInstagramMediaContainer({
+      instagramAccountId: IG_ID,
+      imageUrl: "https://cdn.example.test/media/a.jpg",
+      isCarouselItem: true,
+    });
+    const childB = await client.createInstagramMediaContainer({
+      instagramAccountId: IG_ID,
+      videoUrl: "https://cdn.example.test/media/b.mp4",
+      isCarouselItem: true,
+    });
+    const carousel = await client.createInstagramCarouselContainer({
+      instagramAccountId: IG_ID,
+      children: [childA.containerId, childB.containerId],
+      caption: "Karousel campuran",
+    });
+    check("IG karousel: container induk CAROUSEL", carousel.containerId === "carousel_1");
+    check(
+      "IG karousel: item tanpa caption; video item bukan REELS; children berurutan",
+      captured[0]?.json?.is_carousel_item === true &&
+        !("caption" in (captured[0]?.json ?? {})) &&
+        captured[1]?.json?.is_carousel_item === true &&
+        !("media_type" in (captured[1]?.json ?? {})) &&
+        captured[2]?.json?.media_type === "CAROUSEL" &&
+        captured[2]?.json?.children === `${childA.containerId},${childB.containerId}`,
+      JSON.stringify(captured.map((request) => request.json)),
     );
   }
 
