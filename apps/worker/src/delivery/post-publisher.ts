@@ -9,6 +9,7 @@ import {
   instagramPostPublisher,
 } from "./meta-post";
 import { threadsPostPublisher } from "./threads-post";
+import { blueskyPostPublisher } from "./bluesky-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -48,6 +49,8 @@ export interface PostPublisherOptions {
   metaGraphApiVersion?: string | undefined;
   /** Base URL Threads API (env THREADS_API_BASE; default graph.threads.net). */
   threadsApiBase?: string | undefined;
+  /** Base URL entryway/PDS Bluesky (env BLUESKY_API_BASE; default bsky.social). */
+  blueskyApiBase?: string | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
@@ -114,6 +117,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   facebookPagePostPublisher,
   instagramPostPublisher,
   threadsPostPublisher,
+  blueskyPostPublisher,
 ];
 
 export function getPostPublisher(

@@ -92,6 +92,14 @@ const EnvSchema = z.object({
    */
   THREADS_API_BASE: z.string().url().optional(),
   /**
+   * Base URL entryway Bluesky (AT Protocol). Default
+   * https://bsky.social — entryway meneruskan panggilan XRPC ke PDS
+   * akun; override hanya untuk uji mock atau PDS mandiri — pola yang
+   * sama dengan META_API_BASE. Kredensial per akun (app password)
+   * tersimpan terenkripsi pada akun channel, bukan di env.
+   */
+  BLUESKY_API_BASE: z.string().url().optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta

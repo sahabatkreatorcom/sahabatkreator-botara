@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@sahabat-kreator/ai": "workspace:*",
+    "@sahabat-kreator/channel-bluesky": "workspace:*",
     "@sahabat-kreator/channel-messenger": "workspace:*",
     "@sahabat-kreator/channel-telegram": "workspace:*",
     "@sahabat-kreator/channel-whatsapp": "workspace:*",
@@ -38,6 +39,7 @@
     "verify:meta-send": "tsx scripts/verify-meta-send.ts",
     "verify:meta-post": "tsx scripts/verify-meta-post.ts",
     "verify:threads-post": "tsx scripts/verify-threads-post.ts",
+    "verify:bluesky-post": "tsx scripts/verify-bluesky-post.ts",
     "verify:meta-token-lifecycle": "tsx scripts/verify-meta-token-lifecycle.ts",
     "purge:channels": "tsx scripts/purge-trashed-channels.ts",
     "prune:logs": "tsx scripts/prune-integration-logs.ts",

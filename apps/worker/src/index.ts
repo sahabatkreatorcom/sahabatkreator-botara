@@ -502,6 +502,7 @@ const bullWorker = new Worker<MainJobData>(
           metaApiBase: env.META_API_BASE,
           metaGraphApiVersion: META_GRAPH_API_VERSION,
           threadsApiBase: env.THREADS_API_BASE,
+          blueskyApiBase: env.BLUESKY_API_BASE,
           publicMediaBaseUrl: env.POST_MEDIA_PUBLIC_BASE_URL,
           mediaStore,
         },
