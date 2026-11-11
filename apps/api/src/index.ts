@@ -111,6 +111,11 @@ const platformOptions: PlatformSettingsOptions = {
     // ada konsumen — disiapkan untuk alur connect/OAuth Threads.
     threads_app_id: env.THREADS_APP_ID,
     threads_app_secret: env.THREADS_APP_SECRET,
+    // Kredensial aplikasi TikTok (TikTok for Developers): env hanya
+    // fallback; sumber utama Panel Admin grup TikTok. Belum ada
+    // konsumen — disiapkan untuk alur connect/OAuth TikTok.
+    tiktok_client_key: env.TIKTOK_CLIENT_KEY,
+    tiktok_client_secret: env.TIKTOK_CLIENT_SECRET,
     // Fase 11B: email Resend — env hanya fallback; sumber utama Panel
     // Admin (resend_api_key rahasia + identitas pengirim publik).
     resend_api_key: env.RESEND_API_KEY,

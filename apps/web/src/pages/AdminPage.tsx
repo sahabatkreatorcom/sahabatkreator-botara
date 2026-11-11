@@ -10,6 +10,7 @@ import type {
   PlatformSettingTestResult,
   PlatformR2Info,
   PlatformThreadsInfo,
+  PlatformTikTokInfo,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
@@ -95,6 +96,9 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   // Aplikasi Threads (terpisah dari Meta App utama) — sub-blok di grup Meta.
   threads_app_id: "admin.threadsAppIdLabel",
   threads_app_secret: "admin.threadsAppSecretLabel",
+  // Aplikasi TikTok (TikTok for Developers) — bagian tersendiri.
+  tiktok_client_key: "admin.tiktokClientKeyLabel",
+  tiktok_client_secret: "admin.tiktokClientSecretLabel",
   resend_api_key: "admin.resendApiKeyLabel",
   resend_from_email: "admin.resendFromEmailLabel",
   resend_from_name: "admin.resendFromNameLabel",
@@ -122,6 +126,8 @@ export function AdminPage({ t, locale }: AdminPageProps) {
   const [metaInfo, setMetaInfo] = useState<PlatformMetaInfo | null>(null);
   const [threadsInfo, setThreadsInfo] =
     useState<PlatformThreadsInfo | null>(null);
+  const [tiktokInfo, setTiktokInfo] =
+    useState<PlatformTikTokInfo | null>(null);
   const [emailInfo, setEmailInfo] = useState<PlatformEmailInfo | null>(null);
   const [googleInfo, setGoogleInfo] = useState<PlatformGoogleInfo | null>(
     null,
@@ -144,6 +150,7 @@ export function AdminPage({ t, locale }: AdminPageProps) {
       setR2Info(body.r2);
       setMetaInfo(body.meta);
       setThreadsInfo(body.threads);
+      setTiktokInfo(body.tiktok);
       setEmailInfo(body.email);
       setGoogleInfo(body.google);
       setContentScheduleInfo(body.contentSchedule);
@@ -513,6 +520,54 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             locale={locale}
             settingKey="threads_app_secret"
             status={byKey("threads_app_secret")}
+            onStatusChanged={onStatusChanged}
+          />
+        </div>
+      </section>
+
+      {/*
+        Kredensial APLIKASI TikTok (TikTok for Developers) — bagian
+        tersendiri (bukan aplikasi Meta): client key pengenal publik
+        (teks biasa, nilai efektif ditampilkan), client secret baris
+        password yang tidak pernah dirender. BELUM ada konsumen —
+        disiapkan untuk alur connect/OAuth TikTok (Login Kit).
+      */}
+      <section className="mt-8">
+        <h2 className="text-base font-semibold text-ink">
+          {t("admin.tiktokTitle")}
+        </h2>
+        <p className="mt-1 max-w-2xl text-sm text-muted">
+          {t("admin.tiktokBody")}
+        </p>
+        {tiktokInfo ? (
+          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.tiktokClientKeyLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {tiktokInfo.clientKey ?? "—"}
+              </dd>
+            </div>
+          </dl>
+        ) : null}
+        <div className="mt-4 space-y-3">
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="tiktok_client_key"
+            status={byKey("tiktok_client_key")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="tiktok_client_secret"
+            status={byKey("tiktok_client_secret")}
             onStatusChanged={onStatusChanged}
           />
         </div>

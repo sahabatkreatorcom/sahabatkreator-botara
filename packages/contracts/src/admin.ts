@@ -43,6 +43,15 @@ export const PlatformSettingKeySchema = z.enum([
   // token per akun tenant.
   "threads_app_id",
   "threads_app_secret",
+  // Kredensial APLIKASI TikTok milik platform (TikTok for Developers),
+  // istilah resmi TikTok: `tiktok_client_key` adalah pengenal PUBLIK
+  // aplikasi (nilainya ditampilkan panel lewat PlatformTikTokInfo,
+  // pola meta_app_id/threads_app_id); `tiktok_client_secret` RAHASIA
+  // (pola meta_app_secret: hanya status yang dipertukarkan). Untuk
+  // connect/OAuth TikTok (Login Kit) kelak; penerbitan saat ini
+  // memakai token per akun tenant.
+  "tiktok_client_key",
+  "tiktok_client_secret",
   // Fase 11B: email transaksional via Resend (keputusan user 2026-11-02).
   // `resend_api_key` adalah RAHASIA (pola kunci lain: status saja yang
   // dipertukarkan). `resend_from_email` / `resend_from_name` adalah
@@ -137,6 +146,17 @@ export const PlatformThreadsInfoSchema = z.object({
 export type PlatformThreadsInfo = z.infer<typeof PlatformThreadsInfoSchema>;
 
 /**
+ * Info TikTok BUKAN rahasia: Client Key aplikasi TikTok efektif
+ * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya —
+ * pengenal publik, pola PlatformMetaInfo/PlatformThreadsInfo.
+ * Client Secret TIDAK PERNAH muncul di kontrak mana pun.
+ */
+export const PlatformTikTokInfoSchema = z.object({
+  clientKey: z.string().nullable(),
+});
+export type PlatformTikTokInfo = z.infer<typeof PlatformTikTokInfoSchema>;
+
+/**
  * Info email BUKAN rahasia (Fase 11B): identitas pengirim Resend efektif
  * (panel → env) DITAMPILKAN agar pemilik bisa memverifikasinya. Kunci
  * API Resend sendiri rahasia dan tidak pernah muncul di kontrak mana pun
@@ -188,6 +208,7 @@ export const PlatformSettingsResponseSchema = z.object({
   r2: PlatformR2InfoSchema,
   meta: PlatformMetaInfoSchema,
   threads: PlatformThreadsInfoSchema,
+  tiktok: PlatformTikTokInfoSchema,
   email: PlatformEmailInfoSchema,
   google: PlatformGoogleInfoSchema,
   contentSchedule: PlatformContentScheduleInfoSchema,

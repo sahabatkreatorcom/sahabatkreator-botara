@@ -281,7 +281,12 @@ hanya bisa diajukan dari akun pemilik:
 
 1. **TikTok** — dibutuhkan: (a) aplikasi TikTok milik pemilik
    (TikTok for Developers) dengan produk Login Kit + Content
-   Posting API aktif dan client key/secret aplikasi itu; (b)
+   Posting API aktif dan client key/secret aplikasi itu — per
+   2026-11-12, Client Key & Client Secret kini bisa diisi di Panel
+   Admin (grup TikTok; fallback env `TIKTOK_CLIENT_KEY` /
+   `TIKTOK_CLIENT_SECRET`) dan akan dipakai alur connect/OAuth
+   TikTok kelak; pendaftaran aplikasinya sendiri tetap tindakan
+   pemilik di portal TikTok for Developers; (b)
    pengajuan **AUDIT Content Posting API** dari akun pemilik —
    prasyarat ini sudah dicatat sejak Gelombang 0 karena prosesnya
    paling lama: TANPA audit lolos, TikTok hanya mengizinkan
@@ -298,7 +303,7 @@ hanya bisa diajukan dari akun pemilik:
    mengizinkannya; (e) khusus FOTO/CAROUSEL: **verifikasi
    kepemilikan domain (atau prefix URL) dari base URL media
    publik** di portal TikTok for Developers, dan isi base URL itu
-   di Panel Admin (grup Content schedule; env
+   di Panel Admin (grup Cloudflare R2; env
    `POST_MEDIA_PUBLIC_BASE_URL` hanya fallback) — foto hanya bisa
    `PULL_FROM_URL` dari domain terverifikasi itu; tanpa
    verifikasi, init foto ditolak provider dengan

@@ -95,6 +95,10 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   // app secret rahasia mengikuti batas kunci rahasia lain.
   threads_app_id: 128,
   threads_app_secret: 512,
+  // Aplikasi TikTok: client key publik pendek (ditampilkan panel),
+  // client secret rahasia mengikuti batas kunci rahasia lain.
+  tiktok_client_key: 128,
+  tiktok_client_secret: 512,
   // Fase 11B: kunci Resend rahasia; identitas pengirim publik (alamat
   // email + nama tampil) — panjang mengikuti sifat nilainya.
   resend_api_key: 512,
@@ -132,6 +136,8 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
  * terbukti dari dialog Hubungkan Google tenant yang berhasil/gagal.
  * `threads_app_secret` juga tidak diuji — alasan yang sama seperti
  * meta_app_secret (dan alur OAuth Threads-nya sendiri belum dibuka).
+ * `tiktok_client_secret` sama: tidak ada panggilan validasi mandiri
+ * TikTok untuk client secret, dan OAuth TikTok belum dibuka.
  */
 const TESTABLE_KEYS: ReadonlySet<PlatformSettingKey> = new Set([
   "openrouter_api_key",
@@ -238,6 +244,12 @@ export function createAdminRoutes(
       // yang sama seperti meta_app_secret di grup Meta.
       threads: {
         appId: publicConfig.threads_app_id,
+      },
+      // Aplikasi TikTok (TikTok for Developers): hanya Client Key
+      // yang ditampilkan (pengenal publik); Client Secret tidak
+      // pernah keluar — pola yang sama seperti kunci rahasia lain.
+      tiktok: {
+        clientKey: publicConfig.tiktok_client_key,
       },
       // Fase 11B: identitas pengirim email efektif (panel → env) —
       // publik menurut sifatnya, ditampilkan untuk verifikasi pemilik.

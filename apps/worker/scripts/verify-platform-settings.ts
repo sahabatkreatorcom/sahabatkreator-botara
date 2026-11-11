@@ -19,6 +19,8 @@
  *     endpoint kosong diturunkan dari account id efektif.
  *  8. Kredensial aplikasi Threads: panel menang atas env, secret
  *     hanya envelope terenkripsi, app id publik & secret tak tampil.
+ *  9. Kredensial aplikasi TikTok: hal yang sama untuk client
+ *     key/secret TikTok.
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:platform-settings
  * (Nilai dummy di skrip ini adalah fixture uji yang jelas-jelas palsu.)
@@ -446,6 +448,69 @@ await clearPlatformSetting(db, { key: "threads_app_id", updatedByUserId: ADMIN_U
 await clearPlatformSetting(db, { key: "threads_app_secret", updatedByUserId: ADMIN_USER });
 clearPlatformSettingsCache();
 console.log("[8] Threads: panel menang atas env; secret hanya envelope v1; status bebas nilai; app id publik, secret tak tampil: OK");
+
+// ---------- 9. Kredensial aplikasi TikTok: panel → env ----------
+const TIKTOK_ENV_KEY = "tiktok-key-env";
+const TIKTOK_ENV_SECRET = "tiktok-secret-env";
+const TIKTOK_PANEL_KEY = "tiktok-key-panel";
+const TIKTOK_PANEL_SECRET = "tiktok-secret-panel";
+const tiktokOpts = {
+  masterSecret: MASTER,
+  env: {
+    tiktok_client_key: TIKTOK_ENV_KEY,
+    tiktok_client_secret: TIKTOK_ENV_SECRET,
+  },
+};
+
+// Env saja → env untuk kedua kunci; client key tampil di konfigurasi
+// publik, client secret TIDAK punya tempat di sana sama sekali.
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "tiktok_client_key", tiktokOpts), TIKTOK_ENV_KEY);
+assert.equal(await getProviderSecret(db, "tiktok_client_secret", tiktokOpts), TIKTOK_ENV_SECRET);
+let tiktokPublic = await getPlatformPublicConfig(db, tiktokOpts);
+assert.equal(tiktokPublic.tiktok_client_key, TIKTOK_ENV_KEY);
+assert.ok(!("tiktok_client_secret" in tiktokPublic));
+
+// Panel → MENANG atas env untuk kedua kunci.
+await setPlatformSetting(
+  db,
+  { key: "tiktok_client_key", value: TIKTOK_PANEL_KEY, updatedByUserId: ADMIN_USER },
+  tiktokOpts,
+);
+await setPlatformSetting(
+  db,
+  { key: "tiktok_client_secret", value: TIKTOK_PANEL_SECRET, updatedByUserId: ADMIN_USER },
+  tiktokOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(await getProviderSecret(db, "tiktok_client_key", tiktokOpts), TIKTOK_PANEL_KEY);
+assert.equal(await getProviderSecret(db, "tiktok_client_secret", tiktokOpts), TIKTOK_PANEL_SECRET);
+tiktokPublic = await getPlatformPublicConfig(db, tiktokOpts);
+assert.equal(tiktokPublic.tiktok_client_key, TIKTOK_PANEL_KEY);
+
+// Secret tersimpan HANYA sebagai envelope terenkripsi; daftar status
+// bebas nilai untuk kedua kunci.
+const tiktokRaw = await client.query<{ value_encrypted: string }>(
+  `SELECT value_encrypted FROM platform_settings WHERE key = 'tiktok_client_secret'`,
+);
+assert.equal(tiktokRaw.rows.length, 1);
+assert.ok(tiktokRaw.rows[0].value_encrypted.startsWith("v1:"));
+assert.ok(!tiktokRaw.rows[0].value_encrypted.includes(TIKTOK_PANEL_SECRET));
+const tiktokStatuses = await listPlatformSettingStatuses(db, tiktokOpts);
+assert.ok(!JSON.stringify(tiktokStatuses).includes(TIKTOK_PANEL_SECRET));
+assert.ok(!JSON.stringify(tiktokStatuses).includes(TIKTOK_ENV_SECRET));
+assert.equal(
+  tiktokStatuses.find((s) => s.key === "tiktok_client_key")?.source,
+  "panel",
+);
+assert.equal(
+  tiktokStatuses.find((s) => s.key === "tiktok_client_secret")?.source,
+  "panel",
+);
+await clearPlatformSetting(db, { key: "tiktok_client_key", updatedByUserId: ADMIN_USER });
+await clearPlatformSetting(db, { key: "tiktok_client_secret", updatedByUserId: ADMIN_USER });
+clearPlatformSettingsCache();
+console.log("[9] TikTok: panel menang atas env; secret hanya envelope v1; status bebas nilai; client key publik, secret tak tampil: OK");
 
 await client.close();
 console.log("verify platform-settings (PGlite): SEMUA LULUS");

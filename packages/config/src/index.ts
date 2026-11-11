@@ -139,6 +139,18 @@ const EnvSchema = z.object({
    */
   TIKTOK_API_BASE: z.string().url().optional(),
   /**
+   * Kredensial APLIKASI TikTok milik PLATFORM (TikTok for Developers) —
+   * istilah resmi TikTok: Client Key (pengenal publik aplikasi) dan
+   * Client Secret (RAHASIA). Keduanya FALLBACK env saja (instruksi
+   * pemilik 2026-11-12); sumber utama adalah Panel Admin (kunci
+   * `tiktok_client_key` / `tiktok_client_secret` di platform_settings,
+   * resolusi panel → env lewat resolver core). Dipakai alur
+   * connect/OAuth TikTok (Login Kit) kelak — saat ini belum ada
+   * konsumennya; penerbitan memakai token per akun tenant.
+   */
+  TIKTOK_CLIENT_KEY: z.string().min(1).optional(),
+  TIKTOK_CLIENT_SECRET: z.string().min(1).optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta
