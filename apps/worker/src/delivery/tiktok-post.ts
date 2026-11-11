@@ -6,6 +6,7 @@ import {
   markPostFailed,
   markPostPublished,
   recordIntegrationLog,
+  type PostPublishPayload,
 } from "@sahabat-kreator/core";
 import {
   TikTokApiError,
@@ -13,10 +14,11 @@ import {
   tiktokErrorCode,
   type TikTokPrivacyLevel,
 } from "@sahabat-kreator/channel-tiktok";
-import type {
-  PostPublisherAdapter,
-  PostPublisherOptions,
-  PublishPostResult,
+import {
+  resolvePostPublicMediaUrl,
+  type PostPublisherAdapter,
+  type PostPublisherOptions,
+  type PublishPostResult,
 } from "./post-publisher";
 
 /**
@@ -27,14 +29,28 @@ import type {
  * dulu, lalu muat payload, dekripsi kredensial akun, kirim, dan
  * tandai hasil. Perbedaan TikTok ada pada protokol dan gerbangnya:
  *
- * - Konten = tepat SATU video (capability menolak selain itu saat
- *   penjadwalan; pemeriksaan di sini pertahanan terakhir). Biner
- *   dibaca dari object store privat lalu diunggah FILE_UPLOAD per
- *   potongan oleh klien — TikTok tidak menuntut URL publik untuk
- *   video, sama seperti YouTube/Bluesky.
+ * - Konten = tepat SATU video ATAU foto/carousel khusus foto
+ *   (capability + core menolak komposisi lain saat penjadwalan;
+ *   pemeriksaan di sini pertahanan terakhir — campuran foto+video,
+ *   multi-video, dan dokumen tidak pernah sampai ke provider).
+ *   Video: biner dibaca dari object store privat lalu diunggah
+ *   FILE_UPLOAD per potongan oleh klien — TikTok tidak menuntut
+ *   URL publik untuk video, sama seperti YouTube/Bluesky. Foto:
+ *   TIDAK ada jalur biner; TikTok menariknya dari URL publik
+ *   (`PULL_FROM_URL`), jadi URL diselesaikan dari resolver media
+ *   publik (Panel Admin → env → null) dan postingan gagal aman
+ *   `tiktok_public_media_url_unavailable` SEBELUM panggilan API
+ *   apa pun bila URL tidak tersedia (pola Instagram). Domain base
+ *   URL itu harus diverifikasi pemilik di portal TikTok, kalau
+ *   tidak provider menolak `url_ownership_unverified`.
  * - Judul postingan TikTok adalah CAPTION post itu sendiri
- *   (`post_info.title`); kolom `title` post tidak dikirim ke
- *   platform dan tetap label internal kalender.
+ *   (video: `post_info.title`; foto: caption menjadi `title` foto
+ *   maks 90 sekaligus `description` maks 4000); kolom `title` post
+ *   tidak dikirim ke platform dan tetap label internal kalender.
+ * - Postingan foto membawa AUTO MUSIC: `auto_add_music: true`
+ *   pada post_info foto (parameter resmi, hanya DIRECT_POST) —
+ *   permintaan pemilik; TikTok menambahkan musik rekomendasi dan
+ *   hasil terbit mencatatnya di log integrasi.
  * - GERBANG AUDIT: level privasi berasal dari konfigurasi platform
  *   (env TIKTOK_PRIVACY_LEVEL, bawaan `SELF_ONLY` — satu-satunya
  *   level yang diizinkan sebelum aplikasi pemilik lolos audit
@@ -102,36 +118,53 @@ export async function publishTikTokPost(
   );
   if (!accessToken) return fail("tiktok_token_undecryptable");
 
-  // Media divalidasi & dibaca SEBELUM API dipanggil: direct post
-  // menuntut tepat satu video (capability menegakkannya saat
-  // penjadwalan; pemeriksaan di sini pertahanan terakhir), dan
-  // postingan yang medianya hilang tidak boleh membakar panggilan
-  // creator_info/init untuk kegagalan yang pasti.
-  if (payload.media.length !== 1 || payload.media[0]!.kind !== "video") {
+  // Komposisi media divalidasi SEBELUM API dipanggil (capability +
+  // core menegakkannya saat penjadwalan; pemeriksaan di sini
+  // pertahanan terakhir): tepat satu video, ATAU satu+ foto tanpa
+  // campuran apa pun. Komposisi lain adalah kegagalan pasti yang
+  // tidak boleh membakar panggilan creator_info/init.
+  const isPhotoPost =
+    payload.media.length > 0 &&
+    payload.media.every((item) => item.kind === "photo");
+  const isVideoPost =
+    payload.media.length === 1 && payload.media[0]!.kind === "video";
+  if (!isPhotoPost && !isVideoPost) {
     return fail("tiktok_media_kind_unsupported");
   }
-  const media = payload.media[0]!;
-  const object = await opts.mediaStore.get(media.r2Key);
-  if (!object) return fail("post_media_missing");
-  const data = new Uint8Array(object.data);
-  const contentType = media.mimeType ?? object.contentType ?? "video/mp4";
+
+  // Foto ditarik TikTok dari URL publik: selesaikan SEMUA URL lebih
+  // dulu. Satu saja tidak tersedia → gagal aman di sini, sebelum
+  // creator_info/init dipanggil (pola Instagram persis).
+  let photoUrls: string[] | null = null;
+  if (isPhotoPost) {
+    photoUrls = [];
+    for (const item of payload.media) {
+      const url = resolvePostPublicMediaUrl(opts, item);
+      if (!url) return fail("tiktok_public_media_url_unavailable");
+      photoUrls.push(url);
+    }
+  }
 
   const privacyLevel = (opts.tiktokPrivacyLevel ??
     "SELF_ONLY") as TikTokPrivacyLevel;
   const client = new TikTokClient({ baseUrl: opts.tiktokApiBase });
 
   try {
-    const result = await client.publishVideo({
-      accessToken,
-      // Judul postingan TikTok ADALAH caption; `title` post adalah
-      // label internal kalender dan tidak dikirim ke platform.
-      title: payload.caption,
-      privacyLevel,
-      data,
-      contentType,
-      pollIntervalMs: opts.tiktokStatusPollIntervalMs,
-      maxPolls: opts.tiktokStatusMaxPolls,
-    });
+    const result = photoUrls
+      ? await client.publishPhotos({
+          accessToken,
+          // Caption menjadi title foto (maks 90) + description
+          // (maks 4000) — lihat pembangun payload di channel-tiktok.
+          caption: payload.caption,
+          privacyLevel,
+          photoUrls,
+          // Auto music: permintaan pemilik, dinyalakan eksplisit
+          // di sini dan dicatat pada summary log di bawah.
+          autoAddMusic: true,
+          pollIntervalMs: opts.tiktokStatusPollIntervalMs,
+          maxPolls: opts.tiktokStatusMaxPolls,
+        })
+      : await publishSingleVideo(payload, accessToken);
     await markPostPublished(db, {
       ...ctx,
       postId: input.postId,
@@ -145,7 +178,11 @@ export async function publishTikTokPost(
       outcome: "sent",
       summary:
         `channel post ${input.postId} published ` +
-        `(privacy ${result.privacyLevel}, status ${result.finalStatus})`,
+        `(privacy ${result.privacyLevel}, status ${result.finalStatus}` +
+        (photoUrls
+          ? `, photos ${photoUrls.length}, auto music on`
+          : ", video") +
+        `)`,
     });
     console.log(
       `[post] ${input.postId} terbit (${result.postId ?? result.publishId}, ` +
@@ -153,13 +190,51 @@ export async function publishTikTokPost(
     );
     return { published: true };
   } catch (err) {
-    const code = tiktokErrorCode(err);
+    // Error provider dipetakan dari kode resminya; kegagalan lokal
+    // yang disengaja membawa kode aman pada `message` (pola adapter
+    // Meta: `post_media_missing` dari muat biner video di atas).
+    const code =
+      err instanceof TikTokApiError
+        ? tiktokErrorCode(err)
+        : err instanceof Error && /^[a-z_]+$/.test(err.message)
+          ? err.message
+          : tiktokErrorCode(err);
     const detail =
       err instanceof TikTokApiError
         ? ` — ${err.description.slice(0, 200)}`
         : "";
     console.error(`[post] ${input.postId} ditolak provider: ${code}${detail}`);
     return fail(code);
+  }
+
+  // Payload diteruskan sebagai parameter (bukan tangkapan closure)
+  // agar penyempitan non-null dari pemeriksaan di atas tetap
+  // berlaku di dalam fungsi ini.
+  async function publishSingleVideo(
+    loaded: PostPublishPayload,
+    token: string,
+  ) {
+    const media = loaded.media[0]!;
+    const object = await opts.mediaStore.get(media.r2Key);
+    if (!object) {
+      // Kode yang sama seperti kegagalan muat media sebelumnya:
+      // dilempar sebagai Error berkode aman agar tertangkap
+      // pemetaan di atas dan ditandai gagal, bukan terkirim.
+      throw new Error("post_media_missing");
+    }
+    const data = new Uint8Array(object.data);
+    const contentType = media.mimeType ?? object.contentType ?? "video/mp4";
+    return client.publishVideo({
+      accessToken: token,
+      // Judul postingan TikTok ADALAH caption; `title` post adalah
+      // label internal kalender dan tidak dikirim ke platform.
+      title: loaded.caption,
+      privacyLevel,
+      data,
+      contentType,
+      pollIntervalMs: opts.tiktokStatusPollIntervalMs,
+      maxPolls: opts.tiktokStatusMaxPolls,
+    });
   }
 }
 

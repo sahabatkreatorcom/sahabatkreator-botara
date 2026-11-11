@@ -5,8 +5,10 @@
  *
  * TikTok bukan channel inbox: tidak ada webhook, pesan, atau DM di
  * paket ini, dan paket ini SENGAJA bukan `ChannelAdapter`. Satu post
- * = satu DIRECT POST video ke akun kreator yang terhubung:
+ * = satu DIRECT POST ke akun kreator yang terhubung, dalam dua
+ * bentuk yang protokolnya berbeda:
  *
+ * VIDEO (tepat satu):
  *   1. `POST /v2/post/publish/creator_info/query/` — info kreator
  *      WAJIB dicek sebelum posting: `privacy_level_options` akun,
  *      dan apakah komentar/duet/stitch dimatikan kreator.
@@ -18,6 +20,15 @@
  *      TIDAK perlu URL publik (pola Telegram/Bluesky/YouTube).
  *   4. `POST /v2/post/publish/status/fetch/` dipolling sampai
  *      `PUBLISH_COMPLETE` / `FAILED`.
+ *
+ * FOTO / CAROUSEL (satu foto atau album khusus foto):
+ *   1. `creator_info/query/` yang sama (gerbang privasi identik).
+ *   2. `POST /v2/post/publish/content/init/` dengan
+ *      `media_type: "PHOTO"`, `post_mode: "DIRECT_POST"`, dan
+ *      `source_info.source = "PULL_FROM_URL"` → `publish_id`
+ *      (tanpa sesi unggah: TikTok MENARIK foto dari URL kita).
+ *   3. Polling `status/fetch/` yang sama sampai terminal
+ *      (`PROCESSING_DOWNLOAD` adalah keadaan khas jalur tarik ini).
  *
  * GERBANG AUDIT (fakta platform, bukan kekurangan implementasi):
  * aplikasi yang belum lolos audit Content Posting API TikTok HANYA
@@ -33,14 +44,27 @@
  * menaikkan level privasi adalah tindakan pemilik setelah audit
  * lolos (lihat OWNER-ACTIONS).
  *
- * MODE FOTO tidak dibangun paket ini: foto Content Posting API
- * hanya menerima `PULL_FROM_URL` dari URL pada domain yang
- * diverifikasi kepemilikannya di portal developer TikTok. Itu
- * bertabrakan dengan model media privat repo — tidak ada jalur
- * unggah biner untuk foto seperti FILE_UPLOAD video — jadi
- * capability di kontrak menyatakan `supportsPhotos: false` (alasan
- * yang sama seperti video Bluesky/Pinterest ditunda di gelombang
- * sebelumnya).
+ * FOTO MEMAKAI URL PUBLIK DOMAIN TERVERIFIKASI (fakta platform):
+ * foto hanya menerima `PULL_FROM_URL` — tidak ada jalur unggah
+ * biner seperti video — dan URL-nya harus berada pada domain yang
+ * kepemilikannya diverifikasi pemilik aplikasi di portal TikTok
+ * for Developers; tanpa itu init menjawab
+ * `url_ownership_unverified` (dipetakan `tiktok_url_unverified`).
+ * Pemanggil (adapter worker) menyelesaikan URL dari resolver media
+ * publik repo (Panel Admin → env → null) dan gagal aman SEBELUM
+ * memanggil paket ini bila URL tidak tersedia. Batas platform:
+ * s/d 35 foto per postingan, format JPEG/WebP, judul foto maks 90
+ * rune UTF-16 dan deskripsi maks 4000 rune UTF-16 (panjang string
+ * JS dihitung dalam unit UTF-16, jadi pemotongan di pembangun
+ * payload persis dengan hitungan TikTok).
+ *
+ * AUTO MUSIC: post_info foto mengenal parameter resmi
+ * `auto_add_music` (hanya DIRECT_POST) — bila true, TikTok
+ * menambahkan musik rekomendasi ke postingan foto dan kreator
+ * dapat menggantinya kemudian di aplikasi. Pemilik meminta musik
+ * otomatis untuk postingan foto, jadi adapter menyalakannya
+ * secara bawaan dan hasilnya dicatat di log integrasi; parameter
+ * ini tidak dikenal post_info video.
  *
  * KREDENSIAL: access token OAuth TikTok (scope `video.publish`)
  * diserahkan pemanggil per panggilan dari akun channel terenkripsi.
@@ -60,6 +84,15 @@ export const DEFAULT_TIKTOK_API_BASE = "https://open.tiktokapis.com";
 
 /** Batas judul postingan video TikTok (= caption, karakter). */
 export const TIKTOK_TITLE_MAX = 2200;
+
+/** Batas judul postingan FOTO TikTok (rune UTF-16, dokumentasi resmi). */
+export const TIKTOK_PHOTO_TITLE_MAX = 90;
+
+/** Batas deskripsi postingan FOTO TikTok (rune UTF-16). */
+export const TIKTOK_PHOTO_DESCRIPTION_MAX = 4000;
+
+/** Batas foto per postingan menurut platform (repo membatasi 10 lewat capability). */
+export const TIKTOK_PHOTO_MAX_IMAGES = 35;
 
 /** Level privasi yang dikenal Content Posting API. */
 export type TikTokPrivacyLevel =
@@ -113,9 +146,16 @@ export function tiktokErrorCode(err: unknown): string {
   if (err.providerCode === "scope_not_authorized") return "tiktok_scope_missing";
   if (
     err.providerCode === "rate_limit_exceeded" ||
-    err.providerCode === "spam_risk_too_many_posts"
+    err.providerCode === "spam_risk_too_many_posts" ||
+    err.providerCode === "spam_risk_too_many_pending_share"
   ) {
     return "tiktok_rate_limited";
+  }
+  if (
+    err.providerCode ===
+    "unaudited_client_can_only_post_to_private_accounts"
+  ) {
+    return "tiktok_unaudited_private_only";
   }
   if (err.providerCode === "spam_risk_user_banned_from_posting") {
     return "tiktok_posting_restricted";
@@ -422,31 +462,159 @@ export class TikTokClient {
         contentType: input.contentType,
       });
     }
-    const pollIntervalMs = input.pollIntervalMs ?? 3_000;
-    const maxPolls = input.maxPolls ?? 20;
+    const status = await this.pollPublishStatus(input.accessToken, publishId, {
+      pollIntervalMs: input.pollIntervalMs,
+      maxPolls: input.maxPolls,
+    });
+    return {
+      publishId,
+      postId:
+        status.status === "PUBLISH_COMPLETE"
+          ? status.publiclyAvailablePostId
+          : null,
+      privacyLevel,
+      finalStatus: status.status,
+    };
+  }
+
+  /** Buka sesi publikasi foto; mengembalikan publish_id (tanpa upload_url). */
+  async initPhotoPublish(
+    accessToken: string,
+    input: {
+      postInfo: TikTokPhotoPostInfo;
+      sourceInfo: TikTokPhotoSourceInfo;
+    },
+  ): Promise<{ publishId: string }> {
+    const data = await this.request(
+      accessToken,
+      "/v2/post/publish/content/init/",
+      {
+        media_type: "PHOTO",
+        post_mode: "DIRECT_POST",
+        post_info: input.postInfo,
+        source_info: input.sourceInfo,
+      },
+    );
+    const publishId = asString(data.publish_id);
+    if (!publishId) {
+      throw new TikTokApiError(200, "", "missing_publish_id");
+    }
+    return { publishId };
+  }
+
+  /**
+   * Publikasi foto/carousel utuh: creator_info → validasi privasi →
+   * init PULL_FROM_URL → polling status. Semantik status terminal
+   * sama persis dengan video (lihat `pollPublishStatus`):
+   * SEND_TO_USER_INBOX diteruskan apa adanya sebagai finalStatus,
+   * bukan diklaim terbit publik.
+   *
+   * `autoAddMusic` bawaan TRUE (permintaan pemilik): parameter
+   * resmi `auto_add_music` pada post_info foto — TikTok
+   * menambahkan musik rekomendasi ke postingan foto DIRECT_POST.
+   */
+  async publishPhotos(input: {
+    accessToken: string;
+    caption: string;
+    privacyLevel: TikTokPrivacyLevel;
+    photoUrls: string[];
+    autoAddMusic?: boolean | undefined;
+    photoCoverIndex?: number | undefined;
+    pollIntervalMs?: number | undefined;
+    maxPolls?: number | undefined;
+  }): Promise<{
+    publishId: string;
+    postId: string | null;
+    privacyLevel: TikTokPrivacyLevel;
+    finalStatus: TikTokPublishStatusName;
+    autoAddMusic: boolean;
+  }> {
+    if (
+      input.photoUrls.length === 0 ||
+      input.photoUrls.length > TIKTOK_PHOTO_MAX_IMAGES
+    ) {
+      throw new TikTokApiError(
+        400,
+        "invalid_param",
+        `photo_images must contain 1..${TIKTOK_PHOTO_MAX_IMAGES} urls`,
+      );
+    }
+    const autoAddMusic = input.autoAddMusic ?? true;
+    const creatorInfo = await this.queryCreatorInfo(input.accessToken);
+    const privacyLevel = resolveTikTokPrivacyLevel(
+      input.privacyLevel,
+      creatorInfo.privacyLevelOptions,
+    );
+    if (!privacyLevel) {
+      throw new TikTokApiError(
+        400,
+        "privacy_level_option_mismatch",
+        `privacy ${input.privacyLevel} not allowed for this creator`,
+      );
+    }
+    const coverIndex = Math.min(
+      Math.max(input.photoCoverIndex ?? 0, 0),
+      input.photoUrls.length - 1,
+    );
+    const { publishId } = await this.initPhotoPublish(input.accessToken, {
+      postInfo: buildTikTokPhotoPostInfo({
+        caption: input.caption,
+        privacyLevel,
+        creatorInfo,
+        autoAddMusic,
+      }),
+      sourceInfo: {
+        source: "PULL_FROM_URL",
+        photo_images: [...input.photoUrls],
+        photo_cover_index: coverIndex,
+      },
+    });
+    const status = await this.pollPublishStatus(input.accessToken, publishId, {
+      pollIntervalMs: input.pollIntervalMs,
+      maxPolls: input.maxPolls,
+    });
+    return {
+      publishId,
+      postId:
+        status.status === "PUBLISH_COMPLETE"
+          ? status.publiclyAvailablePostId
+          : null,
+      privacyLevel,
+      finalStatus: status.status,
+      autoAddMusic,
+    };
+  }
+
+  /**
+   * Polling status publikasi sampai terminal, dipakai bersama oleh
+   * jalur video dan foto (endpoint status/fetch yang sama).
+   * Terminal sukses: `PUBLISH_COMPLETE` (terbit) dan
+   * `SEND_TO_USER_INBOX` (jalur scope `video.upload` — konten
+   * mendarat sebagai draf inbox kreator; BUKAN terbit, dan
+   * pemanggil mencatat finalStatus-nya apa adanya). `FAILED`
+   * menjadi TikTokApiError dengan fail_reason terbawa; kehabisan
+   * anggaran polling menjadi `tiktok_publish_timeout`.
+   */
+  private async pollPublishStatus(
+    accessToken: string,
+    publishId: string,
+    opts: {
+      pollIntervalMs?: number | undefined;
+      maxPolls?: number | undefined;
+    },
+  ): Promise<TikTokPublishStatus> {
+    const pollIntervalMs = opts.pollIntervalMs ?? 3_000;
+    const maxPolls = opts.maxPolls ?? 20;
     for (let attempt = 0; attempt < maxPolls; attempt += 1) {
       if (attempt > 0 && pollIntervalMs > 0) {
         await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
       }
-      const status = await this.fetchPublishStatus(
-        input.accessToken,
-        publishId,
-      );
-      if (status.status === "PUBLISH_COMPLETE") {
-        return {
-          publishId,
-          postId: status.publiclyAvailablePostId,
-          privacyLevel,
-          finalStatus: status.status,
-        };
-      }
-      if (status.status === "SEND_TO_USER_INBOX") {
-        return {
-          publishId,
-          postId: null,
-          privacyLevel,
-          finalStatus: status.status,
-        };
+      const status = await this.fetchPublishStatus(accessToken, publishId);
+      if (
+        status.status === "PUBLISH_COMPLETE" ||
+        status.status === "SEND_TO_USER_INBOX"
+      ) {
+        return status;
       }
       if (status.status === "FAILED") {
         const reason = status.failReason ?? "unknown_fail_reason";
@@ -483,6 +651,50 @@ export interface TikTokVideoSourceInfo {
   video_size: number;
   chunk_size: number;
   total_chunk_count: number;
+}
+
+export interface TikTokPhotoPostInfo {
+  title: string;
+  description: string;
+  privacy_level: TikTokPrivacyLevel;
+  disable_comment: boolean;
+  auto_add_music: boolean;
+}
+
+export interface TikTokPhotoSourceInfo {
+  source: "PULL_FROM_URL";
+  photo_images: string[];
+  photo_cover_index: number;
+}
+
+/**
+ * Rakit `post_info` init foto (murni). Berbeda dari video, foto
+ * memisahkan `title` (maks 90 rune UTF-16) dan `description`
+ * (maks 4000): caption post mengisi keduanya — judul adalah
+ * potongan awal caption, deskripsi caption utuh — supaya satu
+ * teks komposer melayani kedua bentuk postingan TikTok tanpa
+ * field komposer baru. Pemotongan memakai panjang string JS
+ * (unit UTF-16), persis hitungan batas TikTok, dan merupakan
+ * pertahanan terakhir di samping capability core (caption maks
+ * 2200). Foto tidak mengenal duet/stitch — satu-satunya
+ * `disable_*` di post_info foto adalah `disable_comment`, yang
+ * meniru pengaturan kreator seperti jalur video.
+ * `auto_add_music` diteruskan apa adanya dari keputusan
+ * pemanggil (adapter: selalu true, permintaan pemilik).
+ */
+export function buildTikTokPhotoPostInfo(input: {
+  caption: string;
+  privacyLevel: TikTokPrivacyLevel;
+  creatorInfo: TikTokCreatorInfo;
+  autoAddMusic: boolean;
+}): TikTokPhotoPostInfo {
+  return {
+    title: input.caption.slice(0, TIKTOK_PHOTO_TITLE_MAX),
+    description: input.caption.slice(0, TIKTOK_PHOTO_DESCRIPTION_MAX),
+    privacy_level: input.privacyLevel,
+    disable_comment: input.creatorInfo.commentDisabled,
+    auto_add_music: input.autoAddMusic,
+  };
 }
 
 /**

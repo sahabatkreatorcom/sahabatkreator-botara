@@ -2,27 +2,36 @@
  * Verifikasi penerbitan TikTok melawan fake TikTok Content Posting
  * API.
  *
- * TikTok menerbitkan satu direct post video per post: adapter
- * memeriksa info kreator (gerbang privasi), membuka sesi unggah
- * FILE_UPLOAD, mengunggah biner per potongan dengan Content-Range,
- * lalu memolling status sampai selesai. Harness ini membuktikan
- * bagian yang menjadi tanggung jawab klien di paket channel-tiktok:
- * perencana potongan, pembangun post_info, gerbang privasi
- * (bawaan SELF_ONLY masa pra-audit), urutan protokol penuh, dan
- * pemetaan error — tanpa jaringan atau kredensial nyata, dan tanpa
- * token bocor.
+ * TikTok menerbitkan satu direct post per post dalam dua bentuk.
+ * VIDEO: adapter memeriksa info kreator (gerbang privasi), membuka
+ * sesi unggah FILE_UPLOAD, mengunggah biner per potongan dengan
+ * Content-Range, lalu memolling status sampai selesai. FOTO/
+ * CAROUSEL: init ke /content/init/ dengan PULL_FROM_URL (URL dari
+ * resolver media publik — di sini diwakili uji resolver worker),
+ * post_info membawa auto_add_music, lalu polling status yang sama.
+ * Harness ini membuktikan bagian yang menjadi tanggung jawab
+ * klien di paket channel-tiktok: perencana potongan, pembangun
+ * post_info video + foto, gerbang privasi (bawaan SELF_ONLY masa
+ * pra-audit), urutan protokol penuh kedua jalur, dan pemetaan
+ * error — tanpa jaringan atau kredensial nyata, dan tanpa token
+ * bocor.
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:tiktok-post
  */
 import {
   TikTokApiError,
   TikTokClient,
+  buildTikTokPhotoPostInfo,
   buildTikTokVideoPostInfo,
   planTikTokUploadChunks,
   resolveTikTokPrivacyLevel,
   tiktokErrorCode,
   type TikTokCreatorInfo,
 } from "@sahabat-kreator/channel-tiktok";
+import {
+  resolvePostPublicMediaUrl,
+  type PostPublisherOptions,
+} from "../src/delivery/post-publisher";
 
 let passes = 0;
 let failures = 0;
@@ -435,6 +444,305 @@ async function main(): Promise<void> {
     "error: jaringan putus → tiktok_network_error",
     network.code === "tiktok_network_error",
     network.code,
+  );
+
+  // =======================================================================
+  // FOTO / CAROUSEL — jalur /content/init/ PULL_FROM_URL + auto music
+  // =======================================================================
+
+  // --- Pembangun post_info foto (murni) ----------------------------------
+  const photoInfo = buildTikTokPhotoPostInfo({
+    caption: "x".repeat(4500),
+    privacyLevel: "SELF_ONLY",
+    creatorInfo: CREATOR_INFO,
+    autoAddMusic: true,
+  });
+  check(
+    "foto post_info: judul dipotong 90, deskripsi dipotong 4000, auto_add_music true, disable_comment meniru kreator",
+    photoInfo.title.length === 90 &&
+      photoInfo.description.length === 4000 &&
+      photoInfo.privacy_level === "SELF_ONLY" &&
+      photoInfo.auto_add_music === true &&
+      photoInfo.disable_comment === CREATOR_INFO.commentDisabled,
+  );
+
+  // --- Resolver URL publik worker (gerbang gagal aman adapter) -----------
+  const sampleMedia = {
+    r2Key: "t/dir/foto baru.jpg",
+    mimeType: "image/jpeg",
+    fileName: "foto baru.jpg",
+  };
+  // Resolver hanya membaca dua field opsi; objek parsial cukup dan
+  // jujur untuk harness ini (adapter nyata menerima opsi penuh).
+  const resolverOpts = (extra: Partial<PostPublisherOptions>) =>
+    extra as PostPublisherOptions;
+  check(
+    "foto resolver: tanpa base URL publik → null (adapter gagal aman tiktok_public_media_url_unavailable sebelum API)",
+    resolvePostPublicMediaUrl(resolverOpts({}), sampleMedia) === null,
+  );
+  check(
+    "foto resolver: base terkonfigurasi memetakan {base}/{r2Key} dengan segmen ter-encode",
+    resolvePostPublicMediaUrl(
+      resolverOpts({
+        publicMediaBaseUrl: "https://cdn.example.test/media/",
+      }),
+      sampleMedia,
+    ) === "https://cdn.example.test/media/t/dir/foto%20baru.jpg",
+  );
+
+  // --- Alur penuh carousel: creator_info → content/init → polling -------
+  const photoUrls = [
+    "https://cdn.example.test/media/t/promo-1.jpg",
+    "https://cdn.example.test/media/t/promo-2.jpg",
+    "https://cdn.example.test/media/t/promo-3.jpg",
+  ];
+  const photoCaptured: Captured[] = [];
+  let photoStatusCalls = 0;
+  const photoClient = new TikTokClient({
+    baseUrl: "https://fake.tiktokapis.test",
+    fetchImpl: fakeFetch(photoCaptured, (call) => {
+      if (call.url.endsWith("/creator_info/query/")) {
+        return okEnvelope({
+          creator_username: "tiktokpromo",
+          privacy_level_options: ["SELF_ONLY", "MUTUAL_FOLLOW_FRIENDS"],
+          comment_disabled: false,
+          duet_disabled: false,
+          stitch_disabled: false,
+        });
+      }
+      if (call.url.endsWith("/content/init/")) {
+        return okEnvelope({ publish_id: "p_pub_foto_1" });
+      }
+      if (call.url.endsWith("/status/fetch/")) {
+        photoStatusCalls += 1;
+        return photoStatusCalls === 1
+          ? okEnvelope({ status: "PROCESSING_DOWNLOAD" })
+          : okEnvelope({
+              status: "PUBLISH_COMPLETE",
+              publicaly_available_post_id: [7412345678901],
+            });
+      }
+      return errorEnvelope("invalid_param", "unknown path", 400);
+    }),
+  });
+  const photoResult = await photoClient.publishPhotos({
+    accessToken: ACCESS_TOKEN,
+    caption: "Carousel promo minggu ini #fyp",
+    privacyLevel: "SELF_ONLY",
+    photoUrls,
+    pollIntervalMs: 1,
+    maxPolls: 5,
+  });
+  const photoOrder = photoCaptured.map((call) =>
+    call.url.includes("creator_info")
+      ? "creator_info"
+      : call.url.includes("content/init")
+        ? "init"
+        : "status",
+  );
+  check(
+    "foto alur: urutan creator_info → content/init → polling (PROCESSING_DOWNLOAD → PUBLISH_COMPLETE)",
+    JSON.stringify(photoOrder) ===
+      JSON.stringify(["creator_info", "init", "status", "status"]),
+    photoOrder.join(","),
+  );
+  const photoInit = photoCaptured.find((call) =>
+    call.url.includes("content/init"),
+  )!;
+  const photoPostInfo = photoInit.json?.post_info as Record<string, unknown>;
+  const photoSource = photoInit.json?.source_info as Record<string, unknown>;
+  check(
+    "foto init: media_type PHOTO + post_mode DIRECT_POST + auto_add_music true + privasi tervalidasi",
+    photoInit.json?.media_type === "PHOTO" &&
+      photoInit.json?.post_mode === "DIRECT_POST" &&
+      photoPostInfo.auto_add_music === true &&
+      photoPostInfo.privacy_level === "SELF_ONLY" &&
+      photoPostInfo.title === "Carousel promo minggu ini #fyp" &&
+      photoPostInfo.description === "Carousel promo minggu ini #fyp",
+  );
+  check(
+    "foto init: source PULL_FROM_URL dengan photo_images persis URL resolver + photo_cover_index 0",
+    photoSource.source === "PULL_FROM_URL" &&
+      JSON.stringify(photoSource.photo_images) === JSON.stringify(photoUrls) &&
+      photoSource.photo_cover_index === 0,
+  );
+  check(
+    "foto hasil: PUBLISH_COMPLETE memberi id postingan dan autoAddMusic tercatat true",
+    photoResult.publishId === "p_pub_foto_1" &&
+      photoResult.postId === "7412345678901" &&
+      photoResult.finalStatus === "PUBLISH_COMPLETE" &&
+      photoResult.autoAddMusic === true,
+  );
+
+  // --- Foto tunggal -------------------------------------------------------
+  const singleCaptured: Captured[] = [];
+  const singleClient = new TikTokClient({
+    baseUrl: "https://fake.tiktokapis.test",
+    fetchImpl: fakeFetch(singleCaptured, (call) => {
+      if (call.url.endsWith("/creator_info/query/")) {
+        return okEnvelope({
+          creator_username: "tiktokpromo",
+          privacy_level_options: ["SELF_ONLY"],
+          comment_disabled: true,
+          duet_disabled: false,
+          stitch_disabled: false,
+        });
+      }
+      if (call.url.endsWith("/content/init/")) {
+        return okEnvelope({ publish_id: "p_pub_foto_2" });
+      }
+      return okEnvelope({
+        status: "PUBLISH_COMPLETE",
+        publicaly_available_post_id: [7412345678902],
+      });
+    }),
+  });
+  const singleResult = await singleClient.publishPhotos({
+    accessToken: ACCESS_TOKEN,
+    caption: "Satu foto saja",
+    privacyLevel: "SELF_ONLY",
+    photoUrls: [photoUrls[0]!],
+    pollIntervalMs: 1,
+    maxPolls: 3,
+  });
+  const singleInit = singleCaptured.find((call) =>
+    call.url.includes("content/init"),
+  )!;
+  const singleSource = singleInit.json?.source_info as Record<
+    string,
+    unknown
+  >;
+  const singlePostInfo = singleInit.json?.post_info as Record<string, unknown>;
+  check(
+    "foto tunggal: satu URL terinit sebagai postingan foto (bukan carousel), disable_comment meniru kreator",
+    singleResult.postId === "7412345678902" &&
+      (singleSource.photo_images as string[]).length === 1 &&
+      singlePostInfo.disable_comment === true,
+  );
+
+  // --- Gerbang privasi foto: berhenti SEBELUM content/init ----------------
+  const photoMismatchCaptured: Captured[] = [];
+  const photoMismatchClient = new TikTokClient({
+    baseUrl: "https://fake.tiktokapis.test",
+    fetchImpl: fakeFetch(photoMismatchCaptured, (call) => {
+      if (call.url.endsWith("/creator_info/query/")) {
+        return okEnvelope({
+          creator_username: "tiktokpromo",
+          privacy_level_options: ["SELF_ONLY"],
+          comment_disabled: false,
+          duet_disabled: false,
+          stitch_disabled: false,
+        });
+      }
+      return okEnvelope({ publish_id: "x" });
+    }),
+  });
+  let photoMismatchCode = "";
+  try {
+    await photoMismatchClient.publishPhotos({
+      accessToken: ACCESS_TOKEN,
+      caption: "Ingin publik sebelum audit",
+      privacyLevel: "PUBLIC_TO_EVERYONE",
+      photoUrls,
+      pollIntervalMs: 1,
+    });
+  } catch (err) {
+    photoMismatchCode = tiktokErrorCode(err);
+  }
+  check(
+    "foto gerbang audit: privasi publik pra-audit ditolak tiktok_privacy_option_mismatch sebelum init foto",
+    photoMismatchCode === "tiktok_privacy_option_mismatch" &&
+      photoMismatchCaptured.length === 1,
+    photoMismatchCode,
+  );
+
+  // --- Error API foto ------------------------------------------------------
+  const unverified = await errorCase(
+    (call) => {
+      if (call.url.endsWith("/creator_info/query/")) {
+        return okEnvelope({
+          creator_username: "tiktokpromo",
+          privacy_level_options: ["SELF_ONLY"],
+          comment_disabled: false,
+          duet_disabled: false,
+          stitch_disabled: false,
+        });
+      }
+      return errorEnvelope(
+        "url_ownership_unverified",
+        "domain not verified",
+        403,
+      );
+    },
+    (c) =>
+      c.publishPhotos({
+        accessToken: ACCESS_TOKEN,
+        caption: "domain belum diverifikasi",
+        privacyLevel: "SELF_ONLY",
+        photoUrls,
+        pollIntervalMs: 1,
+      }),
+  );
+  check(
+    "foto error: url_ownership_unverified → tiktok_url_unverified",
+    unverified.code === "tiktok_url_unverified",
+    unverified.code,
+  );
+
+  const unaudited = await errorCase(
+    (call) => {
+      if (call.url.endsWith("/creator_info/query/")) {
+        return okEnvelope({
+          creator_username: "tiktokpromo",
+          privacy_level_options: ["SELF_ONLY"],
+          comment_disabled: false,
+          duet_disabled: false,
+          stitch_disabled: false,
+        });
+      }
+      return errorEnvelope(
+        "unaudited_client_can_only_post_to_private_accounts",
+        "unaudited client",
+        403,
+      );
+    },
+    (c) =>
+      c.publishPhotos({
+        accessToken: ACCESS_TOKEN,
+        caption: "klien belum audit",
+        privacyLevel: "SELF_ONLY",
+        photoUrls,
+        pollIntervalMs: 1,
+      }),
+  );
+  check(
+    "foto error: unaudited_client_can_only_post_to_private_accounts → tiktok_unaudited_private_only",
+    unaudited.code === "tiktok_unaudited_private_only",
+    unaudited.code,
+  );
+
+  const emptyCaptured: Captured[] = [];
+  const emptyClient = new TikTokClient({
+    baseUrl: "https://fake.tiktokapis.test",
+    fetchImpl: fakeFetch(emptyCaptured, () => okEnvelope({})),
+  });
+  let emptyErr: unknown = null;
+  try {
+    await emptyClient.publishPhotos({
+      accessToken: ACCESS_TOKEN,
+      caption: "tanpa foto",
+      privacyLevel: "SELF_ONLY",
+      photoUrls: [],
+      pollIntervalMs: 1,
+    });
+  } catch (err) {
+    emptyErr = err;
+  }
+  check(
+    "foto validasi: daftar URL kosong ditolak klien sebelum panggilan jaringan apa pun",
+    emptyErr instanceof TikTokApiError &&
+      emptyErr.providerCode === "invalid_param" &&
+      emptyCaptured.length === 0,
   );
 
   console.log(`\n${passes} PASS, ${failures} GAGAL`);
