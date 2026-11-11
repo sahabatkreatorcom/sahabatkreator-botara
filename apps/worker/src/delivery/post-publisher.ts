@@ -12,6 +12,7 @@ import {
 import { threadsPostPublisher } from "./threads-post";
 import { blueskyPostPublisher } from "./bluesky-post";
 import { youtubePostPublisher } from "./youtube-post";
+import { linkedinPostPublisher } from "./linkedin-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -67,6 +68,8 @@ export interface PostPublisherOptions {
    * aplikasi Google yang belum terverifikasi).
    */
   youtubePrivacyStatus?: string | undefined;
+  /** Base URL LinkedIn API (env LINKEDIN_API_BASE; default api.linkedin.com). */
+  linkedinApiBase?: string | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
@@ -135,6 +138,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   threadsPostPublisher,
   blueskyPostPublisher,
   youtubePostPublisher,
+  linkedinPostPublisher,
 ];
 
 export function getPostPublisher(

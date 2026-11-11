@@ -2,6 +2,7 @@
   "dependencies": {
     "@sahabat-kreator/ai": "workspace:*",
     "@sahabat-kreator/channel-bluesky": "workspace:*",
+    "@sahabat-kreator/channel-linkedin": "workspace:*",
     "@sahabat-kreator/channel-messenger": "workspace:*",
     "@sahabat-kreator/channel-telegram": "workspace:*",
     "@sahabat-kreator/channel-whatsapp": "workspace:*",
@@ -47,7 +48,8 @@
     "prune:logs": "tsx scripts/prune-integration-logs.ts",
     "prune:media": "tsx scripts/prune-media.ts",
     "prune:outbox": "tsx scripts/prune-outbox.ts",
-    "meta:token-lifecycle": "tsx scripts/meta-token-lifecycle.ts"
+    "meta:token-lifecycle": "tsx scripts/meta-token-lifecycle.ts",
+    "verify:linkedin-post": "tsx scripts/verify-linkedin-post.ts"
   },
   "type": "module",
   "types": "./src/index.ts",

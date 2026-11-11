@@ -100,6 +100,14 @@ const EnvSchema = z.object({
    */
   BLUESKY_API_BASE: z.string().url().optional(),
   /**
+   * Base URL LinkedIn API (Posts API). Default https://api.linkedin.com;
+   * override hanya untuk uji mock — pola yang sama dengan
+   * META_API_BASE/BLUESKY_API_BASE. Versi REST bulanan ter-pin di
+   * paket channel-linkedin, bukan di env; kredensial per akun (access
+   * token OAuth) tersimpan terenkripsi pada akun channel.
+   */
+  LINKEDIN_API_BASE: z.string().url().optional(),
+  /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
    * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta
