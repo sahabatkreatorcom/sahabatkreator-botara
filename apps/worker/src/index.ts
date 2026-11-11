@@ -499,6 +499,8 @@ const bullWorker = new Worker<MainJobData>(
         {
           channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
           telegramApiBase: env.TELEGRAM_API_BASE,
+          metaApiBase: env.META_API_BASE,
+          metaGraphApiVersion: META_GRAPH_API_VERSION,
           mediaStore,
         },
       );

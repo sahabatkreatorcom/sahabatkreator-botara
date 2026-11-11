@@ -183,6 +183,32 @@ export abstract class GraphHttpClient {
     return this.sendJson<T>("POST", path, payload);
   }
 
+  /**
+   * POST multipart/form-data — permukaan unggah berkas Graph (foto/video
+   * Page). Berbeda dari `postJson`, header Content-Type TIDAK diset di
+   * sini: runtime fetch harus mengisinya sendiri beserta boundary acak
+   * dari FormData. Token tetap hanya di header Authorization.
+   */
+  protected async postForm<T>(path: string, form: FormData): Promise<T> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(this.url(path), {
+        method: "POST",
+        headers: this.headers(),
+        body: form,
+        signal: AbortSignal.timeout(this.timeoutMs),
+      });
+    } catch {
+      throw this.createError(0, null, "network_error", null);
+    }
+    if (!response.ok) throw await this.parseError(response);
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw this.createError(response.status, null, "invalid_response", null);
+    }
+  }
+
   protected async deleteJson<T>(path: string): Promise<T> {
     return this.sendJson<T>("DELETE", path);
   }

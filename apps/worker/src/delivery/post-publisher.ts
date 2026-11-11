@@ -4,6 +4,7 @@ import {
   type MediaObjectStore,
 } from "@sahabat-kreator/core";
 import { telegramPostPublisher } from "./telegram-post";
+import { facebookPagePostPublisher } from "./meta-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -37,6 +38,22 @@ export interface PostPublisherOptions {
   mediaStore: MediaObjectStore;
   /** Base URL Bot API Telegram (env TELEGRAM_API_BASE; default api.telegram.org). */
   telegramApiBase?: string | undefined;
+  /** Base URL Meta Graph API (env META_API_BASE; default graph.facebook.com). */
+  metaApiBase?: string | undefined;
+  /** Versi Graph ter-pin dari config platform. */
+  metaGraphApiVersion?: string | undefined;
+  /**
+   * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
+   * diambil provider eksternal. Media internal repo SENGAJA privat
+   * (endpoint API bersesi), jadi adapter container Meta (IG/Threads)
+   * gagal aman tanpa konfigurasi ini. Bentuk URL final:
+   * `{base}/{r2Key}` dengan tiap segmen path ter-encode.
+   */
+  publicMediaBaseUrl?: string | undefined;
+  /** Resolver URL media publik khusus — dipakai rantai uji/mock. */
+  resolvePublicMediaUrl?: (
+    media: { r2Key: string; mimeType: string | null; fileName: string | null },
+  ) => string | null;
 }
 
 export interface PublishPostResult {
@@ -56,7 +73,10 @@ export interface PostPublisherAdapter {
 }
 
 /** Registry adapter. Urutan tidak berarti; kunci pemilihan adalah provider. */
-const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [telegramPostPublisher];
+const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
+  telegramPostPublisher,
+  facebookPagePostPublisher,
+];
 
 export function getPostPublisher(
   provider: string,

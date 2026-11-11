@@ -47,6 +47,18 @@ hanya bisa diajukan dari akun pemilik:
    persetujuan ini prasyarat Gelombang 3 (postingan per lokasi).
    Sudah dimock: belum perlu — implementasi GBP belum dimulai.
 
+## Gelombang 1 — Keluarga Meta
+
+1. **Facebook Page** — dibutuhkan: Meta App milik pemilik dengan
+   izin `pages_manage_posts` lolos App Review, Page contoh yang
+   terhubung sebagai akun `messenger`, dan Page Access Token hasil
+   connect nyata. Untuk apa: adapter menerbitkan teks/tautan ke
+   `/{page-id}/feed`, foto/album ke `/{page-id}/photos`, dan video ke
+   `/{page-id}/videos` memakai token Page terenkripsi. Sudah dimock:
+   seluruh permukaan Graph itu dibangun dan diverifikasi melawan fake
+   Graph API (`verify:meta-post`) dengan token uji; sasaran Page
+   dimaterialisasi dari `channel_accounts` terhubung tanpa migrasi.
+
 ## Gelombang berikutnya
 
 _(belum ada entri — ditambahkan pekerja saat ditemukan, per gelombang)_

@@ -162,8 +162,11 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsFirstComment: true,
   },
   messenger: {
-    // Facebook Page: batas pesan feed Graph API sangat longgar (63.206).
-    publishSupported: false,
+    // Facebook Page (Gelombang 1): feed teks/tautan, foto tunggal,
+    // album foto, dan video Graph didukung adapter. First comment
+    // belum dinyalakan: model post belum punya kolom/isi komentar
+    // pertama, jadi capability tidak boleh menjanjikannya.
+    publishSupported: true,
     mediaRequired: false,
     maxCaption: 63206,
     maxMedia: 10,
@@ -171,7 +174,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsVideo: true,
     supportsDocuments: false,
     supportsAlbumDocuments: false,
-    supportsFirstComment: true,
+    supportsFirstComment: false,
   },
   whatsapp: {
     // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);

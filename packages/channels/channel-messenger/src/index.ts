@@ -61,6 +61,13 @@ export interface MetaGraphClientOptions extends GraphClientOptions {
   accessToken?: string;
 }
 
+/** Berkas media utuh di memori untuk unggahan multipart Graph. */
+export interface MetaPublishFile {
+  data: Uint8Array;
+  filename: string;
+  contentType: string;
+}
+
 /** Profil objek Graph yang dipakai connect (Page / akun IG). */
 export interface MetaObjectProfile {
   id: string;
@@ -1343,6 +1350,134 @@ export class MetaGraphClient extends GraphHttpClient {
       {},
     );
   }
+
+  /**
+   * Terbitkan postingan teks/tautan Facebook Page:
+   * `POST /{page-id}/feed` dengan Page Access Token milik instance ini.
+   * Mengembalikan id postingan Page (Graph kadang menyebutnya `id`,
+   * kadang `post_id` pada permukaan terkait).
+   */
+  async publishPagePost(input: {
+    pageId: string;
+    message: string;
+    link?: string;
+    /** Lampiran foto yang sudah diunggah unpublished (rakitan album). */
+    attachedMedia?: Array<{ media_fbid: string }>;
+  }): Promise<{ providerPostId: string }> {
+    const body = await this.postJson<{ id?: string; post_id?: string }>(
+      `${encodeURIComponent(input.pageId)}/feed`,
+      {
+        message: input.message,
+        ...(input.link ? { link: input.link } : {}),
+        ...(input.attachedMedia
+          ? { attached_media: input.attachedMedia }
+          : {}),
+      },
+    );
+    const providerPostId = body.post_id ?? body.id;
+    if (!providerPostId) {
+      throw new MetaGraphError(200, null, "missing_post_id");
+    }
+    return { providerPostId };
+  }
+
+  /**
+   * Unggah SATU foto Page lewat multipart `POST /{page-id}/photos`.
+   * `published=false` dipakai tahap album: foto ditahan sampai postingan
+   * feed yang merangkainya dibuat, agar tidak muncul sebagai kiriman
+   * lepas sebelum albumnya jadi.
+   */
+  async publishPagePhoto(input: {
+    pageId: string;
+    file: MetaPublishFile;
+    caption?: string;
+    published?: boolean;
+  }): Promise<{ providerPostId: string; mediaId: string }> {
+    const form = new FormData();
+    form.set(
+      "source",
+      new Blob([input.file.data], {
+        type: input.file.contentType,
+      }),
+      input.file.filename,
+    );
+    if (input.caption) form.set("caption", input.caption);
+    form.set("published", input.published === false ? "false" : "true");
+    const body = await this.postForm<{ id?: string; post_id?: string }>(
+      `${encodeURIComponent(input.pageId)}/photos`,
+      form,
+    );
+    if (!body.id) throw new MetaGraphError(200, null, "missing_media_id");
+    return {
+      mediaId: body.id,
+      providerPostId: body.post_id ?? body.id,
+    };
+  }
+
+  /**
+   * Terbitkan album foto Page. Satu foto memakai tepi photos secara
+   * langsung; banyak foto diunggah `published=false`, lalu SATU feed
+   * merangkai `attached_media`-nya. Urutan array adalah urutan album.
+   */
+  async publishPagePhotoAlbum(input: {
+    pageId: string;
+    files: MetaPublishFile[];
+    caption: string;
+  }): Promise<{ providerPostId: string }> {
+    if (input.files.length === 1) {
+      return this.publishPagePhoto({
+        pageId: input.pageId,
+        file: input.files[0]!,
+        caption: input.caption,
+        published: true,
+      });
+    }
+    const mediaIds: string[] = [];
+    for (const file of input.files) {
+      const uploaded = await this.publishPagePhoto({
+        pageId: input.pageId,
+        file,
+        published: false,
+      });
+      mediaIds.push(uploaded.mediaId);
+    }
+    return this.publishPagePost({
+      pageId: input.pageId,
+      message: input.caption,
+      attachedMedia: mediaIds.map((media_fbid) => ({ media_fbid })),
+    });
+  }
+
+  /**
+   * Unggah video Page lewat multipart `POST /{page-id}/videos`.
+   * Ini jalur unggah Graph non-resumable untuk berkas yang sudah utuh
+   * di memori worker; berkas raksasa yang perlu resumable upload berada
+   * di luar pola MediaObjectStore repo saat ini.
+   */
+  async publishPageVideo(input: {
+    pageId: string;
+    file: MetaPublishFile;
+    description: string;
+    title?: string;
+  }): Promise<{ providerPostId: string }> {
+    const form = new FormData();
+    form.set(
+      "source",
+      new Blob([input.file.data], {
+        type: input.file.contentType,
+      }),
+      input.file.filename,
+    );
+    if (input.description) form.set("description", input.description);
+    if (input.title) form.set("title", input.title);
+    const body = await this.postForm<{ id?: string }>(
+      `${encodeURIComponent(input.pageId)}/videos`,
+      form,
+    );
+    if (!body.id) throw new MetaGraphError(200, null, "missing_post_id");
+    return { providerPostId: body.id };
+  }
+
 }
 
 // ---------------------------------------------------------------------------

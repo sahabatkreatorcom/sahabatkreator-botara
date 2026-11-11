@@ -2,6 +2,8 @@ import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   auditLogs,
   channelAccounts,
+  channelIdentities,
+  contacts,
   conversations,
   media,
   outboxEvents,
@@ -179,17 +181,146 @@ async function loadMedia(
 }
 
 /**
+ * Provider Meta yang akun terhubungnya SENDIRI adalah linimasa.
+ * Berbeda dari Telegram — yang sasaran channel-nya baru diketahui saat
+ * bot ditambahkan ke sebuah channel oleh admin — Page dan akun IG
+ * Business sudah membawa alamat terbitnya sejak connect: `external_id`
+ * akun adalah Page ID / IG user ID. Karena itu tidak ada migrasi atau
+ * tabel sasaran baru: sasaran dimaterialisasi sebagai percakapan
+ * `kind='channel'` dengan `provider_chat_id = external_id`, persis
+ * bentuk yang sudah dipakai state machine post.
+ */
+const TIMELINE_ACCOUNT_PROVIDERS = ["messenger", "instagram"] as const;
+
+/**
+ * Materialisasi idempoten sasaran linimasa Meta untuk akun terhubung.
+ *
+ * Kontak jangkar adalah akun itu sendiri (pola `ensureTelegramChannel`):
+ * identitas `(channel_account_id, external_id akun)` menunjuk ke satu
+ * kontak bernama akun, dan satu percakapan channel menunjuk balik ke
+ * akun tersebut. Fungsi ini dipanggil dari `listPostTargets` karena
+ * daftar sasaran adalah permukaan yang memang harus mencerminkan akun
+ * yang baru terhubung; ia tidak membuat postingan dan tidak memanggil
+ * provider. Panggilan berulang menemukan baris yang sama.
+ */
+async function ensureMetaTimelineTargets(
+  tx: DbTx,
+  tenantId: string,
+): Promise<void> {
+  const accounts = await tx
+    .select({
+      id: channelAccounts.id,
+      provider: channelAccounts.provider,
+      externalId: channelAccounts.externalId,
+      displayName: channelAccounts.displayName,
+      publicHandle: channelAccounts.publicHandle,
+    })
+    .from(channelAccounts)
+    .where(
+      and(
+        eq(channelAccounts.tenantId, tenantId),
+        eq(channelAccounts.status, "connected"),
+        inArray(channelAccounts.provider, [...TIMELINE_ACCOUNT_PROVIDERS]),
+      ),
+    );
+
+  for (const account of accounts) {
+    const label =
+      account.displayName ?? account.publicHandle ?? account.externalId;
+
+    const [identity] = await tx
+      .select({ contactId: channelIdentities.contactId })
+      .from(channelIdentities)
+      .where(
+        and(
+          eq(channelIdentities.channelAccountId, account.id),
+          eq(channelIdentities.externalUserId, account.externalId),
+        ),
+      )
+      .limit(1);
+
+    let contactId = identity?.contactId;
+    if (!contactId) {
+      const [contact] = await tx
+        .insert(contacts)
+        .values({ tenantId, name: label })
+        .returning({ id: contacts.id });
+      contactId = contact!.id;
+      await tx.insert(channelIdentities).values({
+        tenantId,
+        contactId,
+        channelAccountId: account.id,
+        provider: account.provider,
+        externalUserId: account.externalId,
+        username: account.publicHandle,
+      });
+    }
+
+    const [existing] = await tx
+      .select({
+        id: conversations.id,
+        title: conversations.title,
+        kind: conversations.kind,
+        provider: conversations.provider,
+      })
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, tenantId),
+          eq(conversations.channelAccountId, account.id),
+          eq(conversations.providerChatId, account.externalId),
+        ),
+      )
+      .orderBy(desc(conversations.createdAt))
+      .limit(1);
+
+    if (existing) {
+      if (
+        existing.kind !== "channel" ||
+        existing.provider !== account.provider ||
+        existing.title !== label
+      ) {
+        await tx
+          .update(conversations)
+          .set({
+            kind: "channel",
+            provider: account.provider,
+            title: label,
+            updatedAt: new Date(),
+          })
+          .where(eq(conversations.id, existing.id));
+      }
+      continue;
+    }
+
+    await tx.insert(conversations).values({
+      tenantId,
+      channelAccountId: account.id,
+      contactId,
+      provider: account.provider,
+      providerChatId: account.externalId,
+      title: label,
+      kind: "channel",
+      status: "open",
+    });
+  }
+}
+
+/**
  * Channel yang bisa dituju: percakapan `kind='channel'` pada akun yang
- * masih terhubung. Percakapan channel dibuat saat bot ditambahkan sebagai
- * admin (webhook `my_chat_member` / `channel_post`) — jadi daftar ini
- * kosong berarti bot belum pernah masuk ke channel mana pun, dan UI
- * menampilkan instruksi alih-alih pemilih kosong.
+ * masih terhubung. Percakapan channel Telegram dibuat saat bot
+ * ditambahkan sebagai admin (webhook `my_chat_member` / `channel_post`);
+ * sasaran Page/IG dimaterialisasi dari akun terhubung oleh
+ * `ensureMetaTimelineTargets` di atas. Daftar kosong berarti belum ada
+ * channel/akun linimasa yang terhubung, dan UI menampilkan instruksi
+ * alih-alih pemilih kosong.
  */
 export async function listPostTargets(
   db: Database,
   input: { tenantId: string },
 ): Promise<PostTarget[]> {
   return withTenantDb(db, input.tenantId, async (tx) => {
+    await ensureMetaTimelineTargets(tx, input.tenantId);
     return tx
       .select({
         channelAccountId: conversations.channelAccountId,

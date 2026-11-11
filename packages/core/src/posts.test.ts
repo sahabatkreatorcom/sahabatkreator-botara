@@ -40,6 +40,7 @@ import { createTestDb, TEST_TENANT_ID, type TestDb } from "./testing/pglite";
  */
 
 const CH_ACCOUNT = "8a000000-0000-4000-8000-000000000023";
+const FB_ACCOUNT = "8a010000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
 const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
@@ -63,6 +64,12 @@ beforeAll(async () => {
        (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, bot_username)
      VALUES ($1, $2, 'telegram', 'post-test-bot', 'Bot Posting', 'connected', 'v1:token', 'post_test_bot')`,
     [CH_ACCOUNT, TEST_TENANT_ID],
+  );
+  await q(
+    `INSERT INTO channel_accounts
+       (id, tenant_id, provider, external_id, display_name, status, access_token_encrypted, public_handle)
+     VALUES ($1, $2, 'messenger', '1234567890', 'Page Promo', 'connected', 'v1:page-token', 'pagepromo')`,
+    [FB_ACCOUNT, TEST_TENANT_ID],
   );
   await q(
     `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Promo')`,
@@ -119,6 +126,42 @@ describe("target", () => {
         postId: "8a900000-0000-4000-8000-000000000023",
       }),
     ).resolves.toBeNull();
+  });
+});
+
+describe("sasaran Meta (Gelombang 1)", () => {
+  it("Page terhubung menjadi sasaran channel dari external_id akun, idempoten", async () => {
+    const first = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const page = first.find((target) => target.provider === "messenger");
+    expect(page).toBeDefined();
+    expect(page?.channelAccountId).toBe(FB_ACCOUNT);
+    expect(page?.providerChatId).toBe("1234567890");
+    expect(page?.title).toBe("Page Promo");
+
+    const second = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const pages = second.filter((target) => target.provider === "messenger");
+    expect(pages).toHaveLength(1);
+    expect(pages[0]?.conversationId).toBe(page?.conversationId);
+  });
+
+  it("post teks Facebook Page lolos penjadwalan lewat capability messenger", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const page = targets.find((target) => target.provider === "messenger")!;
+    const post = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: page.conversationId,
+      title: "Promo Page",
+      caption: "Halo dari Facebook Page",
+      mediaIds: [],
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.target.provider).toBe("messenger");
   });
 });
 
