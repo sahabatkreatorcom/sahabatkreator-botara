@@ -270,6 +270,18 @@ const EnvSchema = z.object({
   GOOGLE_API_BASE: z.string().url().optional(),
   GOOGLE_TOKEN_BASE: z.string().url().optional(),
   GOOGLE_AUTH_BASE: z.string().url().optional(),
+  /**
+   * Status privasi video YouTube hasil content schedule (Gelombang 2).
+   * Bawaan `private` DISENGAJA: untuk aplikasi Google yang belum
+   * terverifikasi, video yang diunggah lewat API memang dikunci
+   * Google ke private — bawaan ini membuat perilaku konsisten dan
+   * aman di semua keadaan. Pemilik platform menaikkan ke `unlisted`
+   * atau `public` lewat env ini setelah verifikasi aplikasi Google
+   * selesai (lihat OWNER-ACTIONS roadmap content schedule).
+   */
+  YOUTUBE_PRIVACY_STATUS: z
+    .enum(["private", "unlisted", "public"])
+    .default("private"),
 });
 
 /**

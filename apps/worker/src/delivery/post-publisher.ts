@@ -1,6 +1,7 @@
 import type { Database } from "@sahabat-kreator/db";
 import {
   getPostTargetProvider,
+  type GoogleDeps,
   type MediaObjectStore,
 } from "@sahabat-kreator/core";
 import { telegramPostPublisher } from "./telegram-post";
@@ -10,6 +11,7 @@ import {
 } from "./meta-post";
 import { threadsPostPublisher } from "./threads-post";
 import { blueskyPostPublisher } from "./bluesky-post";
+import { youtubePostPublisher } from "./youtube-post";
 
 /**
  * PublisherAdapter (Gelombang 0, butir 1 roadmap content schedule) —
@@ -51,6 +53,20 @@ export interface PostPublisherOptions {
   threadsApiBase?: string | undefined;
   /** Base URL entryway/PDS Bluesky (env BLUESKY_API_BASE; default bsky.social). */
   blueskyApiBase?: string | undefined;
+  /**
+   * Dependensi Google (klien OAuth platform + secret token + base URL)
+   * — objek yang sama dengan yang dipakai sinkron Google Calendar.
+   * Dipakai adapter YouTube untuk menukar refresh token koneksi
+   * Google tenant menjadi access token; base URL API-nya
+   * (`bases.apiBase`, env GOOGLE_API_BASE) menjadi base klien YouTube.
+   */
+  google?: GoogleDeps | undefined;
+  /**
+   * Status privasi video YouTube (env YOUTUBE_PRIVACY_STATUS;
+   * bawaan `private` — satu-satunya status yang dijamin untuk
+   * aplikasi Google yang belum terverifikasi).
+   */
+  youtubePrivacyStatus?: string | undefined;
   /**
    * Base URL publik yang memetakan `r2Key` media ke URL yang dapat
    * diambil provider eksternal. Media internal repo SENGAJA privat
@@ -118,6 +134,7 @@ const POST_PUBLISHERS: readonly PostPublisherAdapter[] = [
   instagramPostPublisher,
   threadsPostPublisher,
   blueskyPostPublisher,
+  youtubePostPublisher,
 ];
 
 export function getPostPublisher(

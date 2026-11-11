@@ -504,6 +504,8 @@ const bullWorker = new Worker<MainJobData>(
           threadsApiBase: env.THREADS_API_BASE,
           blueskyApiBase: env.BLUESKY_API_BASE,
           publicMediaBaseUrl: env.POST_MEDIA_PUBLIC_BASE_URL,
+          google: googleDeps,
+          youtubePrivacyStatus: env.YOUTUBE_PRIVACY_STATUS,
           mediaStore,
         },
       );
