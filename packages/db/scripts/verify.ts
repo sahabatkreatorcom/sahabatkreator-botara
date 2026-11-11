@@ -106,7 +106,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // − 1 tabel Fase 21 (webhook_inbox dihapus — tidak pernah dipakai)
 // + 2 tabel migrasi 0011 (platform_admins, backup_runs — global, tanpa RLS)
 // + 2 tabel Fase 23 / migrasi 0012 (posts, post_media)
-assert.equal(Number(tablesRes.rows[0].count), 62);
+// + 1 tabel Gelombang 0 / migrasi 0013 (post_groups)
+assert.equal(Number(tablesRes.rows[0].count), 63);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -255,7 +256,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-10: migrasi 0012 menambah `posts` + `post_media` dengan
 // tenant_isolation masing-masing → 87.
-assert.equal(Number(policies.rows[0].count), 87);
+//
+// 2026-11-12: migrasi 0013 menambah `post_groups` dengan
+// tenant_isolation → 88.
+assert.equal(Number(policies.rows[0].count), 88);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -284,7 +288,7 @@ await db.exec(`
     appointment_services, appointment_settings, appointment_availability,
     bookings, google_calendar_connections,
     payment_provider_configs,
-    posts, post_media
+    posts, post_media, post_groups
   TO app_user;
 `);
 
@@ -2394,8 +2398,10 @@ function oneHotVector(index: number): string {
   );
   // 2026-11-10: migrasi 0012 (content schedule) menambah posts +
   // post_media beserta tenant_isolation-nya → tabel 62, policy 87.
-  assert.equal(counts.rows[0].tables, "62");
-  assert.equal(counts.rows[0].policies, "87");
+  // 2026-11-12: migrasi 0013 (grup multi-target) menambah post_groups
+  // beserta tenant_isolation-nya → tabel 63, policy 88.
+  assert.equal(counts.rows[0].tables, "63");
+  assert.equal(counts.rows[0].policies, "88");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
@@ -3657,6 +3663,70 @@ await db.query(`DELETE FROM contacts WHERE id = $1`, [POST_CONTACT]);
 await db.query(`DELETE FROM channel_accounts WHERE id = $1`, [POST_CH]);
 console.log(
   "[49] Fase 23: posts/post_media ber-RLS (tenant lain melihat 0 baris) dan FK media RESTRICT menolak penghapusan aset yang masih dirujuk postingan: OK",
+);
+
+// ---------------------------------------------------------------------------
+// [50] Gelombang 0: grup multi-target (migrasi 0013).
+//
+// Yang dijaga di level data:
+//   1. `post_groups` ber-RLS seperti tabel tenant lainnya — grup adalah
+//      data tenant, bukan data global.
+//   2. FK `posts.group_id` adalah SET NULL: menghapus grup TIDAK boleh
+//      menghapus postingan anggotanya (riwayat terbit > label grup).
+// ---------------------------------------------------------------------------
+const GROUP_ID = "7f500000-0000-4000-8000-000000000050";
+const GROUP_POST_ID = "7f600000-0000-4000-8000-000000000050";
+
+await db.query(
+  `INSERT INTO channel_accounts (id, tenant_id, provider, external_id, display_name, status)
+   VALUES ($1, $2, 'telegram', 'group-verify-bot', 'Bot Grup', 'connected')`,
+  [POST_CH, TENANT_A],
+);
+await db.query(
+  `INSERT INTO contacts (id, tenant_id, name) VALUES ($1, $2, 'Channel Grup')`,
+  [POST_CONTACT, TENANT_A],
+);
+await db.query(
+  `INSERT INTO conversations
+     (id, tenant_id, channel_account_id, contact_id, provider, provider_chat_id, title, kind)
+   VALUES ($1, $2, $3, $4, 'telegram', '-1001234567891', 'Channel Grup', 'channel')`,
+  [POST_CONV, TENANT_A, POST_CH, POST_CONTACT],
+);
+await db.query(
+  `INSERT INTO post_groups (id, tenant_id, title) VALUES ($1, $2, 'Kampanye Grup')`,
+  [GROUP_ID, TENANT_A],
+);
+await db.query(
+  `INSERT INTO posts (id, tenant_id, channel_account_id, conversation_id, group_id, title, caption, status)
+   VALUES ($1, $2, $3, $4, $5, 'Anggota Grup', 'Halo grup', 'draft')`,
+  [GROUP_POST_ID, TENANT_A, POST_CH, POST_CONV, GROUP_ID],
+);
+
+const groupIsolation = await db.transaction(async (tx) => {
+  await tx.query(`SET LOCAL ROLE app_user`);
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_A]);
+  const own = await tx.query(`SELECT id FROM post_groups`);
+  await tx.query(`SELECT set_config('app.tenant_id', $1, true)`, [TENANT_B]);
+  const other = await tx.query(`SELECT id FROM post_groups`);
+  return { own: own.rows.length, other: other.rows.length };
+});
+assert.equal(groupIsolation.own, 1);
+assert.equal(groupIsolation.other, 0);
+
+await db.query(`DELETE FROM post_groups WHERE id = $1`, [GROUP_ID]);
+const orphan = await db.query<{ group_id: string | null }>(
+  `SELECT group_id FROM posts WHERE id = $1`,
+  [GROUP_POST_ID],
+);
+assert.equal(orphan.rows.length, 1);
+assert.equal(orphan.rows[0].group_id, null);
+
+await db.query(`DELETE FROM posts WHERE id = $1`, [GROUP_POST_ID]);
+await db.query(`DELETE FROM conversations WHERE id = $1`, [POST_CONV]);
+await db.query(`DELETE FROM contacts WHERE id = $1`, [POST_CONTACT]);
+await db.query(`DELETE FROM channel_accounts WHERE id = $1`, [POST_CH]);
+console.log(
+  "[50] Gelombang 0: post_groups ber-RLS (tenant lain melihat 0 baris) dan hapus grup meng-SET NULL group_id anggota tanpa menghapus postingannya: OK",
 );
 
 await db.close();

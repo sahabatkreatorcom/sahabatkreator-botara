@@ -69,6 +69,8 @@ export type PostTarget = z.infer<typeof PostTargetSchema>;
 
 export const PostSchema = z.object({
   id: z.string().uuid(),
+  /** Grup multi-target pemilik post ini (migrasi 0013); null = tunggal. */
+  groupId: z.string().uuid().nullable(),
   title: z.string(),
   caption: z.string(),
   status: PostStatusSchema,
@@ -224,6 +226,42 @@ export const CreatePostRequestSchema = z.object({
   mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).default([]),
 });
 export type CreatePostRequest = z.infer<typeof CreatePostRequestSchema>;
+
+/**
+ * Buat konten multi-target sekaligus (Gelombang 0, butir 3): satu
+ * konten induk, N sasaran. Server membuat SATU baris `posts` per
+ * sasaran dalam satu grup (satu transaksi — gagal satu, gagal semua),
+ * karena status dan klaim publikasi memang per linimasa.
+ *
+ * `caption` per sasaran adalah override opsional di atas caption induk:
+ * panjang dan gaya tiap platform berbeda, dan memaksa satu teks untuk
+ * semua platform adalah kesalahan yang baru terasa setelah terbit.
+ * Media dipakai bersama (album yang sama untuk semua sasaran); validasi
+ * kesesuaiannya per platform terjadi saat penjadwalan, per baris.
+ */
+export const CreatePostGroupRequestSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  caption: z.string().max(POST_CAPTION_HARD_MAX).default(""),
+  mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).default([]),
+  targets: z
+    .array(
+      z.object({
+        conversationId: z.string().uuid(),
+        caption: z.string().max(POST_CAPTION_HARD_MAX).optional(),
+      }),
+    )
+    .min(1)
+    .max(20),
+});
+export type CreatePostGroupRequest = z.infer<
+  typeof CreatePostGroupRequestSchema
+>;
+
+export const PostGroupResponseSchema = z.object({
+  groupId: z.string().uuid(),
+  items: z.array(PostSchema),
+});
+export type PostGroupResponse = z.infer<typeof PostGroupResponseSchema>;
 
 /** Edit hanya berlaku untuk draft (ditegakkan di core, bukan di kontrak). */
 export const UpdatePostRequestSchema = z.object({

@@ -92,6 +92,13 @@
       "when": 1793870118808,
       "tag": "0012_content_posts",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1793870118809,
+      "tag": "0013_post_groups",
+      "breakpoints": true
     }
   ]
 }

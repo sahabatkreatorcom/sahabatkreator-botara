@@ -1,7 +1,9 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  CreatePostGroupRequestSchema,
   CreatePostRequestSchema,
+  PostGroupResponseSchema,
   PostListQuerySchema,
   PostListResponseSchema,
   PostSchema,
@@ -14,6 +16,7 @@ import {
   PostDomainError,
   cancelPost,
   createPost,
+  createPostGroup,
   deletePost,
   getPost,
   listPostTargets,
@@ -32,6 +35,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   GET    /tenants/:tenantId/posts/targets        channel yang bisa dituju
  *   GET    /tenants/:tenantId/posts                daftar + saringan status
  *   POST   /tenants/:tenantId/posts                buat draft
+ *   POST   /tenants/:tenantId/posts/group          buat grup multi-target
  *   GET    /tenants/:tenantId/posts/:id            detail
  *   PATCH  /tenants/:tenantId/posts/:id            edit (draft saja)
  *   DELETE /tenants/:tenantId/posts/:id            hapus (draft/cancelled)
@@ -50,6 +54,7 @@ import { resolveTenantForUser } from "../tenants/guard";
 function serializePost(post: PostRecord): PostResponse {
   return {
     id: post.id,
+    groupId: post.groupId,
     title: post.title,
     caption: post.caption,
     status: post.status,
@@ -104,6 +109,7 @@ export function createPostsRoutes(bundle: AuthBundle | null) {
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured");
     app.get(base, unavailable);
     app.post(base, unavailable);
+    app.post(`${base}/group`, unavailable);
     app.get(`${base}/targets`, unavailable);
     app.get(`${base}/:id`, unavailable);
     app.patch(`${base}/:id`, unavailable);
@@ -209,6 +215,43 @@ export function createPostsRoutes(bundle: AuthBundle | null) {
         mediaIds: parsed.data.mediaIds,
       });
       return c.json(PostSchema.parse(serializePost(post)), 201);
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Buat grup multi-target ----------------------------------------------
+  // Satu konten induk → N draft dalam satu grup (satu transaksi di core).
+  // Penjadwalan tetap per anggota lewat route /:id/schedule yang ada.
+  app.post(`${base}/group`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid JSON body");
+    }
+    const parsed = CreatePostGroupRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid post group payload");
+    }
+    try {
+      const result = await createPostGroup(bundle.db, {
+        tenantId: g.tenant.id,
+        userId: g.appUser.id,
+        title: parsed.data.title,
+        caption: parsed.data.caption,
+        mediaIds: parsed.data.mediaIds,
+        targets: parsed.data.targets,
+      });
+      return c.json(
+        PostGroupResponseSchema.parse({
+          groupId: result.groupId,
+          items: result.posts.map(serializePost),
+        }),
+        201,
+      );
     } catch (err) {
       return domainError(c, err);
     }

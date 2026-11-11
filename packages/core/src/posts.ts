@@ -5,6 +5,7 @@ import {
   conversations,
   media,
   outboxEvents,
+  postGroups,
   postMedia,
   posts,
   type Database,
@@ -84,6 +85,8 @@ export interface PostMediaItem {
 
 export interface PostRecord {
   id: string;
+  /** Grup multi-target (migrasi 0013); null = post tunggal. */
+  groupId: string | null;
   title: string;
   caption: string;
   status: PostStatus;
@@ -218,6 +221,7 @@ async function loadPost(
   const [row] = await tx
     .select({
       id: posts.id,
+      groupId: posts.groupId,
       title: posts.title,
       caption: posts.caption,
       status: posts.status,
@@ -242,6 +246,7 @@ async function loadPost(
   const mediaByPost = await loadMedia(tx, tenantId, [postId]);
   return {
     id: row.id,
+    groupId: row.groupId,
     title: row.title,
     caption: row.caption,
     status: row.status,
@@ -307,6 +312,7 @@ export async function listPosts(
     const rows = await tx
       .select({
         id: posts.id,
+        groupId: posts.groupId,
         title: posts.title,
         caption: posts.caption,
         status: posts.status,
@@ -342,6 +348,7 @@ export async function listPosts(
     );
     return rows.map((row) => ({
       id: row.id,
+      groupId: row.groupId,
       title: row.title,
       caption: row.caption,
       status: row.status,
@@ -373,10 +380,87 @@ export async function getPost(
   );
 }
 
+interface ResolvedPostTarget {
+  channelAccountId: string;
+  provider: string;
+}
+
 /**
- * Buat draft. Target divalidasi saat pembuatan (bukan saat jadwal) supaya
- * pengguna tahu lebih awal kalau channel-nya sudah tidak terhubung.
+ * Validasi sasaran saat PEMBUATAN (bukan saat jadwal) supaya pengguna
+ * tahu lebih awal kalau channel-nya sudah tidak terhubung. Dipakai
+ * bersama oleh pembuatan tunggal dan grup.
  */
+async function resolvePostTarget(
+  tx: DbTx,
+  tenantId: string,
+  conversationId: string,
+): Promise<ResolvedPostTarget> {
+  const [target] = await tx
+    .select({
+      channelAccountId: conversations.channelAccountId,
+      provider: conversations.provider,
+      status: channelAccounts.status,
+    })
+    .from(conversations)
+    .innerJoin(
+      channelAccounts,
+      eq(channelAccounts.id, conversations.channelAccountId),
+    )
+    .where(
+      and(
+        eq(conversations.tenantId, tenantId),
+        eq(conversations.id, conversationId),
+        eq(conversations.kind, "channel"),
+      ),
+    )
+    .limit(1);
+  if (!target) throw new PostDomainError("POST_TARGET_NOT_FOUND");
+  if (target.status !== "connected") {
+    throw new PostDomainError("POST_TARGET_NOT_CONNECTED");
+  }
+  return target;
+}
+
+/**
+ * Sisipkan satu baris draft + lampirannya. Caption dipotong ke batas
+ * provider SASARAN (capability), bukan konstanta global — dulu semua
+ * provider mewarisi 1024 ala Telegram hanya karena batasnya tinggal
+ * di jalur pembuatan tunggal.
+ */
+async function insertDraftPost(
+  tx: DbTx,
+  input: {
+    tenantId: string;
+    userId: string;
+    target: ResolvedPostTarget;
+    conversationId: string;
+    groupId: string | null;
+    title: string;
+    caption: string;
+    mediaIds: string[];
+  },
+): Promise<string> {
+  const [row] = await tx
+    .insert(posts)
+    .values({
+      tenantId: input.tenantId,
+      channelAccountId: input.target.channelAccountId,
+      conversationId: input.conversationId,
+      groupId: input.groupId,
+      title: input.title,
+      caption: input.caption.slice(
+        0,
+        capabilityFor(input.target.provider).maxCaption,
+      ),
+      status: "draft",
+      createdByUserId: input.userId,
+    })
+    .returning({ id: posts.id });
+  await replaceMedia(tx, input.tenantId, row!.id, input.mediaIds);
+  return row!.id;
+}
+
+/** Buat draft tunggal. */
 export async function createPost(
   db: Database,
   input: {
@@ -389,64 +473,126 @@ export async function createPost(
   },
 ): Promise<PostRecord> {
   return withTenantDb(db, input.tenantId, async (tx) => {
-    const [target] = await tx
-      .select({
-        channelAccountId: conversations.channelAccountId,
-        provider: conversations.provider,
-        status: channelAccounts.status,
-      })
-      .from(conversations)
-      .innerJoin(
-        channelAccounts,
-        eq(channelAccounts.id, conversations.channelAccountId),
-      )
-      .where(
-        and(
-          eq(conversations.tenantId, input.tenantId),
-          eq(conversations.id, input.conversationId),
-          eq(conversations.kind, "channel"),
-        ),
-      )
-      .limit(1);
-    if (!target) throw new PostDomainError("POST_TARGET_NOT_FOUND");
-    if (target.status !== "connected") {
-      throw new PostDomainError("POST_TARGET_NOT_CONNECTED");
-    }
-
-    const [row] = await tx
-      .insert(posts)
-      .values({
-        tenantId: input.tenantId,
-        channelAccountId: target.channelAccountId,
-        conversationId: input.conversationId,
-        title: input.title,
-        // Caption dipotong ke batas provider SASARAN (capability), bukan
-        // lagi konstanta global — dulu semua provider mewarisi 1024 ala
-        // Telegram hanya karena konstananya tinggal di sini.
-        caption: input.caption.slice(
-          0,
-          capabilityFor(target.provider).maxCaption,
-        ),
-        status: "draft",
-        createdByUserId: input.userId,
-      })
-      .returning({ id: posts.id });
-
-    await replaceMedia(tx, input.tenantId, row!.id, input.mediaIds);
+    const target = await resolvePostTarget(
+      tx,
+      input.tenantId,
+      input.conversationId,
+    );
+    const postId = await insertDraftPost(tx, {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      target,
+      conversationId: input.conversationId,
+      groupId: null,
+      title: input.title,
+      caption: input.caption,
+      mediaIds: input.mediaIds,
+    });
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
       actorType: "user",
       actorId: input.userId,
       action: "post.created",
       meta: {
-        postId: row!.id,
+        postId,
         conversationId: input.conversationId,
         mediaCount: input.mediaIds.length,
       },
     });
-    const created = await loadPost(tx, input.tenantId, row!.id);
+    const created = await loadPost(tx, input.tenantId, postId);
     if (!created) throw new PostDomainError("POST_NOT_FOUND");
     return created;
+  });
+}
+
+export interface PostGroupRecord {
+  groupId: string;
+  posts: PostRecord[];
+}
+
+/**
+ * Buat konten multi-target (Gelombang 0, butir 3): satu grup, N draft —
+ * satu per sasaran, dalam SATU transaksi. Gagal memvalidasi satu
+ * sasaran = tidak ada satu pun yang dibuat; pengguna tidak pernah
+ * ditinggal dengan grup setengah jadi yang separuhnya hilang.
+ *
+ * Penjadwalan TIDAK dilakukan di sini: tiap anggota tetap dijadwalkan
+ * (dan terbit/gagal) sendiri-sendiri lewat jalur yang sudah ada, karena
+ * state machine-nya memang per linimasa.
+ */
+export async function createPostGroup(
+  db: Database,
+  input: {
+    tenantId: string;
+    userId: string;
+    title: string;
+    caption: string;
+    mediaIds: string[];
+    targets: Array<{ conversationId: string; caption?: string }>;
+  },
+): Promise<PostGroupRecord> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    // Sasaran ganda pada permintaan yang sama dibuang: dua baris untuk
+    // linimasa yang sama dalam satu grup adalah kirim ganda yang
+    // direncanakan, bukan fitur.
+    const uniqueTargets = [
+      ...new Map(input.targets.map((t) => [t.conversationId, t])).values(),
+    ];
+    if (uniqueTargets.length === 0) {
+      throw new PostDomainError("POST_TARGET_NOT_FOUND");
+    }
+    const resolved = new Map<string, ResolvedPostTarget>();
+    for (const target of uniqueTargets) {
+      resolved.set(
+        target.conversationId,
+        await resolvePostTarget(tx, input.tenantId, target.conversationId),
+      );
+    }
+
+    const [group] = await tx
+      .insert(postGroups)
+      .values({
+        tenantId: input.tenantId,
+        title: input.title,
+        createdByUserId: input.userId,
+      })
+      .returning({ id: postGroups.id });
+
+    const postIds: string[] = [];
+    for (const target of uniqueTargets) {
+      postIds.push(
+        await insertDraftPost(tx, {
+          tenantId: input.tenantId,
+          userId: input.userId,
+          target: resolved.get(target.conversationId)!,
+          conversationId: target.conversationId,
+          groupId: group!.id,
+          title: input.title,
+          caption: target.caption ?? input.caption,
+          mediaIds: input.mediaIds,
+        }),
+      );
+    }
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "post_group.created",
+      meta: {
+        groupId: group!.id,
+        postIds,
+        targetCount: postIds.length,
+        mediaCount: input.mediaIds.length,
+      },
+    });
+
+    const created: PostRecord[] = [];
+    for (const postId of postIds) {
+      const post = await loadPost(tx, input.tenantId, postId);
+      if (!post) throw new PostDomainError("POST_NOT_FOUND");
+      created.push(post);
+    }
+    return { groupId: group!.id, posts: created };
   });
 }
 

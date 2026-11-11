@@ -50,6 +50,37 @@ export const postStatusEnum = pgEnum("post_status", [
   "cancelled",
 ]);
 
+/**
+ * Grup multi-target (migrasi 0013, Gelombang 0 butir 3): satu konten
+ * induk yang diterbitkan ke N sasaran sekaligus.
+ *
+ * Kenapa grup adalah tabel PENGGELOMPOK, bukan kolom target jamak di
+ * `posts`: state machine dan klaim atomik publikasi hidup per baris
+ * `posts` (satu baris = satu linimasa = satu status). Grup hanya
+ * menamai kebersamaan mereka — anggota dibuat bersama, tetapi terjadwal,
+ * terbit, dan gagal secara independen per platform, karena memang
+ * begitulah kenyataan di provider. Menghapus grup TIDAK menghapus
+ * anggota (`group_id` di-null-kan): riwayat terbit tidak boleh hilang
+ * karena labelnya dicabut.
+ */
+export const postGroups = pgTable("post_groups", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  /** Judul internal konten induk; disalin ke tiap post anggota. */
+  title: varchar("title", { length: 255 }).notNull(),
+  createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 export const posts = pgTable(
   "posts",
   {
@@ -57,6 +88,13 @@ export const posts = pgTable(
     tenantId: uuid("tenant_id")
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
+    /**
+     * Grup multi-target pemilik baris ini (migrasi 0013); NULL = post
+     * tunggal. `set null`, bukan cascade — lihat komentar postGroups.
+     */
+    groupId: uuid("group_id").references(() => postGroups.id, {
+      onDelete: "set null",
+    }),
     /** Akun bot pengirim (Telegram dulu; provider lain menyusul). */
     channelAccountId: uuid("channel_account_id")
       .notNull()
@@ -105,6 +143,8 @@ export const posts = pgTable(
     index("posts_tenant_status_idx").on(t.tenantId, t.status),
     // Sasaran per channel (dipakai saat disconnect: apa yang masih terjadwal).
     index("posts_conversation_idx").on(t.conversationId),
+    // Anggota satu grup dibaca bersama (kartu grup di kalender).
+    index("posts_group_idx").on(t.groupId),
   ],
 );
 
@@ -139,6 +179,8 @@ export const postMedia = pgTable(
   ],
 );
 
+export type PostGroup = typeof postGroups.$inferSelect;
+export type NewPostGroup = typeof postGroups.$inferInsert;
 export type Post = typeof posts.$inferSelect;
 export type NewPost = typeof posts.$inferInsert;
 export type PostMedia = typeof postMedia.$inferSelect;

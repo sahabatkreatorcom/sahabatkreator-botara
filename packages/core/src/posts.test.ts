@@ -6,6 +6,7 @@ import {
   cancelPost,
   claimPostForPublish,
   createPost,
+  createPostGroup,
   getPost,
   getPostTargetProvider,
   listPostTargets,
@@ -38,6 +39,7 @@ import { createTestDb, TEST_TENANT_ID, type TestDb } from "./testing/pglite";
 const CH_ACCOUNT = "8a000000-0000-4000-8000-000000000023";
 const CONTACT = "8a100000-0000-4000-8000-000000000023";
 const CONV_CHANNEL = "8a200000-0000-4000-8000-000000000023";
+const CONV_CHANNEL_2 = "8a210000-0000-4000-8000-000000000023";
 const USER_ID = "8a300000-0000-4000-8000-000000000023";
 const MEDIA_PHOTO = "8a400000-0000-4000-8000-000000000023";
 const MEDIA_DOC = "8a500000-0000-4000-8000-000000000023";
@@ -66,8 +68,9 @@ beforeAll(async () => {
   await q(
     `INSERT INTO conversations
        (id, tenant_id, channel_account_id, contact_id, provider, provider_chat_id, title, kind)
-     VALUES ($1, $2, $3, $4, 'telegram', '-1009876543210', 'Channel Promo', 'channel')`,
-    [CONV_CHANNEL, TEST_TENANT_ID, CH_ACCOUNT, CONTACT],
+     VALUES ($1, $2, $3, $4, 'telegram', '-1009876543210', 'Channel Promo', 'channel'),
+              ($5, $2, $3, $4, 'telegram', '-1009876543211', 'Channel Promo 2', 'channel')`,
+    [CONV_CHANNEL, TEST_TENANT_ID, CH_ACCOUNT, CONTACT, CONV_CHANNEL_2],
   );
   await q(
     `INSERT INTO media (id, tenant_id, r2_key, file_name, mime_type, size_bytes)
@@ -173,6 +176,57 @@ describe("gerbang isi: yang tidak boleh sampai ke antrean", () => {
         caption: "diubah setelah dijadwalkan",
       }),
     ).rejects.toMatchObject({ code: "POST_NOT_EDITABLE" });
+  });
+});
+
+describe("grup multi-target", () => {
+  it("satu konten induk menjadi N draft dalam satu grup; override caption per sasaran menang", async () => {
+    const result = await createPostGroup(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      title: "Kampanye Grup",
+      caption: "Caption induk untuk semua",
+      mediaIds: [MEDIA_PHOTO],
+      targets: [
+        { conversationId: CONV_CHANNEL },
+        { conversationId: CONV_CHANNEL_2, caption: "Caption khusus channel 2" },
+      ],
+    });
+    expect(result.posts).toHaveLength(2);
+    expect(result.posts.every((p) => p.groupId === result.groupId)).toBe(true);
+    expect(result.posts.every((p) => p.status === "draft")).toBe(true);
+    const byTarget = new Map(
+      result.posts.map((p) => [p.target.conversationId, p.caption]),
+    );
+    expect(byTarget.get(CONV_CHANNEL)).toBe("Caption induk untuk semua");
+    expect(byTarget.get(CONV_CHANNEL_2)).toBe("Caption khusus channel 2");
+    // Media dipakai bersama: kedua anggota membawa lampiran yang sama.
+    expect(result.posts.every((p) => p.media.length === 1)).toBe(true);
+  });
+
+  it("satu sasaran tidak dikenal menggagalkan SELURUH grup (tidak ada grup setengah jadi)", async () => {
+    await expect(
+      createPostGroup(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        title: "Grup Gagal",
+        caption: "tidak akan pernah ada",
+        mediaIds: [],
+        targets: [
+          { conversationId: CONV_CHANNEL },
+          { conversationId: "8a900000-0000-4000-8000-000000000023" },
+        ],
+      }),
+    ).rejects.toMatchObject({ code: "POST_TARGET_NOT_FOUND" });
+    const groups = await ctx.pglite.query(
+      `SELECT id FROM post_groups WHERE title = 'Grup Gagal'`,
+    );
+    expect(groups.rows).toHaveLength(0);
+  });
+
+  it("post tunggal tetap groupId null", async () => {
+    const post = await draft();
+    expect(post.groupId).toBeNull();
   });
 });
 
