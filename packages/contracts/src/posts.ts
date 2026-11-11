@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ChannelProviderSchema } from "./inbox";
+import { ChannelProviderSchema, type ChannelProvider } from "./inbox";
 
 /**
  * Content Schedule (Fase 23) — kontrak postingan terjadwal ke linimasa
@@ -84,20 +84,143 @@ export const PostSchema = z.object({
 export type PostResponse = z.infer<typeof PostSchema>;
 
 /**
- * Batas caption 1024 karakter = batas `caption` Bot API Telegram. Sengaja
- * ditegakkan di kontrak, bukan hanya di publisher: provider lain punya
- * batas lebih longgar, tetapi menampung 4096 lalu menolak saat jam tayang
- * adalah kegagalan yang baru terlihat setelah postingan gagal terbit.
+ * Batas caption Telegram (1024) — dipertahankan sebagai konstanta bernama
+ * karena UI dan pesan bantuan masih merujuknya, tetapi sejak Gelombang 0
+ * ia BUKAN lagi batas global: batas yang mengikat per postingan adalah
+ * `maxCaption` pada capability provider sasarannya (lihat di bawah).
  */
 export const POST_CAPTION_MAX = 1024;
 
 /** Batas album Telegram (sendMediaGroup menerima 2–10 item). */
 export const POST_MEDIA_MAX = 10;
 
+/**
+ * Deklarasi kemampuan penerbitan per provider (Gelombang 0, butir 2).
+ *
+ * Dua jenis nilai yang sengaja dibedakan di sini:
+ * - ATURAN PLATFORM (`maxCaption`, `mediaRequired`, `supportsAlbum`, …):
+ *   fakta tentang API provider, berlaku selamanya. Validasi di core
+ *   memakai nilai ini saat membuat/menjadwalkan postingan — kesalahan
+ *   format harus tertangkap sebelum jam tayang, bukan saat provider
+ *   menolak di tengah malam.
+ * - `publishSupported`: apakah SISTEM saat ini punya `PublisherAdapter`
+ *   terdaftar untuk provider itu di worker. Ini berubah tiap gelombang
+ *   (Telegram `true` sejak Fase 23; sisanya menyusul per roadmap) dan
+ *   menjadi gerbang penjadwalan menggantikan pemeriksaan keras
+ *   `provider === "telegram"` yang dulu hidup di core.
+ *
+ * Provider yang belum menjadi sasaran linimasa (whatsapp, webchat)
+ * tetap dideklarasikan agar tabel ini lengkap terhadap
+ * `ChannelProviderSchema`; nilai aturannya tidak dipakai selama
+ * `publishSupported: false`.
+ */
+export const PostProviderCapabilitySchema = z.object({
+  publishSupported: z.boolean(),
+  /** true = postingan tanpa media tidak pernah boleh terbit (Instagram). */
+  mediaRequired: z.boolean(),
+  maxCaption: z.number().int().positive(),
+  maxMedia: z.number().int().positive(),
+  supportsAlbum: z.boolean(),
+  supportsVideo: z.boolean(),
+  /** Dokumen sebagai lampiran TUNGGAL. */
+  supportsDocuments: z.boolean(),
+  /** Dokumen di dalam album campuran (Telegram menolak ini di Bot API). */
+  supportsAlbumDocuments: z.boolean(),
+  supportsFirstComment: z.boolean(),
+});
+export type PostProviderCapability = z.infer<
+  typeof PostProviderCapabilitySchema
+>;
+
+export const POST_PROVIDER_CAPABILITIES: Record<
+  ChannelProvider,
+  PostProviderCapability
+> = {
+  telegram: {
+    publishSupported: true,
+    mediaRequired: false,
+    maxCaption: POST_CAPTION_MAX,
+    maxMedia: POST_MEDIA_MAX,
+    supportsAlbum: true,
+    supportsVideo: true,
+    supportsDocuments: true,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
+  instagram: {
+    // Content Publishing API: wajib media, karousel maks 10, caption 2200.
+    publishSupported: false,
+    mediaRequired: true,
+    maxCaption: 2200,
+    maxMedia: 10,
+    supportsAlbum: true,
+    supportsVideo: true,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: true,
+  },
+  messenger: {
+    // Facebook Page: batas pesan feed Graph API sangat longgar (63.206).
+    publishSupported: false,
+    mediaRequired: false,
+    maxCaption: 63206,
+    maxMedia: 10,
+    supportsAlbum: true,
+    supportsVideo: true,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: true,
+  },
+  whatsapp: {
+    // Bukan sasaran linimasa (tidak ada API publikasi pihak ketiga);
+    // kebutuhan massal ditangani broadcasts. Nilai aturan tidak dipakai.
+    publishSupported: false,
+    mediaRequired: false,
+    maxCaption: POST_CAPTION_MAX,
+    maxMedia: POST_MEDIA_MAX,
+    supportsAlbum: false,
+    supportsVideo: true,
+    supportsDocuments: true,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
+  webchat: {
+    // Widget milik sendiri; tidak ada linimasa publik untuk diterbitkan.
+    publishSupported: false,
+    mediaRequired: false,
+    maxCaption: POST_CAPTION_MAX,
+    maxMedia: POST_MEDIA_MAX,
+    supportsAlbum: false,
+    supportsVideo: false,
+    supportsDocuments: false,
+    supportsAlbumDocuments: false,
+    supportsFirstComment: false,
+  },
+};
+
+/** Capability sebuah provider; `undefined` untuk nilai di luar enum. */
+export function getPostProviderCapability(
+  provider: string,
+): PostProviderCapability | undefined {
+  return (
+    POST_PROVIDER_CAPABILITIES as Record<string, PostProviderCapability>
+  )[provider];
+}
+
+/**
+ * Langit-langit keras caption pada skema permintaan: cukup longgar untuk
+ * provider paling longgar, karena batas yang BENAR-BENAR mengikat adalah
+ * capability provider sasaran dan ditegakkan di core (di sana provider
+ * diketahui; di kontrak permintaan, sasaran bisa berubah per baris grup).
+ */
+export const POST_CAPTION_HARD_MAX = Math.max(
+  ...Object.values(POST_PROVIDER_CAPABILITIES).map((c) => c.maxCaption),
+);
+
 export const CreatePostRequestSchema = z.object({
   conversationId: z.string().uuid(),
   title: z.string().trim().min(1).max(255),
-  caption: z.string().max(POST_CAPTION_MAX).default(""),
+  caption: z.string().max(POST_CAPTION_HARD_MAX).default(""),
   mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).default([]),
 });
 export type CreatePostRequest = z.infer<typeof CreatePostRequestSchema>;
@@ -105,7 +228,7 @@ export type CreatePostRequest = z.infer<typeof CreatePostRequestSchema>;
 /** Edit hanya berlaku untuk draft (ditegakkan di core, bukan di kontrak). */
 export const UpdatePostRequestSchema = z.object({
   title: z.string().trim().min(1).max(255).optional(),
-  caption: z.string().max(POST_CAPTION_MAX).optional(),
+  caption: z.string().max(POST_CAPTION_HARD_MAX).optional(),
   mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).optional(),
 });
 export type UpdatePostRequest = z.infer<typeof UpdatePostRequestSchema>;

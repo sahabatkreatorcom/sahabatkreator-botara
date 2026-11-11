@@ -157,6 +157,11 @@ export const ErrorCodeSchema = z.enum([
   "POST_NOT_SCHEDULABLE",
   "POST_NOT_CANCELLABLE",
   "POST_EMPTY",
+  // Gelombang 0: validasi format per capability provider (core/posts).
+  "POST_CAPTION_TOO_LONG",
+  "POST_MEDIA_REQUIRED",
+  "POST_MEDIA_TOO_MANY",
+  "POST_MEDIA_KIND_UNSUPPORTED",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

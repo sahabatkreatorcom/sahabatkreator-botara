@@ -11,9 +11,10 @@ import {
   type PostStatus,
 } from "@sahabat-kreator/db";
 import {
-  POST_CAPTION_MAX,
   POST_MEDIA_MAX,
+  getPostProviderCapability,
   type PostMediaKind,
+  type PostProviderCapability,
 } from "@sahabat-kreator/contracts";
 import { withTenantDb, type DbTx } from "./tx";
 
@@ -57,7 +58,11 @@ export type PostErrorCode =
   | "POST_NOT_EDITABLE"
   | "POST_NOT_SCHEDULABLE"
   | "POST_NOT_CANCELLABLE"
-  | "POST_EMPTY";
+  | "POST_EMPTY"
+  | "POST_CAPTION_TOO_LONG"
+  | "POST_MEDIA_REQUIRED"
+  | "POST_MEDIA_TOO_MANY"
+  | "POST_MEDIA_KIND_UNSUPPORTED";
 
 export interface PostTarget {
   channelAccountId: string;
@@ -90,6 +95,19 @@ export interface PostRecord {
   media: PostMediaItem[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Capability provider sasaran sebuah postingan. Provider di luar enum
+ * kontrak (baris lama, data menyimpang) diperlakukan sebagai Telegram —
+ * nilai capability yang PALING KETAT — agar validasi gagal aman, bukan
+ * gagal longgar.
+ */
+function capabilityFor(provider: string): PostProviderCapability {
+  return (
+    getPostProviderCapability(provider) ??
+    getPostProviderCapability("telegram")!
+  );
 }
 
 /**
@@ -374,6 +392,7 @@ export async function createPost(
     const [target] = await tx
       .select({
         channelAccountId: conversations.channelAccountId,
+        provider: conversations.provider,
         status: channelAccounts.status,
       })
       .from(conversations)
@@ -401,7 +420,13 @@ export async function createPost(
         channelAccountId: target.channelAccountId,
         conversationId: input.conversationId,
         title: input.title,
-        caption: input.caption.slice(0, POST_CAPTION_MAX),
+        // Caption dipotong ke batas provider SASARAN (capability), bukan
+        // lagi konstanta global — dulu semua provider mewarisi 1024 ala
+        // Telegram hanya karena konstananya tinggal di sini.
+        caption: input.caption.slice(
+          0,
+          capabilityFor(target.provider).maxCaption,
+        ),
         status: "draft",
         createdByUserId: input.userId,
       })
@@ -450,7 +475,12 @@ export async function updatePost(
       .set({
         ...(input.title !== undefined ? { title: input.title } : {}),
         ...(input.caption !== undefined
-          ? { caption: input.caption.slice(0, POST_CAPTION_MAX) }
+          ? {
+              caption: input.caption.slice(
+                0,
+                capabilityFor(existing.target.provider).maxCaption,
+              ),
+            }
           : {}),
         updatedAt: new Date(),
       })
@@ -517,7 +547,12 @@ export async function schedulePost(
     if (existing.status !== "draft" && existing.status !== "scheduled") {
       throw new PostDomainError("POST_NOT_SCHEDULABLE");
     }
-    if (existing.target.provider !== "telegram") {
+    // Gerbang provider sekarang membaca capability (Gelombang 0),
+    // menggantikan pemeriksaan keras `provider !== "telegram"`:
+    // provider tanpa PublisherAdapter terdaftar tetap ditolak dengan
+    // kode yang sama seperti sebelumnya.
+    const capability = capabilityFor(existing.target.provider);
+    if (!capability.publishSupported) {
       throw new PostDomainError("POST_TARGET_NOT_FOUND");
     }
     if (!existing.target.providerChatId) {
@@ -526,13 +561,40 @@ export async function schedulePost(
     if (existing.caption.trim().length === 0 && existing.media.length === 0) {
       throw new PostDomainError("POST_EMPTY");
     }
-    // Telegram: album hanya boleh berisi foto/video. Dokumen di tengah
-    // album ditolak Bot API, jadi ditolak di sini — sebelum jam tayang.
+    // Validasi format per provider — semuanya harus tertangkap SEBELUM
+    // jam tayang. Caption yang lolos pembuatan (dipotong per capability
+    // sasaran asal) bisa menjadi terlalu panjang bila sasaran berganti
+    // konteks, mis. lewat grup multi-target di masa depan.
+    if (existing.caption.length > capability.maxCaption) {
+      throw new PostDomainError("POST_CAPTION_TOO_LONG");
+    }
+    if (capability.mediaRequired && existing.media.length === 0) {
+      throw new PostDomainError("POST_MEDIA_REQUIRED");
+    }
+    if (existing.media.length > capability.maxMedia) {
+      throw new PostDomainError("POST_MEDIA_TOO_MANY");
+    }
     if (
-      existing.media.length > 1 &&
-      existing.media.some((item) => item.kind === "document")
+      (!capability.supportsVideo &&
+        existing.media.some((item) => item.kind === "video")) ||
+      (!capability.supportsDocuments &&
+        existing.media.some((item) => item.kind === "document"))
     ) {
-      throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+      throw new PostDomainError("POST_MEDIA_KIND_UNSUPPORTED");
+    }
+    if (existing.media.length > 1) {
+      // Album bukan hak semua provider, dan dokumen di tengah album
+      // ditolak Bot API Telegram — keduanya ditolak di sini, bukan
+      // saat provider menjawab error di jam tayang.
+      if (!capability.supportsAlbum) {
+        throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+      }
+      if (
+        !capability.supportsAlbumDocuments &&
+        existing.media.some((item) => item.kind === "document")
+      ) {
+        throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+      }
     }
 
     const now = new Date();

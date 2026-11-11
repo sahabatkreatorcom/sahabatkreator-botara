@@ -135,6 +135,11 @@ describe("gerbang isi: yang tidak boleh sampai ke antrean", () => {
     ).rejects.toMatchObject({ code: "POST_EMPTY" });
   });
 
+  it("caption dipotong menurut capability provider sasaran (telegram 1024), bukan konstanta global", async () => {
+    const post = await draft({ caption: "x".repeat(1500) });
+    expect(post.caption).toHaveLength(1024);
+  });
+
   it("menolak album yang mencampur dokumen dengan foto", async () => {
     const post = await draft({ mediaIds: [MEDIA_PHOTO, MEDIA_DOC] });
     await expect(
