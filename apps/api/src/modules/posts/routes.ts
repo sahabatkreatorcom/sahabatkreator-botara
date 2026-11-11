@@ -18,9 +18,12 @@ import {
   createPost,
   createPostGroup,
   deletePost,
+  duplicatePost,
   getPost,
   listPostTargets,
   listPosts,
+  releaseStuckPost,
+  retryPost,
   schedulePost,
   updatePost,
   type PostErrorCode,
@@ -40,6 +43,9 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   PATCH  /tenants/:tenantId/posts/:id            edit (draft saja)
  *   DELETE /tenants/:tenantId/posts/:id            hapus (draft/cancelled)
  *   POST   /tenants/:tenantId/posts/:id/schedule   jadwalkan / terbitkan sekarang
+ *   POST   /tenants/:tenantId/posts/:id/retry      jadwalkan ulang post gagal (manual)
+ *   POST   /tenants/:tenantId/posts/:id/release-stuck  publishing macet → failed (manual)
+ *   POST   /tenants/:tenantId/posts/:id/duplicate  duplikat menjadi draft baru
  *   POST   /tenants/:tenantId/posts/:id/cancel     batalkan
  *
  * Penerbitan BUKAN di sini: `schedule` menulis event outbox
@@ -86,6 +92,8 @@ const ERROR_STATUS: Record<PostErrorCode, 400 | 404 | 409 | 422> = {
   POST_NOT_EDITABLE: 409,
   POST_NOT_SCHEDULABLE: 409,
   POST_NOT_CANCELLABLE: 409,
+  POST_NOT_RETRYABLE: 409,
+  POST_NOT_PUBLISHING: 409,
   POST_EMPTY: 422,
   POST_CAPTION_TOO_LONG: 422,
   POST_MEDIA_REQUIRED: 422,
@@ -115,6 +123,9 @@ export function createPostsRoutes(bundle: AuthBundle | null) {
     app.patch(`${base}/:id`, unavailable);
     app.delete(`${base}/:id`, unavailable);
     app.post(`${base}/:id/schedule`, unavailable);
+    app.post(`${base}/:id/retry`, unavailable);
+    app.post(`${base}/:id/release-stuck`, unavailable);
+    app.post(`${base}/:id/duplicate`, unavailable);
     app.post(`${base}/:id/cancel`, unavailable);
     return app;
   }
@@ -343,6 +354,77 @@ export function createPostsRoutes(bundle: AuthBundle | null) {
           : null,
       });
       return c.json(PostSchema.parse(serializePost(result.post)));
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Jadwalkan ulang post gagal (retry manual) ---------------------------
+  // Bentuk body sama persis dengan /schedule (scheduledAt opsional =
+  // terbitkan sekarang), karena di core keduanya memang satu operasi
+  // penjadwalan dengan gerbang status yang berbeda.
+  app.post(`${base}/:id/retry`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    let json: unknown = {};
+    try {
+      const text = await c.req.text();
+      json = text.trim().length > 0 ? JSON.parse(text) : {};
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid JSON body");
+    }
+    const parsed = SchedulePostRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid schedule payload");
+    }
+    try {
+      const result = await retryPost(bundle.db, {
+        tenantId: g.tenant.id,
+        userId: g.appUser.id,
+        postId,
+        scheduledAt: parsed.data.scheduledAt
+          ? new Date(parsed.data.scheduledAt)
+          : null,
+      });
+      return c.json(PostSchema.parse(serializePost(result.post)));
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Bebaskan post macet di publishing -----------------------------------
+  app.post(`${base}/:id/release-stuck`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    try {
+      const post = await releaseStuckPost(bundle.db, {
+        tenantId: g.tenant.id,
+        userId: g.appUser.id,
+        postId,
+      });
+      return c.json(PostSchema.parse(serializePost(post)));
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Duplikat menjadi draft baru ------------------------------------------
+  app.post(`${base}/:id/duplicate`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    try {
+      const post = await duplicatePost(bundle.db, {
+        tenantId: g.tenant.id,
+        userId: g.appUser.id,
+        postId,
+      });
+      return c.json(PostSchema.parse(serializePost(post)), 201);
     } catch (err) {
       return domainError(c, err);
     }

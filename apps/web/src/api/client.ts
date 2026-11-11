@@ -23,7 +23,9 @@ import type {
   BroadcastRecipientListResponse,
   BroadcastResponse,
   CreateBroadcastRequest,
+  CreatePostGroupRequest,
   CreatePostRequest,
+  PostGroupResponse,
   PostListResponse,
   PostResponse,
   PostStatus,
@@ -1712,6 +1714,44 @@ export const api = {
     cancel(tenantId: string, postId: string): Promise<PostResponse> {
       return request<PostResponse>(
         `/api/tenants/${tenantId}/posts/${postId}/cancel`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** Buat grup multi-target: satu konten induk → N draft (Gelombang 0). */
+    createGroup(
+      tenantId: string,
+      input: CreatePostGroupRequest,
+    ): Promise<PostGroupResponse> {
+      return request<PostGroupResponse>(
+        `/api/tenants/${tenantId}/posts/group`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** Jadwalkan ulang post gagal — manual, bukan auto-retry (Gelombang 0). */
+    retry(
+      tenantId: string,
+      postId: string,
+      scheduledAt?: string | null,
+    ): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/retry`,
+        {
+          method: "POST",
+          body: JSON.stringify(scheduledAt ? { scheduledAt } : {}),
+        },
+      );
+    },
+    /** Bebaskan post macet di publishing → failed publish_outcome_unknown. */
+    releaseStuck(tenantId: string, postId: string): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/release-stuck`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** Duplikat post menjadi draft baru (jadwal tidak ikut disalin). */
+    duplicate(tenantId: string, postId: string): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/duplicate`,
         { method: "POST", body: JSON.stringify({}) },
       );
     },

@@ -59,6 +59,8 @@ export type PostErrorCode =
   | "POST_NOT_EDITABLE"
   | "POST_NOT_SCHEDULABLE"
   | "POST_NOT_CANCELLABLE"
+  | "POST_NOT_RETRYABLE"
+  | "POST_NOT_PUBLISHING"
   | "POST_EMPTY"
   | "POST_CAPTION_TOO_LONG"
   | "POST_MEDIA_REQUIRED"
@@ -678,6 +680,65 @@ export async function deletePost(
  * dengan kolom `posts.scheduled_at` sebelum mengirim: job lama yang masih
  * hidup setelah penjadwalan ulang tidak boleh menerbitkan lebih awal.
  */
+/**
+ * Semua pemeriksaan isi yang harus lolos SEBELUM sebuah post boleh
+ * memegang jam tayang: gerbang provider (capability), kekosongan, dan
+ * kesesuaian format per provider. Dipakai bersama oleh penjadwalan
+ * pertama dan penjadwalan ulang manual (retry) — post yang gagal lalu
+ * dicoba lagi tidak boleh melewati gerbang yang lebih longgar daripada
+ * post yang baru pertama dijadwalkan.
+ */
+function assertPostContentSchedulable(existing: PostRecord): void {
+  // Gerbang provider membaca capability (Gelombang 0), menggantikan
+  // pemeriksaan keras `provider !== "telegram"`: provider tanpa
+  // PublisherAdapter terdaftar tetap ditolak dengan kode yang sama.
+  const capability = capabilityFor(existing.target.provider);
+  if (!capability.publishSupported) {
+    throw new PostDomainError("POST_TARGET_NOT_FOUND");
+  }
+  if (!existing.target.providerChatId) {
+    throw new PostDomainError("POST_TARGET_NOT_FOUND");
+  }
+  if (existing.caption.trim().length === 0 && existing.media.length === 0) {
+    throw new PostDomainError("POST_EMPTY");
+  }
+  // Validasi format per provider — semuanya harus tertangkap SEBELUM
+  // jam tayang. Caption yang lolos pembuatan (dipotong per capability
+  // sasaran asal) bisa menjadi terlalu panjang bila sasaran berganti
+  // konteks, mis. lewat grup multi-target di masa depan.
+  if (existing.caption.length > capability.maxCaption) {
+    throw new PostDomainError("POST_CAPTION_TOO_LONG");
+  }
+  if (capability.mediaRequired && existing.media.length === 0) {
+    throw new PostDomainError("POST_MEDIA_REQUIRED");
+  }
+  if (existing.media.length > capability.maxMedia) {
+    throw new PostDomainError("POST_MEDIA_TOO_MANY");
+  }
+  if (
+    (!capability.supportsVideo &&
+      existing.media.some((item) => item.kind === "video")) ||
+    (!capability.supportsDocuments &&
+      existing.media.some((item) => item.kind === "document"))
+  ) {
+    throw new PostDomainError("POST_MEDIA_KIND_UNSUPPORTED");
+  }
+  if (existing.media.length > 1) {
+    // Album bukan hak semua provider, dan dokumen di tengah album
+    // ditolak Bot API Telegram — keduanya ditolak di sini, bukan
+    // saat provider menjawab error di jam tayang.
+    if (!capability.supportsAlbum) {
+      throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+    }
+    if (
+      !capability.supportsAlbumDocuments &&
+      existing.media.some((item) => item.kind === "document")
+    ) {
+      throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+    }
+  }
+}
+
 export async function schedulePost(
   db: Database,
   input: {
@@ -693,55 +754,7 @@ export async function schedulePost(
     if (existing.status !== "draft" && existing.status !== "scheduled") {
       throw new PostDomainError("POST_NOT_SCHEDULABLE");
     }
-    // Gerbang provider sekarang membaca capability (Gelombang 0),
-    // menggantikan pemeriksaan keras `provider !== "telegram"`:
-    // provider tanpa PublisherAdapter terdaftar tetap ditolak dengan
-    // kode yang sama seperti sebelumnya.
-    const capability = capabilityFor(existing.target.provider);
-    if (!capability.publishSupported) {
-      throw new PostDomainError("POST_TARGET_NOT_FOUND");
-    }
-    if (!existing.target.providerChatId) {
-      throw new PostDomainError("POST_TARGET_NOT_FOUND");
-    }
-    if (existing.caption.trim().length === 0 && existing.media.length === 0) {
-      throw new PostDomainError("POST_EMPTY");
-    }
-    // Validasi format per provider — semuanya harus tertangkap SEBELUM
-    // jam tayang. Caption yang lolos pembuatan (dipotong per capability
-    // sasaran asal) bisa menjadi terlalu panjang bila sasaran berganti
-    // konteks, mis. lewat grup multi-target di masa depan.
-    if (existing.caption.length > capability.maxCaption) {
-      throw new PostDomainError("POST_CAPTION_TOO_LONG");
-    }
-    if (capability.mediaRequired && existing.media.length === 0) {
-      throw new PostDomainError("POST_MEDIA_REQUIRED");
-    }
-    if (existing.media.length > capability.maxMedia) {
-      throw new PostDomainError("POST_MEDIA_TOO_MANY");
-    }
-    if (
-      (!capability.supportsVideo &&
-        existing.media.some((item) => item.kind === "video")) ||
-      (!capability.supportsDocuments &&
-        existing.media.some((item) => item.kind === "document"))
-    ) {
-      throw new PostDomainError("POST_MEDIA_KIND_UNSUPPORTED");
-    }
-    if (existing.media.length > 1) {
-      // Album bukan hak semua provider, dan dokumen di tengah album
-      // ditolak Bot API Telegram — keduanya ditolak di sini, bukan
-      // saat provider menjawab error di jam tayang.
-      if (!capability.supportsAlbum) {
-        throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
-      }
-      if (
-        !capability.supportsAlbumDocuments &&
-        existing.media.some((item) => item.kind === "document")
-      ) {
-        throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
-      }
-    }
+    assertPostContentSchedulable(existing);
 
     const now = new Date();
     const requested =
@@ -777,6 +790,197 @@ export async function schedulePost(
     const scheduled = await loadPost(tx, input.tenantId, input.postId);
     if (!scheduled) throw new PostDomainError("POST_NOT_FOUND");
     return { kind: "scheduled" as const, post: scheduled, dispatchAt: requested };
+  });
+}
+
+/**
+ * Jadwalkan ulang post yang GAGAL — secara manual, oleh manusia, satu
+ * kali per tindakan (Gelombang 0, butir 5).
+ *
+ * Ini BUKAN auto-retry dan tidak mengubah filosofi attempts-1 Fase 23:
+ * sistem tidak pernah mencoba ulang sendiri, karena kegagalan setelah
+ * provider menerima kiriman tidak bisa dibedakan dari keberhasilan
+ * yang laporannya hilang. Yang berubah hanyalah bahwa operator tidak
+ * lagi harus membuat post baru dari nol untuk mencoba lagi: post yang
+ * sama divalidasi ulang persis seperti penjadwalan pertama (gerbang
+ * yang sama), catatan errornya dibersihkan, dan tindakannya teraudit
+ * sebagai `post.retried` dengan kode error sebelumnya ikut tercatat.
+ *
+ * Guard status di WHERE adalah pertahanan terhadap balapan: dua klik
+ * retry bersamaan tidak boleh menghasilkan dua event publish_due.
+ */
+export async function retryPost(
+  db: Database,
+  input: {
+    tenantId: string;
+    userId: string;
+    postId: string;
+    scheduledAt?: Date | null;
+  },
+): Promise<{ kind: "scheduled"; post: PostRecord; dispatchAt: Date }> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const existing = await loadPost(tx, input.tenantId, input.postId);
+    if (!existing) throw new PostDomainError("POST_NOT_FOUND");
+    if (existing.status !== "failed") {
+      throw new PostDomainError("POST_NOT_RETRYABLE");
+    }
+    assertPostContentSchedulable(existing);
+
+    const now = new Date();
+    const requested =
+      input.scheduledAt && input.scheduledAt.getTime() > now.getTime()
+        ? input.scheduledAt
+        : now;
+
+    const updated = await tx
+      .update(posts)
+      .set({
+        status: "scheduled",
+        scheduledAt: requested,
+        errorCode: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(posts.tenantId, input.tenantId),
+          eq(posts.id, input.postId),
+          eq(posts.status, "failed"),
+        ),
+      )
+      .returning({ id: posts.id });
+    if (updated.length === 0) {
+      throw new PostDomainError("POST_NOT_RETRYABLE");
+    }
+
+    await tx.insert(outboxEvents).values({
+      tenantId: input.tenantId,
+      type: "post.publish_due",
+      payload: {
+        postId: input.postId,
+        scheduledAt: requested.toISOString(),
+      },
+    });
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "post.retried",
+      meta: {
+        postId: input.postId,
+        scheduledAt: requested.toISOString(),
+        previousErrorCode: existing.errorCode,
+      },
+    });
+
+    const retried = await loadPost(tx, input.tenantId, input.postId);
+    if (!retried) throw new PostDomainError("POST_NOT_FOUND");
+    return { kind: "scheduled" as const, post: retried, dispatchAt: requested };
+  });
+}
+
+/**
+ * Bebaskan post yang macet di `publishing` (Gelombang 0, butir 5).
+ *
+ * Post bisa tertinggal di status ini bila worker mati di antara klaim
+ * dan panggilan provider, atau sesudah provider menerima kiriman
+ * tetapi sebelum hasilnya tercatat. Pada titik itu sistem TIDAK TAHU
+ * apakah postingan sudah tayang — dan tidak akan pernah tahu dari
+ * dalam. Karena itu aksi ini secara eksplisit BUKAN retry: status
+ * dipindah ke `failed` dengan kode `publish_outcome_unknown` — kode
+ * itulah penjelasan untuk operator (UI menerjemahkannya menjadi
+ * "periksa linimasa sebelum menjadwalkan ulang") — supaya manusia
+ * yang memeriksa linimasa channel yang memutuskan langkah berikutnya
+ * (jadwalkan ulang lewat retryPost, atau biarkan). Teraudit sebagai
+ * `post.publish_released`.
+ */
+export async function releaseStuckPost(
+  db: Database,
+  input: { tenantId: string; userId: string; postId: string },
+): Promise<PostRecord> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const existing = await loadPost(tx, input.tenantId, input.postId);
+    if (!existing) throw new PostDomainError("POST_NOT_FOUND");
+    if (existing.status !== "publishing") {
+      throw new PostDomainError("POST_NOT_PUBLISHING");
+    }
+
+    const updated = await tx
+      .update(posts)
+      .set({
+        status: "failed",
+        errorCode: "publish_outcome_unknown",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(posts.tenantId, input.tenantId),
+          eq(posts.id, input.postId),
+          eq(posts.status, "publishing"),
+        ),
+      )
+      .returning({ id: posts.id });
+    if (updated.length === 0) {
+      throw new PostDomainError("POST_NOT_PUBLISHING");
+    }
+
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "post.publish_released",
+      meta: { postId: input.postId, fromStatus: "publishing" },
+    });
+
+    const released = await loadPost(tx, input.tenantId, input.postId);
+    if (!released) throw new PostDomainError("POST_NOT_FOUND");
+    return released;
+  });
+}
+
+/**
+ * Duplikat post menjadi draft BARU (Gelombang 0, butir 5): judul,
+ * caption, media, dan sasaran disalin; jadwal dan hasil publikasi
+ * TIDAK — duplikat selalu lahir sebagai draft yang belum terjadwal,
+ * apa pun status sumbernya.
+ *
+ * Keanggotaan grup ikut disalin: menduplikat anggota kampanye berarti
+ * menambah satu kiriman lagi ke kampanye yang sama, bukan memulai
+ * kampanye baru yang mirip. Sasaran divalidasi ulang seperti pembuatan
+ * biasa — channel yang sudah putus sejak post asal dibuat menolak
+ * duplikat dengan kode yang sama seperti pembuatan baru.
+ */
+export async function duplicatePost(
+  db: Database,
+  input: { tenantId: string; userId: string; postId: string },
+): Promise<PostRecord> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const source = await loadPost(tx, input.tenantId, input.postId);
+    if (!source) throw new PostDomainError("POST_NOT_FOUND");
+    const target = await resolvePostTarget(
+      tx,
+      input.tenantId,
+      source.target.conversationId,
+    );
+    const newPostId = await insertDraftPost(tx, {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      target,
+      conversationId: source.target.conversationId,
+      groupId: source.groupId,
+      title: source.title,
+      caption: source.caption,
+      mediaIds: source.media.map((item) => item.mediaId),
+    });
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "post.duplicated",
+      meta: { postId: newPostId, sourcePostId: input.postId },
+    });
+    const created = await loadPost(tx, input.tenantId, newPostId);
+    if (!created) throw new PostDomainError("POST_NOT_FOUND");
+    return created;
   });
 }
 

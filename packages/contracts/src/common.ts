@@ -156,6 +156,8 @@ export const ErrorCodeSchema = z.enum([
   "POST_NOT_EDITABLE",
   "POST_NOT_SCHEDULABLE",
   "POST_NOT_CANCELLABLE",
+  "POST_NOT_RETRYABLE",
+  "POST_NOT_PUBLISHING",
   "POST_EMPTY",
   // Gelombang 0: validasi format per capability provider (core/posts).
   "POST_CAPTION_TOO_LONG",

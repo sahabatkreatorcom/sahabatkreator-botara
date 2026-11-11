@@ -7,11 +7,14 @@ import {
   claimPostForPublish,
   createPost,
   createPostGroup,
+  duplicatePost,
   getPost,
   getPostTargetProvider,
   listPostTargets,
   markPostFailed,
   markPostPublished,
+  releaseStuckPost,
+  retryPost,
   schedulePost,
   updatePost,
 } from "./posts";
@@ -372,6 +375,118 @@ describe("klaim: satu postingan tidak pernah terbit dua kali", () => {
     expect(published?.status).toBe("published");
     expect(published?.providerMessageId).toBe("4242");
     expect(published?.publishedAt).not.toBeNull();
+  });
+});
+
+describe("pemulihan manual: retry, bebaskan macet, duplikat (Gelombang 0)", () => {
+  /** Draft → terjadwal → ditandai gagal, seperti kegagalan nyata di worker. */
+  async function failedPost() {
+    const post = await draft({ mediaIds: [MEDIA_PHOTO] });
+    await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    await markPostFailed(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      postId: post.id,
+      errorCode: "telegram_http_400",
+    });
+    return post;
+  }
+
+  it("retry menjadwalkan ulang post gagal dan membersihkan catatan errornya", async () => {
+    const post = await failedPost();
+    const at = new Date(Date.now() + 3_600_000);
+    const result = await retryPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+      scheduledAt: at,
+    });
+    expect(result.post.status).toBe("scheduled");
+    expect(result.post.errorCode).toBeNull();
+    expect(result.post.scheduledAt!.getTime()).toBe(at.getTime());
+  });
+
+  it("retry menolak post yang tidak gagal (POST_NOT_RETRYABLE)", async () => {
+    const post = await draft();
+    await expect(
+      retryPost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: post.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_NOT_RETRYABLE" });
+  });
+
+  it("bebaskan macet: publishing → failed publish_outcome_unknown, BUKAN terjadwal ulang", async () => {
+    const post = await draft();
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    await claimPostForPublish(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      postId: post.id,
+      expectedScheduledAt: scheduled.post.scheduledAt!,
+    });
+    const released = await releaseStuckPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    expect(released.status).toBe("failed");
+    expect(released.errorCode).toBe("publish_outcome_unknown");
+    // Setelah dilepas, operator BOLEH memutuskan retry secara sadar.
+    const retried = await retryPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    expect(retried.post.status).toBe("scheduled");
+  });
+
+  it("bebaskan macet menolak post yang tidak sedang publishing", async () => {
+    const post = await draft();
+    await expect(
+      releaseStuckPost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: post.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_NOT_PUBLISHING" });
+  });
+
+  it("duplikat melahirkan draft baru: isi dan grup disalin, jadwal tidak", async () => {
+    const group = await createPostGroup(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      title: "Sumber Duplikat",
+      caption: "Isi yang akan disalin",
+      mediaIds: [MEDIA_PHOTO],
+      targets: [{ conversationId: CONV_CHANNEL }],
+    });
+    const source = group.posts[0]!;
+    await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: source.id,
+      scheduledAt: new Date(Date.now() + 3_600_000),
+    });
+    const copy = await duplicatePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: source.id,
+    });
+    expect(copy.id).not.toBe(source.id);
+    expect(copy.status).toBe("draft");
+    expect(copy.scheduledAt).toBeNull();
+    expect(copy.caption).toBe("Isi yang akan disalin");
+    expect(copy.media.map((m) => m.mediaId)).toEqual([MEDIA_PHOTO]);
+    expect(copy.groupId).toBe(group.groupId);
+    expect(copy.target.conversationId).toBe(CONV_CHANNEL);
   });
 });
 
