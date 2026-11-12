@@ -403,7 +403,7 @@ async function startAndGetState(
   assert.equal(body.clientKeyConfigured, false);
   assert.equal(body.clientSecretConfigured, false);
   assert.equal(body.clientKey, null);
-  assert.equal(body.oauthRedirectUri, "https://app.test/api/tiktok/oauth/callback");
+  assert.equal(body.oauthRedirectUri, "https://app.test/api/oauth/tiktok/callback");
 
   const start = await app.request(`/tenants/${TENANT_A}/tiktok-oauth/start`, {
     method: "POST",
@@ -449,7 +449,7 @@ let happyState = "";
   assert.equal(dialog.searchParams.get("response_type"), "code");
   assert.equal(
     dialog.searchParams.get("redirect_uri"),
-    "https://app.test/api/tiktok/oauth/callback",
+    "https://app.test/api/oauth/tiktok/callback",
   );
   happyState = dialog.searchParams.get("state")!;
   assert.ok(happyState.length > 10);
@@ -459,7 +459,7 @@ let happyState = "";
 // ---------- [3] State rusak ditolak ----------
 {
   const res = await app.request(
-    `/tiktok/oauth/callback?code=apapun&state=${happyState}x`,
+    `/oauth/tiktok/callback?code=apapun&state=${happyState}x`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -471,7 +471,7 @@ let happyState = "";
 // ---------- [4] Callback sukses → akun tersimpan + avatar + sasaran /posts ----------
 {
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/tiktok/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -484,7 +484,7 @@ let happyState = "";
   assert.equal(lastTokenForm?.get("code"), "kode-uji");
   assert.equal(
     lastTokenForm?.get("redirect_uri"),
-    "https://app.test/api/tiktok/oauth/callback",
+    "https://app.test/api/oauth/tiktok/callback",
   );
 
   const rows = await client.query<{
@@ -535,7 +535,7 @@ let happyState = "";
 
   // ---------- [5] Replay state yang sama ditolak ----------
   const replay = await app.request(
-    `/tiktok/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/tiktok/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(replay.status, 302);
   assert.ok(
@@ -549,7 +549,7 @@ let happyState = "";
 // ---------- [6] User membatalkan di dialog ----------
 {
   const res = await app.request(
-    `/tiktok/oauth/callback?error=access_denied&error_description=dibatalkan`,
+    `/oauth/tiktok/callback?error=access_denied&error_description=dibatalkan`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -562,7 +562,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -581,7 +581,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -604,7 +604,7 @@ let happyState = "";
   );
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -637,7 +637,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -664,7 +664,7 @@ let scopeRowId = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-scope&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-scope&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -705,7 +705,7 @@ let scopeRowId = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-scope-ok&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-scope-ok&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -742,7 +742,7 @@ let scopeRowId = "";
 {
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-info-tolak&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-info-tolak&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -767,7 +767,7 @@ let scopeRowId = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/tiktok/oauth/callback?code=kode-scope-cadangan&state=${encodeURIComponent(state)}`,
+    `/oauth/tiktok/callback?code=kode-scope-cadangan&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -819,6 +819,16 @@ let scopeRowId = "";
   assert.equal(body.available, true);
   assert.equal(body.clientKey, "tiktok-key-env");
   console.log("[10] tanpa panel → env fallback membuat connect tersedia: OK");
+}
+
+// ---------- [16] Path callback lama TIDAK terdaftar lagi (pemotongan bersih) ----------
+// Aturan pemilik 2026-11-12: penyeragaman URL TANPA alias — callback
+// kanonis adalah /oauth/tiktok/callback; path lama
+// /tiktok/oauth/callback harus menjawab 404.
+{
+  const res = await app.request(`/tiktok/oauth/callback?code=apapun&state=apapun`);
+  assert.equal(res.status, 404);
+  console.log("[16] path callback lama /tiktok/oauth/callback → 404 (tanpa alias): OK");
 }
 
 fake.closeAllConnections();

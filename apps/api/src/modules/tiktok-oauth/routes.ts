@@ -34,7 +34,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  * dengan TikTok" via Login Kit.
  *
  *   POST /tenants/:tenantId/tiktok-oauth/start               buat state + URL dialog
- *   GET  /tiktok/oauth/callback                              callback TUNGGAL platform (publik)
+ *   GET  /oauth/tiktok/callback                              callback TUNGGAL platform (publik)
  *   GET  /tenants/:tenantId/channels/tiktok-oauth-info       ketersediaan connect (owner/admin)
  *
  * Alur resmi TikTok Login Kit: authorize di
@@ -122,7 +122,7 @@ export function createTikTokOAuthRoutes(
     app.get("/tenants/:tenantId/channels/tiktok-oauth-info", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
-    app.get("/tiktok/oauth/callback", (c) =>
+    app.get("/oauth/tiktok/callback", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -134,7 +134,7 @@ export function createTikTokOAuthRoutes(
   });
 
   const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
-  const redirectUri = `${webBase}/api/tiktok/oauth/callback`;
+  const redirectUri = `${webBase}/api/oauth/tiktok/callback`;
 
   /** Konfigurasi OAuth efektif (panel → env). */
   async function resolveTikTokConfig() {
@@ -263,7 +263,7 @@ export function createTikTokOAuthRoutes(
   // Callback TUNGGAL (publik; identitas dari state bertanda tangan).
   // Semua kegagalan → redirect error berkode TANPA membuat akun apa pun.
   // -------------------------------------------------------------------------
-  app.get("/tiktok/oauth/callback", async (c) => {
+  app.get("/oauth/tiktok/callback", async (c) => {
     const fail = (code: string) =>
       c.redirect(`${webBase}/channels?tiktok_oauth_error=${code}`, 302);
 

@@ -152,7 +152,7 @@ function check(name: string, ok: boolean): void {
     clientKey: "key-uji",
     clientSecret: "secret-uji",
     code: "kode-uji",
-    redirectUri: "https://app.test/api/tiktok/oauth/callback",
+    redirectUri: "https://app.test/api/oauth/tiktok/callback",
   });
   check(
     "exchange code → token + refresh + open_id terpetakan",
@@ -170,7 +170,7 @@ function check(name: string, ok: boolean): void {
       form.get("client_key") === "key-uji" &&
       form.get("client_secret") === "secret-uji" &&
       form.get("code") === "kode-uji" &&
-      form.get("redirect_uri") === "https://app.test/api/tiktok/oauth/callback",
+      form.get("redirect_uri") === "https://app.test/api/oauth/tiktok/callback",
   );
   const refreshed = await client.refreshTikTokAccessToken({
     clientKey: "key-uji",

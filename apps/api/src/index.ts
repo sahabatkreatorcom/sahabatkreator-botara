@@ -617,7 +617,7 @@ routes.route(
 );
 // Modul TikTok OAuth Connect (gelombang Semua OAuth) — "Hubungkan
 // dengan TikTok" via Login Kit: start ber-state sekali pakai +
-// callback tunggal publik /tiktok/oauth/callback + info
+// callback tunggal publik /oauth/tiktok/callback + info
 // ketersediaan. Kredensial aplikasi dari Panel Admin
 // (tiktok_client_key/secret; env hanya fallback).
 routes.route(
