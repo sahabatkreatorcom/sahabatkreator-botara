@@ -32,6 +32,7 @@ import {
   pruneExpiredAuthSessions,
   pruneIntegrationLogs,
   pruneOutboxEvents,
+  processBroadcastRecurrences,
   purgeExpiredTrashedChannels,
   reconcileBroadcasts,
   recordPermanentJobFailure,
@@ -1346,6 +1347,42 @@ const broadcastReconcileTimer = setInterval(
 void broadcastReconcileTick();
 
 // ---------------------------------------------------------------------------
+// Broadcast berulang (G9): penyapu `processBroadcastRecurrences` —
+// memindai aturan yang slotnya jatuh tempo lintas tenant (lengan baca
+// system_broadcast_recurrence_scan), lalu per slot MEMBUAT broadcast
+// anak lewat jalur pembuatan + penjadwalan broadcast yang ada (event
+// outbox broadcast.dispatch_due → job dispatch → poller, persis
+// seperti broadcast manual terjadwal). Hasil tiap slot tercatat di
+// ledger kejadian aturan (created/skipped/missed + alasan). Pola
+// poller yang sama seperti reconcile: sekali saat boot lalu tiap
+// menit — cukup rapat untuk jadwal harian/mingguan/bulanan, dan
+// ambang keterlambatan core (1 jam) menjaga slot basi tidak
+// ditembakkan sesudah worker mati lama.
+const BROADCAST_RECURRENCE_INTERVAL_MS = 60_000;
+let broadcastRecurrenceRunning = false;
+async function broadcastRecurrenceTick(): Promise<void> {
+  if (broadcastRecurrenceRunning) return;
+  broadcastRecurrenceRunning = true;
+  try {
+    const result = await processBroadcastRecurrences(db);
+    if (result.created > 0 || result.skipped > 0 || result.missed > 0) {
+      console.log(
+        `[worker] broadcast berulang: ${result.rulesScanned} aturan jatuh tempo — created=${result.created} skipped=${result.skipped} missed=${result.missed} completed=${result.completed}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] broadcast berulang gagal (akan dicoba lagi):", err);
+  } finally {
+    broadcastRecurrenceRunning = false;
+  }
+}
+const broadcastRecurrenceTimer = setInterval(
+  () => void broadcastRecurrenceTick(),
+  BROADCAST_RECURRENCE_INTERVAL_MS,
+);
+void broadcastRecurrenceTick();
+
+// ---------------------------------------------------------------------------
 // Lifecycle token Meta (0010): worker harian memindai akun Meta aktif yang
 // tokennya mendekati kedaluwarsa (≤7 hari), mencoba REFRESH `tbft` untuk
 // varian refreshable (system_user_token/business_token — token Unified
@@ -1622,6 +1659,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(outboxPruneTimer);
   clearInterval(authSessionPruneTimer);
   clearInterval(broadcastReconcileTimer);
+  clearInterval(broadcastRecurrenceTimer);
   clearInterval(tokenLifecycleTimer);
   clearInterval(threadsTokenLifecycleTimer);
   clearInterval(tiktokTokenLifecycleTimer);
