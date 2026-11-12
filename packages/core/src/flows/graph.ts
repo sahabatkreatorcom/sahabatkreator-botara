@@ -97,6 +97,20 @@ export const NODE_TYPES = new Set([
   "send_ad_conversion",
 ]);
 
+/**
+ * Provider akun channel yang bisa menampung percakapan kontak untuk
+ * run pemicu webhook (G17): hanya akun PESAN. Akun publikasi murni
+ * (threads/bluesky/youtube/…) tidak punya percakapan kontak, jadi
+ * memilihnya sebagai penempatan run webhook selalu salah.
+ */
+export const FLOW_WEBHOOK_MESSAGING_PROVIDERS = [
+  "whatsapp",
+  "messenger",
+  "instagram",
+  "telegram",
+  "webchat",
+] as const;
+
 const FLOW_BRANCHES: readonly FlowBranch[] = [
   "yes",
   "no",
@@ -280,6 +294,13 @@ export interface FlowRunContextData {
   catalog?: CatalogRunState;
   /** Keadaan book_appointment (Fase 13G) selama node-nya parkir. */
   appointment?: AppointmentRunState;
+  /**
+   * Muatan pemicu webhook (G17): hanya untuk run yang lahir dari
+   * panggilan webhook masuk — payload JSON pemanggil (sudah divalidasi
+   * dasar & dibatasi ukurannya di titik masuk) + cap waktu terima.
+   * Dibaca templat mesin lewat {{payload:<path>}}.
+   */
+  webhook?: { receivedAt: string; payload: Record<string, unknown> };
   [key: string]: unknown;
 }
 
@@ -382,6 +403,23 @@ export function runContextOf(run: FlowRun): FlowRunContextData {
       listedAt: typeof appt.listedAt === "string" ? appt.listedAt : "",
     };
   }
+  const wh = raw.webhook as
+    | { receivedAt?: unknown; payload?: unknown }
+    | undefined;
+  if (
+    typeof wh !== "object" ||
+    wh === null ||
+    typeof wh.payload !== "object" ||
+    wh.payload === null ||
+    Array.isArray(wh.payload)
+  ) {
+    delete out.webhook;
+  } else {
+    out.webhook = {
+      receivedAt: typeof wh.receivedAt === "string" ? wh.receivedAt : "",
+      payload: wh.payload as Record<string, unknown>,
+    };
+  }
   return out;
 }
 
@@ -393,24 +431,64 @@ export function effectiveTriggerMessageId(run: FlowRun): string | null {
 }
 
 /**
+ * Baca nilai pada path titik ("a.b.0.c") dari payload webhook —
+ * segmen numerik menunjuk indeks array. Nilai hilang di tengah jalan
+ * → undefined (pemanggil merendernya sebagai string kosong).
+ */
+export function flowPayloadPathValue(
+  payload: unknown,
+  path: string,
+): unknown {
+  let current: unknown = payload;
+  for (const segment of path.split(".")) {
+    if (typeof current !== "object" || current === null) return undefined;
+    if (Array.isArray(current)) {
+      const idx = Number(segment);
+      if (!Number.isInteger(idx) || idx < 0) return undefined;
+      current = current[idx];
+    } else {
+      current = (current as Record<string, unknown>)[segment];
+    }
+  }
+  return current;
+}
+
+/**
  * Substitusi variabel node http_request (Fase 12A) — SENGAJA SEMPIT,
  * selaras kontrak: `{name}` → nama kontak; `{{field:<key>}}` → nilai
  * contacts.custom_fields[key] (string apa adanya; nilai non-string
  * di-JSON-kan; kunci hilang/null → string kosong). TANPA spintax —
  * payload HTTP harus deterministik. Urutan: field dulu, lalu {name}.
+ *
+ * G17: keluarga sintaks yang sama diperluas SATU anggota —
+ * `{{payload:<path.titik>}}` membaca payload pemicu webhook run ini
+ * (context.webhook.payload); untuk run non-webhook nilainya selalu
+ * string kosong. Ini BUKAN bahasa variabel kedua: fungsi, tanda
+ * kurung, dan aturan render (non-string di-JSON-kan, hilang → kosong)
+ * persis {{field:}} — hanya sumber datanya yang bertambah.
  */
 export function renderFlowHttpTemplate(
   template: string,
   contact: Contact | null,
+  extras?: { webhookPayload?: unknown },
 ): string {
   const custom = (contact?.customFields ?? {}) as Record<string, unknown>;
+  const renderValue = (value: unknown): string => {
+    if (value === undefined || value === null) return "";
+    return typeof value === "string" ? value : JSON.stringify(value);
+  };
   const withFields = template.replace(
     /\{\{field:([^}]+)\}\}/g,
-    (_match, key: string) => {
-      const value = custom[key.trim()];
-      if (value === undefined || value === null) return "";
-      return typeof value === "string" ? value : JSON.stringify(value);
-    },
+    (_match, key: string) => renderValue(custom[key.trim()]),
   );
-  return withFields.replaceAll("{name}", contact?.name ?? "");
+  const withPayload = withFields.replace(
+    /\{\{payload:([^}]+)\}\}/g,
+    (_match, path: string) =>
+      renderValue(
+        extras?.webhookPayload === undefined
+          ? undefined
+          : flowPayloadPathValue(extras.webhookPayload, path.trim()),
+      ),
+  );
+  return withPayload.replaceAll("{name}", contact?.name ?? "");
 }

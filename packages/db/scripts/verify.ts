@@ -130,7 +130,9 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 2 tabel Gelombang G16 / migrasi 0039 (ad_connections,
 //   ad_conversion_events; migrasi yang sama menambah nilai enum
 //   google_service 'ads' — bukan tabel baru)
-assert.equal(Number(tablesRes.rows[0].count), 82);
+// + 1 tabel Gelombang G17 / migrasi 0040 (flow_webhook_endpoints —
+//   kredensial pemicu webhook masuk flow, token hash-only)
+assert.equal(Number(tablesRes.rows[0].count), 83);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -325,7 +327,11 @@ const policies = await db.query<{ count: string }>(
 // 2026-11-13: migrasi 0039 (Gelombang G16 — konversi iklan) menambah
 // `ad_connections` dan `ad_conversion_events`, masing-masing dengan
 // tenant_isolation → 109.
-assert.equal(Number(policies.rows[0].count), 109);
+//
+// Migrasi 0040 (Gelombang G17 — pemicu webhook flow) menambah
+// `flow_webhook_endpoints` dengan tenant_isolation + lengan publik
+// `flow_webhook_lookup` → 111.
+assert.equal(Number(policies.rows[0].count), 111);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -341,7 +347,7 @@ await db.exec(`
     automation_steps, sequence_enrollments,
     platform_settings, profile_photos, integration_log,
     broadcasts, broadcast_recipients,
-    flows, flow_versions, flow_runs, flow_run_steps,
+    flows, flow_versions, flow_runs, flow_run_steps, flow_webhook_endpoints,
     saved_replies,
     conversation_notes,
     whatsapp_templates,
@@ -2506,8 +2512,11 @@ function oneHotVector(index: number): string {
   // 2026-11-13: migrasi 0039 (Gelombang G16 — konversi iklan)
   // menambah ad_connections & ad_conversion_events
   // (masing-masing tenant_isolation) → tabel 82, policy 109.
-  assert.equal(counts.rows[0].tables, "82");
-  assert.equal(counts.rows[0].policies, "109");
+  // 2026-11-13: migrasi 0040 (Gelombang G17 — pemicu webhook flow)
+  // menambah flow_webhook_endpoints (tenant_isolation +
+  // flow_webhook_lookup) → tabel 83, policy 111.
+  assert.equal(counts.rows[0].tables, "83");
+  assert.equal(counts.rows[0].policies, "111");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

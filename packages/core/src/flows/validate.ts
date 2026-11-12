@@ -13,9 +13,11 @@ import {
 } from "drizzle-orm";
 import {
   automations,
+  channelAccounts,
   contacts,
   dealStages,
   flows,
+  flowWebhookEndpoints,
   products,
   tenantMembers,
   type Database,
@@ -30,6 +32,7 @@ import {
   isUuidLike,
 } from "./util";
 import {
+  FLOW_WEBHOOK_MESSAGING_PROVIDERS,
   FlowBranch,
   FlowGraphData,
   FlowGraphNode,
@@ -106,8 +109,15 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
         ) {
           err("TRIGGER_PAYLOADS_REQUIRED", "Trigger postback/quick_reply membutuhkan minimal satu payload non-kosong");
         }
+      } else if (c.kind === "webhook") {
+        // G17: pemicu webhook menempatkan run pada akun channel ini —
+        // bentuk uuid ditegakkan di sini; keberadaan akun + endpoint
+        // terprovision diperiksa validasi graf penuh (butuh DB).
+        if (!isNonEmptyString(c.channelAccountId) || !isUuidLike(c.channelAccountId)) {
+          err("TRIGGER_WEBHOOK_ACCOUNT_REQUIRED", "Trigger webhook membutuhkan config.channelAccountId (uuid akun channel)");
+        }
       } else if (c.kind !== "any_message" && c.kind !== "welcome") {
-        err("TRIGGER_KIND_INVALID", "Trigger membutuhkan kind 'keyword', 'any_message', 'postback', 'quick_reply', atau 'welcome'");
+        err("TRIGGER_KIND_INVALID", "Trigger membutuhkan kind 'keyword', 'any_message', 'postback', 'quick_reply', 'welcome', atau 'webhook'");
       }
       break;
     }
@@ -1052,6 +1062,67 @@ export async function validateFlowGraph(
               `Target custom '${key}' untuk pertanyaan '${question.id}' belum dikenal workspace ini (belum ada kontak yang membawa field itu)`,
             );
           }
+        }
+      }
+    });
+  }
+
+  // G17: rujukan pemicu webhook (butuh DB) — akun channel config
+  // trigger harus akun PESAN milik tenant ini (run ditempatkan pada
+  // percakapan akun itu; akun publikasi murni tidak punya percakapan
+  // kontak), dan endpoint webhook flow HARUS sudah diprovision dari
+  // panel builder: mengaktifkan flow webhook tanpa kredensial akan
+  // melahirkan pemicu yang tidak bisa dipanggil siapa pun.
+  const webhookTrigger = triggers.find(
+    (n) => n.config.kind === "webhook",
+  );
+  if (webhookTrigger) {
+    const accountId = webhookTrigger.config.channelAccountId;
+    await withTenantDb(db, tenantId, async (tx) => {
+      if (isNonEmptyString(accountId) && isUuidLike(accountId)) {
+        const [account] = await tx
+          .select({
+            id: channelAccounts.id,
+            provider: channelAccounts.provider,
+          })
+          .from(channelAccounts)
+          .where(
+            and(
+              eq(channelAccounts.tenantId, tenantId),
+              eq(channelAccounts.id, accountId),
+            ),
+          )
+          .limit(1);
+        if (!account) {
+          err(
+            "TRIGGER_WEBHOOK_ACCOUNT_NOT_FOUND",
+            webhookTrigger.id,
+            "Akun channel pemicu webhook tidak ada di workspace ini",
+          );
+        } else if (
+          !(FLOW_WEBHOOK_MESSAGING_PROVIDERS as readonly string[]).includes(
+            account.provider,
+          )
+        ) {
+          err(
+            "TRIGGER_WEBHOOK_ACCOUNT_NOT_MESSAGING",
+            webhookTrigger.id,
+            "Akun channel pemicu webhook harus akun pesan (WhatsApp/Messenger/Instagram/Telegram/Webchat)",
+          );
+        }
+      }
+      if (options.selfFlowId) {
+        const [endpoint] = await tx
+          .select({ id: flowWebhookEndpoints.id })
+          .from(flowWebhookEndpoints)
+          .where(eq(flowWebhookEndpoints.flowId, options.selfFlowId))
+          .limit(1);
+        if (!endpoint) {
+          err(
+            "TRIGGER_WEBHOOK_NOT_PROVISIONED",
+            webhookTrigger.id,
+            "Endpoint webhook flow ini belum dibuat — buat/rotasi token dari panel pemicu di builder lebih dulu",
+          );
         }
       }
     });

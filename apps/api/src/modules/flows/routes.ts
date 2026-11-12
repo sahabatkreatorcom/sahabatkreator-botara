@@ -19,6 +19,8 @@ import {
   FlowVersionListResponseSchema,
   FlowVersionResponseSchema,
   FlowVersionRestoreResponseSchema,
+  FlowWebhookTriggerResponseSchema,
+  FlowWebhookTriggerRotateResponseSchema,
   InstantiateFlowTemplateRequestSchema,
   UpdateFlowRequestSchema,
   type FlowGraph,
@@ -30,7 +32,10 @@ import {
   createFlow,
   deactivateFlow,
   deleteFlow,
+  deleteFlowWebhookEndpoint,
   getFlow,
+  getFlowWebhookEndpoint,
+  provisionFlowWebhookEndpoint,
   getFlowExperimentResults,
   getFlowVersion,
   instantiateFlowTemplate,
@@ -77,6 +82,12 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   POST   /tenants/:tenantId/flows/:id/simulate       simulasi kering (G4) —
  *                                                      jejak + efek sebagai data,
  *                                                      tanpa satu pun tulisan
+ *   GET    /tenants/:tenantId/flows/:id/webhook-trigger
+ *                                                      keadaan endpoint webhook (G17; tanpa token)
+ *   POST   /tenants/:tenantId/flows/:id/webhook-trigger/rotate
+ *                                                      provision/rotasi token (owner/admin; token tampil SATU KALI)
+ *   DELETE /tenants/:tenantId/flows/:id/webhook-trigger
+ *                                                      hapus endpoint webhook (owner/admin)
  *
  * Eksekusi BUKAN di sini: pesan masuk dievaluasi worker
  * (keyword → flow → agent); run berjalan sebagai job `flow.step`.
@@ -163,6 +174,9 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
     app.get(`${base}/:id/versions`, unavailable);
     app.post(`${base}/:id/versions/:version/restore`, unavailable);
     app.post(`${base}/:id/simulate`, unavailable);
+    app.get(`${base}/:id/webhook-trigger`, unavailable);
+    app.post(`${base}/:id/webhook-trigger/rotate`, unavailable);
+    app.delete(`${base}/:id/webhook-trigger`, unavailable);
     return app;
   }
 
@@ -829,6 +843,64 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
           { issues: graphIssuesBody(result.issues).issues },
         );
     }
+  });
+
+  // ---- Pemicu webhook (G17) --------------------------------------------------
+  // Keadaan endpoint dibaca semua member; provision/rotasi & hapus =
+  // owner/admin (token adalah kredensial pemicu). Token terang HANYA
+  // keluar pada respons rotate — hash-only di DB, tidak ada baca ulang.
+  function serializeWebhookTrigger(
+    endpoint: Awaited<ReturnType<typeof getFlowWebhookEndpoint>>,
+  ) {
+    return FlowWebhookTriggerResponseSchema.parse({
+      configured: endpoint !== null,
+      endpointId: endpoint?.id ?? null,
+      tokenPrefix: endpoint?.tokenPrefix ?? null,
+      lastTriggeredAt: endpoint?.lastTriggeredAt?.toISOString() ?? null,
+      createdAt: endpoint?.createdAt.toISOString() ?? null,
+    });
+  }
+
+  app.get(`${base}/:id/webhook-trigger`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const id = parseUuidParam(c, "id");
+    if (!id) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const flow = await getFlow(bundle.db, { tenantId: g.tenant.id, flowId: id });
+    if (!flow) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const endpoint = await getFlowWebhookEndpoint(bundle.db, g.tenant.id, id);
+    return c.json(serializeWebhookTrigger(endpoint));
+  });
+
+  app.post(`${base}/:id/webhook-trigger/rotate`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const id = parseUuidParam(c, "id");
+    if (!id) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const result = await provisionFlowWebhookEndpoint(
+      bundle.db,
+      g.tenant.id,
+      id,
+      g.appUser.id,
+    );
+    if (!result) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    return c.json(
+      FlowWebhookTriggerRotateResponseSchema.parse({
+        ...serializeWebhookTrigger(result.endpoint),
+        token: result.token,
+      }),
+    );
+  });
+
+  app.delete(`${base}/:id/webhook-trigger`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const id = parseUuidParam(c, "id");
+    if (!id) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const flow = await getFlow(bundle.db, { tenantId: g.tenant.id, flowId: id });
+    if (!flow) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    await deleteFlowWebhookEndpoint(bundle.db, g.tenant.id, id, g.appUser.id);
+    return c.json(serializeWebhookTrigger(null));
   });
 
   return app;

@@ -65,6 +65,7 @@ import { createPostsRoutes } from "./modules/posts/routes";
 import { createWhatsAppTemplatesRoutes } from "./modules/whatsapp-templates/routes";
 import { createCommentsRoutes } from "./modules/comments/routes";
 import { createFlowsRoutes } from "./modules/flows/routes";
+import { createFlowWebhooksRoutes } from "./modules/flow-webhooks/routes";
 import { createSavedRepliesRoutes } from "./modules/saved-replies/routes";
 import { createGrowthRoutes } from "./modules/growth/routes";
 import { createSegmentsRoutes } from "./modules/segments/routes";
@@ -377,6 +378,11 @@ routes.route(
 // Modul flows (Fase 8A) — definisi flow graf /tenants/:tenantId/flows +
 // run & langkah; eksekusi oleh worker (job flow.step dari event outbox).
 routes.route("/", createFlowsRoutes(authBundle));
+// Modul flow-webhooks (G17) — titik masuk PUBLIK pemicu webhook flow:
+// POST /webhooks/flow/:endpointId (kanonis /api/webhooks/flow/...) —
+// autentikasi token hash-only per endpoint; 404 tunggal untuk
+// endpoint tak dikenal maupun token salah.
+routes.route("/", createFlowWebhooksRoutes(authBundle));
 // Modul saved-replies (Fase 9A) — macro balasan /tenants/:tenantId/saved-replies.
 routes.route("/", createSavedRepliesRoutes(authBundle));
 // Modul growth (Fase 13B) — tautan publik /tenants/:tenantId/growth-links

@@ -157,6 +157,11 @@ export function classifyFlowTrigger(
   ctx: FlowTriggerMatchContext,
 ): TriggerClass | null {
   const c = node.config;
+  // G17: pemicu webhook adalah pemicu LUAR PITA (panggilan HTTP
+  // bertoken, bukan pesan masuk) — ia TIDAK PERNAH cocok dengan pesan
+  // masuk mana pun di rantai prioritas ini. Run-nya dimulai
+  // startFlowWebhookRun (flows/webhook-trigger.ts), bukan dari sini.
+  if (c.kind === "webhook") return null;
   const signal = ctx.signal;
   if (signal?.kind === "postback") {
     if (c.kind !== "postback") return null;

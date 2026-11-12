@@ -770,6 +770,8 @@ function BuilderInner({
                   allNodes={nodes}
                   meta={meta}
                   readOnly={readOnly}
+                  tenantId={tenantId}
+                  flowId={flow.id}
                   onChange={updateNodeConfig}
                   onDelete={deleteNode}
                 />
@@ -823,6 +825,7 @@ export function FlowBuilderPage({
     products: [],
     appointmentServices: [],
     customFieldKeys: [],
+    channelAccounts: [],
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -842,6 +845,7 @@ export function FlowBuilderPage({
           appointmentServices,
           dealPipelines,
           members,
+          channelAccounts,
         ] = await Promise.all([
           api.flows.get(tenantId, flowId),
           api.automations.list(tenantId).catch(() => []),
@@ -855,6 +859,7 @@ export function FlowBuilderPage({
             .catch(() => [] as AppointmentServiceResponse[]),
           api.deals.listPipelines(tenantId).catch(() => []),
           api.team.listMembers(tenantId).catch(() => []),
+          api.channels.list(tenantId).catch(() => []),
         ]);
         if (cancelled) return;
         setFlow(flowRes);
@@ -888,6 +893,7 @@ export function FlowBuilderPage({
           products: products.filter((p) => p.isActive),
           appointmentServices: appointmentServices.filter((s) => s.isActive),
           customFieldKeys: [...customFieldKeys].sort(),
+          channelAccounts,
         });
       } catch (err) {
         if (!cancelled) setError(translateApiError(t, err));

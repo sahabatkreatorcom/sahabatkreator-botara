@@ -43,6 +43,23 @@ import { z } from "zod";
  *                   menyala untuk pesan masuk pertama kontak. Urutan
  *                   prioritas antar kelas pemicu hidup di
  *                   packages/core/src/trigger-priority.ts.
+ *                   | { kind: "webhook", channelAccountId } — G17:
+ *                   pemicu LUAR pita (bukan pesan masuk): sistem luar
+ *                   memanggil POST /api/webhooks/flow/<endpointId>
+ *                   dengan token rahasia (hash-only di
+ *                   flow_webhook_endpoints); payload JSON menentukan
+ *                   kontak sasaran (contactId | externalId | phone |
+ *                   email) pada akun channel config ini, run lahir
+ *                   TANPA pesan pemicu (trigger_message_id null) dan
+ *                   payload-nya hidup di context.webhook run —
+ *                   tersedia bagi templat mesin lewat
+ *                   {{payload:<path>}} (perluasan keluarga sintaks
+ *                   {{field:<key>}} yang sama, BUKAN bahasa variabel
+ *                   kedua). Kelas prioritasnya didokumentasikan di
+ *                   trigger-priority.ts: ia tidak bersaing memperebutkan
+ *                   pesan masuk, jadi tidak menempati kelas 0–6; gerbang
+ *                   keselamatannya yang setara adalah autentikasi token
+ *                   + gerbang opt-out kontak di titik mulai run.
  * - send_message  { text } — teks keluar `queued`, variabel {name}.
  * - condition     { predicate: "has_tag", tag }
  *                 | { predicate: "stage_equals", stage }
@@ -372,6 +389,14 @@ export const FlowTriggerConfigSchema = z.discriminatedUnion("kind", [
   }),
   // G5: pemicu pesan pertama kontak (sekali per kontak per flow).
   z.object({ kind: z.literal("welcome") }),
+  // G17: pemicu webhook masuk — akun channel tempat run ditempatkan
+  // (percakapan sasaran lahir/ditemukan pada akun ini). Keabsahan
+  // rinci (akun ada, provider pesan, endpoint sudah diprovision)
+  // ditegakkan validasi aktivasi di core.
+  z.object({
+    kind: z.literal("webhook"),
+    channelAccountId: z.string().uuid(),
+  }),
 ]);
 export type FlowTriggerConfig = z.infer<typeof FlowTriggerConfigSchema>;
 
@@ -827,6 +852,42 @@ export const FlowVersionRestoreResponseSchema = z.object({
 });
 export type FlowVersionRestoreResponse = z.infer<
   typeof FlowVersionRestoreResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// G17 — Pemicu webhook masuk (manajemen endpoint dari Flow Builder)
+// ---------------------------------------------------------------------------
+
+/**
+ * Keadaan endpoint webhook satu flow (panel pemicu di builder).
+ * `endpointId` adalah segmen URL publik — BUKAN rahasia; URL penuhnya
+ * `<base publik>/api/webhooks/flow/<endpointId>`. Token TIDAK PERNAH
+ * keluar di sini (hash-only di DB): yang tampil hanya `tokenPrefix`
+ * untuk mengenali token aktif. `configured: false` = flow belum punya
+ * endpoint (provision/rotasi membuatnya).
+ */
+export const FlowWebhookTriggerResponseSchema = z.object({
+  configured: z.boolean(),
+  endpointId: z.string().uuid().nullable(),
+  tokenPrefix: z.string().nullable(),
+  lastTriggeredAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime().nullable(),
+});
+export type FlowWebhookTriggerResponse = z.infer<
+  typeof FlowWebhookTriggerResponseSchema
+>;
+
+/**
+ * Hasil provision/rotasi: SATU-SATUNYA respons yang memuat token
+ * terang — ditampilkan sekali di builder dan tidak bisa dibaca lagi
+ * (rotasi menerbitkan token baru dan membatalkan yang lama seketika).
+ */
+export const FlowWebhookTriggerRotateResponseSchema =
+  FlowWebhookTriggerResponseSchema.extend({
+    token: z.string(),
+  });
+export type FlowWebhookTriggerRotateResponse = z.infer<
+  typeof FlowWebhookTriggerRotateResponseSchema
 >;
 
 // ---------------------------------------------------------------------------

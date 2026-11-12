@@ -1730,6 +1730,11 @@ export async function executeFlowStep(
     if (node.type === "http_request") {
       const c = node.config;
       const contact = ctxState.contact;
+      // G17: run pemicu webhook membawa payload-nya untuk keluarga
+      // templat yang sama ({{payload:<path>}}); run lain undefined.
+      const templateExtras = {
+        webhookPayload: runContextOf(run).webhook?.payload,
+      };
       const method = ["GET", "POST", "PUT", "PATCH", "DELETE"].includes(
         String(c.method),
       )
@@ -1738,6 +1743,7 @@ export async function executeFlowStep(
       const url = renderFlowHttpTemplate(
         typeof c.url === "string" ? c.url : "",
         contact,
+        templateExtras,
       );
       const headers: Record<string, string> = {};
       if (
@@ -1749,13 +1755,13 @@ export async function executeFlowStep(
           c.headers as Record<string, unknown>,
         )) {
           if (typeof v === "string") {
-            headers[k] = renderFlowHttpTemplate(v, contact);
+            headers[k] = renderFlowHttpTemplate(v, contact, templateExtras);
           }
         }
       }
       const bodyText =
         typeof c.body === "string"
-          ? renderFlowHttpTemplate(c.body, contact)
+          ? renderFlowHttpTemplate(c.body, contact, templateExtras)
           : "";
       const saveFieldRaw =
         typeof c.saveToField === "string" ? c.saveToField : "";

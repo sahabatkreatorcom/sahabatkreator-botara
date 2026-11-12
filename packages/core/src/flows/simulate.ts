@@ -214,11 +214,16 @@ function simNormalizeText(value: string): string {
  *   ketukan tombol dan dicocokkan PERSIS ke config.payloads.
  * - welcome: teks uji dianggap pesan PERTAMA kontak (itulah yang
  *   sedang diuji pemilik flow) → selalu cocok bila ada teks uji.
+ * - webhook (G17): pemicunya panggilan HTTP bertoken, bukan teks —
+ *   simulasi menganggap panggilan sudah terautentikasi & kontak
+ *   teresolusi (itulah yang diuji pemilik flow: graf SESUDAH pemicu),
+ *   jadi selalu cocok; teks uji tidak ditafsirkan sebagai payload.
  */
 function simTriggerMatches(node: FlowGraphNode, messageText: string): boolean {
   const c = node.config;
   if (c.kind === "any_message") return true;
   if (c.kind === "welcome") return true;
+  if (c.kind === "webhook") return true;
   if (c.kind === "postback" || c.kind === "quick_reply") {
     const payloads = Array.isArray(c.payloads)
       ? c.payloads.filter(isNonEmptyString)

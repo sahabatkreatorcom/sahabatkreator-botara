@@ -157,6 +157,8 @@ export {
   FLOW_MAX_STEPS,
   FLOW_GOTO_MAX_DEPTH,
   FLOW_HTTP_TIMEOUT_MS,
+  FLOW_WEBHOOK_MESSAGING_PROVIDERS,
+  flowPayloadPathValue,
   normalizeFlowGraph,
   renderFlowHttpTemplate,
   type FlowGraphData,
@@ -249,3 +251,15 @@ export {
   type FlowStepDeps,
   type ExecuteFlowStepResult,
 } from "./execute";
+export {
+  FLOW_WEBHOOK_PAYLOAD_MAX_BYTES,
+  deleteFlowWebhookEndpoint,
+  getFlowWebhookEndpoint,
+  hashFlowWebhookToken,
+  parseFlowWebhookPayload,
+  provisionFlowWebhookEndpoint,
+  resolveFlowWebhookEndpoint,
+  startFlowWebhookRun,
+  type FlowWebhookPayloadResult,
+  type StartFlowWebhookRunResult,
+} from "./webhook-trigger";

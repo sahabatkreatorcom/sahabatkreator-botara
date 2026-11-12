@@ -145,6 +145,8 @@ import type {
   FlowVersionRestoreResponse,
   FlowSimulateRequest,
   FlowSimulateResponse,
+  FlowWebhookTriggerResponse,
+  FlowWebhookTriggerRotateResponse,
   CreateKbDocumentRequest,
   CreatePaymentLinkRequest,
   CreateProductRequest,
@@ -3027,6 +3029,45 @@ export const api = {
       return request<FlowSimulateResponse>(
         `/api/tenants/${tenantId}/flows/${flowId}/simulate`,
         { method: "POST", body: JSON.stringify(body) },
+      );
+    },
+    /**
+     * GET .../flows/:id/webhook-trigger — keadaan endpoint pemicu
+     * webhook (G17): apakah sudah dibuat, awalan token, kapan terakhir
+     * dipicu. Token terang TIDAK pernah keluar dari sini.
+     */
+    getWebhookTrigger(
+      tenantId: string,
+      flowId: string,
+    ): Promise<FlowWebhookTriggerResponse> {
+      return request<FlowWebhookTriggerResponse>(
+        `/api/tenants/${tenantId}/flows/${flowId}/webhook-trigger`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * POST .../flows/:id/webhook-trigger/rotate — provision/rotasi
+     * token endpoint webhook (owner/admin). Respons adalah SATU-SATUNYA
+     * tempat token terang tampil; rotasi membatalkan token lama
+     * seketika.
+     */
+    rotateWebhookTrigger(
+      tenantId: string,
+      flowId: string,
+    ): Promise<FlowWebhookTriggerRotateResponse> {
+      return request<FlowWebhookTriggerRotateResponse>(
+        `/api/tenants/${tenantId}/flows/${flowId}/webhook-trigger/rotate`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** DELETE .../flows/:id/webhook-trigger — hapus endpoint (owner/admin). */
+    deleteWebhookTrigger(
+      tenantId: string,
+      flowId: string,
+    ): Promise<FlowWebhookTriggerResponse> {
+      return request<FlowWebhookTriggerResponse>(
+        `/api/tenants/${tenantId}/flows/${flowId}/webhook-trigger`,
+        { method: "DELETE" },
       );
     },
     /** POST .../flows/:id/deactivate — aktif → draf (bisa diedit lagi). */

@@ -335,3 +335,56 @@ export type FlowExperimentAssignment =
   typeof flowExperimentAssignments.$inferSelect;
 export type NewFlowExperimentAssignment =
   typeof flowExperimentAssignments.$inferInsert;
+
+/**
+ * Endpoint webhook MASUK pemicu flow (G17 butir 1): SATU baris per flow
+ * yang trigger-nya berjenis `webhook`. `id` baris adalah segmen URL
+ * publik (`POST /api/webhooks/flow/:id`) — ia BUKAN rahasia; rahasianya
+ * adalah token yang hanya disimpan sebagai HASH SHA-256 hex di
+ * `token_hash` (pola api_keys: hash menentukan baris, nilai terang
+ * tidak pernah tersimpan dan hanya ditampilkan SATU KALI saat
+ * provision/rotasi). Pencarian publik berjalan lewat lengan RLS sempit
+ * `flow_webhook_lookup` (migrasi 0040): transaksi men-set
+ * `app.flow_webhook_token_hash` ke hash token yang disodorkan pemanggil
+ * dan policy hanya membuka baris yang hash-nya sama persis — token
+ * salah berarti NOL baris terlihat, jadi endpoint publik menjawab 404
+ * yang sama untuk "endpoint tidak ada" dan "token salah" (keberadaan
+ * flow tidak bocor). `token_prefix` (awalan token, bukan rahasia)
+ * ditampilkan panel builder agar operator bisa mengenali token yang
+ * sedang aktif. `last_triggered_at` dicap setiap pemanggilan sah.
+ * Trigger webhook memakai AKUN channel dari config node trigger
+ * (`channelAccountId`) untuk menempatkan run-nya — baris ini murni
+ * kredensial + penunjuk flow.
+ */
+export const flowWebhookEndpoints = pgTable(
+  "flow_webhook_endpoints",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    flowId: uuid("flow_id")
+      .notNull()
+      .references(() => flows.id, { onDelete: "cascade" }),
+    /** Hash SHA-256 hex token pemanggil — nilai terang TIDAK PERNAH disimpan. */
+    tokenHash: varchar("token_hash", { length: 64 }).notNull(),
+    /** Awalan token untuk tampilan panel (bukan rahasia). */
+    tokenPrefix: varchar("token_prefix", { length: 16 }).notNull(),
+    /** Cap pemanggilan sah terakhir; NULL = belum pernah dipanggil. */
+    lastTriggeredAt: timestamp("last_triggered_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flow_webhook_endpoints_flow_unique").on(t.flowId),
+    uniqueIndex("flow_webhook_endpoints_token_hash_unique").on(t.tokenHash),
+    index("flow_webhook_endpoints_tenant_id_idx").on(t.tenantId),
+  ],
+);
+
+export type FlowWebhookEndpoint = typeof flowWebhookEndpoints.$inferSelect;
+export type NewFlowWebhookEndpoint = typeof flowWebhookEndpoints.$inferInsert;

@@ -131,6 +131,11 @@ export const ErrorCodeSchema = z.enum([
   // menimpa draft itu diam-diam. Pengguna harus mengaktifkan draft
   // dulu (yang menyimpannya sebagai versi) sebelum memulihkan → 409.
   "FLOW_RESTORE_DIRTY_DRAFT",
+  "FLOW_NOT_ACTIVE",
+  "FLOW_TRIGGER_CHANGED",
+  "FLOW_CHANNEL_MISSING",
+  "WEBHOOK_PAYLOAD_INVALID",
+  "WEBHOOK_CONTACT_UNRESOLVED",
   // Fase 12C: lampiran berkas KB — berkas tanpa teks yang bisa
   // diekstrak (PDF hasil pindaian / berkas rusak) → 422 dan dokumen
   // TIDAK disimpan; tipe di luar PDF/TXT/MD → 422; ukuran di atas

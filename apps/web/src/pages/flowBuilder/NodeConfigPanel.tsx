@@ -6,8 +6,10 @@
  * memecahnya per tipe akan menyebarkan satu kontrak ke belasan berkas
  * tanpa memisahkan tanggung jawab apa pun.
  */
-import { META_STANDARD_EVENT_NAMES, type AppointmentServiceResponse, type AutomationResponse, type FlowResponse, type ProductResponse, type TeamMemberResponse } from "@sahabat-kreator/contracts";
-import { useMemo } from "react";
+import { META_STANDARD_EVENT_NAMES, type AppointmentServiceResponse, type AutomationResponse, type ChannelAccountResponse, type FlowResponse, type FlowWebhookTriggerResponse, type ProductResponse, type TeamMemberResponse } from "@sahabat-kreator/contracts";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../../api/client";
+import { translateApiError } from "../../api/errorText";
 import { FLOW_NODE_LABEL_KEYS } from "../../flows/graphModel";
 import { CUSTOM_FIELD_OPTION_LABEL, KNOWN_STAGES, stageLabel } from "./graph";
 import { type FlowRfNode, type Translate } from "./types";
@@ -34,6 +36,8 @@ export interface TenantMeta {
   selfFlow: { id: string; name: string } | null;
   /** Produk aktif tenant (pemilih send_payment_link). */
   products: ProductResponse[];
+  /** Akun channel tenant (pemilih akun penampung run pemicu webhook, G17). */
+  channelAccounts: ChannelAccountResponse[];
   /** Layanan janji temu AKTIF tenant (pemilih book_appointment, Fase 13G). */
   appointmentServices: AppointmentServiceResponse[];
   /**
@@ -52,6 +56,9 @@ export interface NodeConfigPanelProps {
   allNodes: FlowRfNode[];
   meta: TenantMeta;
   readOnly: boolean;
+  /** Konteks flow untuk panel yang bicara ke API per-flow (webhook G17). */
+  tenantId: string;
+  flowId: string;
   onChange: (nodeId: string, config: Record<string, unknown>) => void;
   onDelete: (nodeId: string) => void;
 }
@@ -67,6 +74,8 @@ export function NodeConfigPanel({
   allNodes,
   meta,
   readOnly,
+  tenantId,
+  flowId,
   onChange,
   onDelete,
 }: NodeConfigPanelProps) {
@@ -113,6 +122,7 @@ export function NodeConfigPanel({
                   ["postback", "flows.triggerKindPostback"],
                   ["quick_reply", "flows.triggerKindQuickReply"],
                   ["welcome", "flows.triggerKindWelcome"],
+                  ["webhook", "flows.triggerKindWebhook"],
                 ] as const
               ).map(([kind, key]) => (
                 <label
@@ -147,7 +157,15 @@ export function NodeConfigPanel({
                                   ? config.payloads
                                   : [],
                               }
-                            : { kind },
+                            : kind === "webhook"
+                              ? {
+                                  kind,
+                                  channelAccountId:
+                                    typeof config.channelAccountId === "string"
+                                      ? config.channelAccountId
+                                      : "",
+                                }
+                              : { kind },
                       )
                     }
                   />
@@ -191,6 +209,47 @@ export function NodeConfigPanel({
             <p className="text-xs text-muted">
               {t("flows.triggerWelcomeHint")}
             </p>
+          ) : null}
+          {config.kind === "webhook" ? (
+            <>
+              <div>
+                <label className={labelClass} htmlFor="cfg-webhook-account">
+                  {t("flows.triggerWebhookAccountLabel")}
+                </label>
+                <select
+                  id="cfg-webhook-account"
+                  className={inputClass}
+                  disabled={readOnly}
+                  value={str(config.channelAccountId)}
+                  onChange={(e) => set({ channelAccountId: e.target.value })}
+                >
+                  <option value="">—</option>
+                  {meta.channelAccounts
+                    .filter((a) =>
+                      ["whatsapp", "messenger", "instagram", "telegram", "webchat"].includes(
+                        a.provider,
+                      ),
+                    )
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.displayName} ({a.provider})
+                      </option>
+                    ))}
+                </select>
+                <p className="mt-1 text-xs text-muted">
+                  {t("flows.triggerWebhookAccountHint")}
+                </p>
+              </div>
+              <p className="text-xs text-muted">
+                {t("flows.triggerWebhookPayloadHint")}
+              </p>
+              <WebhookTriggerPanel
+                t={t}
+                tenantId={tenantId}
+                flowId={flowId}
+                readOnly={readOnly}
+              />
+            </>
           ) : null}
           {config.kind === undefined || config.kind === "keyword" ? (
             <>
@@ -2041,3 +2100,151 @@ export function NodeConfigPanel({
 }
 
 // ---------------------------------------------------------------------------
+
+/**
+ * Panel endpoint webhook pemicu (G17): menampilkan URL panggilan +
+ * keadaan token, dan aksi provision/rotasi/hapus. Token terang hanya
+ * tampil SEKALI di sini tepat sesudah rotasi (respons API adalah
+ * satu-satunya tempat token keluar; server menyimpan hash saja).
+ * Aksi token dibatasi peran oleh server (owner/admin); panel
+ * menyembunyikan tombol saat readOnly.
+ */
+function WebhookTriggerPanel({
+  t,
+  tenantId,
+  flowId,
+  readOnly,
+}: {
+  t: Translate;
+  tenantId: string;
+  flowId: string;
+  readOnly: boolean;
+}) {
+  const [state, setState] = useState<FlowWebhookTriggerResponse | null>(null);
+  const [freshToken, setFreshToken] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .flows.getWebhookTrigger(tenantId, flowId)
+      .then((res) => {
+        if (!cancelled) setState(res);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(translateApiError(t, err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, flowId, t]);
+
+  const url =
+    state?.endpointId && typeof window !== "undefined"
+      ? `${window.location.origin}/api/webhooks/flow/${state.endpointId}`
+      : null;
+
+  const rotate = async () => {
+    if (state?.configured && !window.confirm(t("flows.triggerWebhookRotateConfirm"))) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.flows.rotateWebhookTrigger(tenantId, flowId);
+      setState(res);
+      setFreshToken(res.token);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(t("flows.triggerWebhookDeleteConfirm"))) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await api.flows.deleteWebhookTrigger(tenantId, flowId);
+      setState(res);
+      setFreshToken(null);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border border-line bg-surface-2 p-3">
+      <h4 className="text-sm font-semibold text-ink">
+        {t("flows.triggerWebhookPanelTitle")}
+      </h4>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
+      {state && !state.configured ? (
+        <p className="text-xs text-muted">
+          {t("flows.triggerWebhookNotConfigured")}
+        </p>
+      ) : null}
+      {url ? (
+        <div>
+          <span className={labelClass}>{t("flows.triggerWebhookUrlLabel")}</span>
+          <input className={inputClass} readOnly value={url} />
+        </div>
+      ) : null}
+      {state?.configured ? (
+        <p className="text-xs text-muted">
+          {t("flows.triggerWebhookPrefixLabel")}:{" "}
+          <span className="font-mono">{state.tokenPrefix}…</span> ·{" "}
+          {t("flows.triggerWebhookLastLabel")}:{" "}
+          {state.lastTriggeredAt
+            ? new Date(state.lastTriggeredAt).toLocaleString()
+            : t("flows.triggerWebhookNever")}
+        </p>
+      ) : null}
+      {freshToken ? (
+        <div>
+          <label className={labelClass} htmlFor="cfg-webhook-token">
+            {t("flows.triggerWebhookTokenLabel")}
+          </label>
+          <input
+            id="cfg-webhook-token"
+            className={inputClass}
+            readOnly
+            value={freshToken}
+            onFocus={(e) => e.target.select()}
+          />
+          <p className="mt-1 text-xs text-muted">
+            {t("flows.triggerWebhookTokenHint")}
+          </p>
+        </div>
+      ) : null}
+      {!readOnly ? (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={busy || !state}
+            onClick={() => void rotate()}
+            className="rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface"
+          >
+            {state?.configured
+              ? t("flows.triggerWebhookRotate")
+              : t("flows.triggerWebhookCreate")}
+          </button>
+          {state?.configured ? (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void remove()}
+              className="rounded-lg border border-danger px-2.5 py-1 text-xs font-medium text-danger hover:bg-danger/10"
+            >
+              {t("flows.triggerWebhookDelete")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}

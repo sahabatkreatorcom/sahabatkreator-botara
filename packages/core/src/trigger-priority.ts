@@ -72,6 +72,20 @@
  *    run dan tidak ada tindakan consent (kontrak worker yang sudah
  *    ada), dan tidak pernah untuk sinyal postback (kelas 1).
  *
+ * DI LUAR RANTAI — PEMICU WEBHOOK (G17): trigger flow berjenis
+ * `webhook` BUKAN kelas pemicu pesan masuk dan tidak menempati nomor
+ * di urutan di atas: tidak ada pesan yang diperebutkan (pemicunya
+ * panggilan HTTP bertoken dari sistem luar ke
+ * /api/webhooks/flow/<endpointId>), jadi tidak ada penekanan antar
+ * kelas yang berlaku. `classifyFlowTrigger` mengembalikan null untuk
+ * kind ini pada pesan apa pun. Yang berlaku sebagai padanan lapisan
+ * keselamatan kelas 0 di titik mulainya (flows/webhook-trigger.ts):
+ * (a) autentikasi token hash-only — panggilan tak sah tidak melihat
+ * apa pun (404 tunggal); (b) payload gagal validasi dasar tidak
+ * melahirkan run; (c) kontak opt-out tidak memulai run. Sesudah run
+ * lahir, ia run biasa: parkir/resume/balasan kontak mengikuti semua
+ * aturan di atas lewat pesan-pesan berikutnya di percakapannya.
+ *
  * PENYIMPANGAN SADAR dari pakem "satu pemenang" (pola rujukan
  * zernflow trigger-matcher adalah first-match tunggal):
  * - Arsitektur Botara SEJAK AWAL multi-fire: banyak automation boleh

@@ -233,6 +233,7 @@ export function summarizeNodeConfig(
     case "trigger": {
       if (c.kind === "any_message") return t("flows.summaryAnyMessage");
       if (c.kind === "welcome") return t("flows.summaryWelcome");
+      if (c.kind === "webhook") return t("flows.summaryWebhook");
       if (c.kind === "postback" || c.kind === "quick_reply") {
         const payloads = Array.isArray(c.payloads)
           ? c.payloads.filter((k): k is string => typeof k === "string")
