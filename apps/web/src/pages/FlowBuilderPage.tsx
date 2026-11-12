@@ -136,6 +136,11 @@ function BuilderInner({
     [meta.appointmentServices],
   );
 
+  const dealStageName = useCallback(
+    (stageId: string) => meta.dealStages.find((s) => s.id === stageId)?.name,
+    [meta.dealStages],
+  );
+
   // Tandai node yang disebut issue (klik issue juga memilih node itu).
   useEffect(() => {
     const severityByNode = new Map<string, "error" | "warning">();
@@ -464,6 +469,7 @@ function BuilderInner({
     flowName,
     productName,
     serviceName,
+    dealStageName,
   };
 
   return (
@@ -810,6 +816,8 @@ export function FlowBuilderPage({
     tags: [],
     stages: [],
     sequences: [],
+    dealStages: [],
+    members: [],
     flows: [],
     selfFlow: null,
     products: [],
@@ -832,6 +840,8 @@ export function FlowBuilderPage({
           flowsRes,
           products,
           appointmentServices,
+          dealPipelines,
+          members,
         ] = await Promise.all([
           api.flows.get(tenantId, flowId),
           api.automations.list(tenantId).catch(() => []),
@@ -843,6 +853,8 @@ export function FlowBuilderPage({
           api.appointments
             .listServices(tenantId)
             .catch(() => [] as AppointmentServiceResponse[]),
+          api.deals.listPipelines(tenantId).catch(() => []),
+          api.team.listMembers(tenantId).catch(() => []),
         ]);
         if (cancelled) return;
         setFlow(flowRes);
@@ -862,6 +874,15 @@ export function FlowBuilderPage({
           sequences: automations.filter(
             (a) => a.kind === "sequence" && a.isActive,
           ),
+          dealStages: dealPipelines.flatMap((p) =>
+            p.stages.map((s) => ({
+              id: s.id,
+              name: s.name,
+              pipelineName: p.name,
+              kind: s.kind,
+            })),
+          ),
+          members,
           flows: flowsRes?.flows ?? [],
           selfFlow: { id: flowRes.id, name: flowRes.name },
           products: products.filter((p) => p.isActive),

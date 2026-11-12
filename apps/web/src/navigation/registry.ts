@@ -18,7 +18,7 @@ import type { TranslationKey } from "@sahabat-kreator/i18n";
 export type IconName =
   | "home" | "inbox" | "bot" | "megaphone" | "users" | "workflow" | "book"
   | "bag" | "link" | "chart" | "card" | "settings" | "shield" | "more"
-  | "list" | "audit" | "flow" | "growth" | "calendar" | "post";
+  | "list" | "audit" | "flow" | "growth" | "calendar" | "post" | "kanban";
 
 /** Id kelompok navigasi — urutan di NAV_GROUPS adalah urutan render. */
 export type NavGroupId =
@@ -79,6 +79,10 @@ export const NAV_REGISTRY: NavItem[] = [
   { id: "products",    labelKey: "nav.products", group: "konten",    icon: "bag",       route: "/products",    mobile: { slot: "more" }, order: { desktop: 9,  more: 5 } },
   // Janji Temu (Fase 13G): layanan + ketersediaan + booking + Google Calendar.
   { id: "appointments", labelKey: "nav.appointments", group: "layanan", icon: "calendar", route: "/appointments", mobile: { slot: "more" }, order: { desktop: 10, more: 6 } },
+  // Deals / Pipeline penjualan (G12): papan Kanban deal bernilai uang
+  // per kontak — bersebelahan dengan Janji Temu di Layanan, sesudah
+  // Kontak & Otomasi yang menjadi sumber dealnya.
+  { id: "deals",       labelKey: "nav.deals", group: "layanan",       icon: "kanban",    route: "/deals",       mobile: { slot: "more" }, order: { desktop: 10.5, more: 6.5 } },
   { id: "channels",    labelKey: "nav.channels", group: "kelola",    icon: "link",      route: "/channels",    mobile: { slot: "more" }, order: { desktop: 11, more: 7 } },
   { id: "analytics",   labelKey: "nav.analytics", group: "kelola",   icon: "chart",     route: "/analytics",   mobile: { slot: "more" }, order: { desktop: 12, more: 8 } },
   { id: "billing",     labelKey: "nav.billing", group: "akun",     icon: "card",      route: "/billing",     mobile: { slot: "more" }, order: { desktop: 13, more: 9 } },

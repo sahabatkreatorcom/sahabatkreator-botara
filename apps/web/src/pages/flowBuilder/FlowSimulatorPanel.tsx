@@ -73,6 +73,8 @@ const EFFECT_KIND_KEYS: Record<string, string> = {
   set_stage: "flows.simEffectSetStage",
   set_field: "flows.simEffectSetField",
   enroll_sequence: "flows.simEffectEnrollSequence",
+  create_deal: "flows.simEffectCreateDeal",
+  move_deal_stage: "flows.simEffectMoveDealStage",
   goto_flow: "flows.simEffectGotoFlow",
   handoff: "flows.simEffectHandoff",
   ai_response: "flows.simEffectAiResponse",
@@ -236,6 +238,10 @@ export function FlowSimulatorPanel({
         return `${String(d.field ?? "")} = ${String(d.value ?? "")}`;
       case "enroll_sequence":
         return String(d.automationId ?? "");
+      case "create_deal":
+        return String(d.title ?? "");
+      case "move_deal_stage":
+        return String(d.dealStageId ?? "");
       case "goto_flow":
         return String(d.targetFlowId ?? "");
       case "http_request":

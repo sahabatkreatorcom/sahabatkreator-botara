@@ -112,6 +112,9 @@ const AppointmentsPage = lazy(() =>
     default: m.AppointmentsPage,
   })),
 );
+const DealsPage = lazy(() =>
+  import("./pages/DealsPage").then((m) => ({ default: m.DealsPage })),
+);
 
 // Badge navigasi berasal dari API workspace aktif — query yang sama untuk
 // desktop & mobile (§10.1), registry tidak diubah: unread Inbox dari API
@@ -283,6 +286,8 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
   const wideMain =
     activeId === "posts" ||
     activeId === "admin" ||
+    // Papan Kanban deals (G12): kolom tahap berdampingan butuh lebar.
+    activeId === "deals" ||
     (activeId === "flows" && match.segment !== null);
 
   const handleSignOut = async () => {
@@ -368,6 +373,8 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
           <ProductsPage t={t} locale={locale} />
         ) : activeId === "appointments" ? (
           <AppointmentsPage t={t} locale={locale} />
+        ) : activeId === "deals" ? (
+          <DealsPage t={t} locale={locale} />
         ) : activeId === "growth" ? (
           <GrowthPage t={t} locale={locale} />
         ) : activeId === "settings" ? (

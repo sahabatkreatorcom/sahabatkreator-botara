@@ -29,6 +29,8 @@ export const FLOW_NODE_LABEL_KEYS: Record<FlowNodeType, TranslationKey> = {
   remove_tag: "flows.nodeRemoveTag",
   set_stage: "flows.nodeSetStage",
   enroll_sequence: "flows.nodeEnrollSequence",
+  create_deal: "flows.nodeCreateDeal",
+  move_deal_stage: "flows.nodeMoveDealStage",
   ai_response: "flows.nodeAiResponse",
   handoff: "flows.nodeHandoff",
   end: "flows.nodeEnd",
@@ -53,6 +55,8 @@ export const ADDABLE_NODE_TYPES: FlowNodeType[] = [
   "remove_tag",
   "set_stage",
   "enroll_sequence",
+  "create_deal",
+  "move_deal_stage",
   "ai_response",
   "handoff",
   "end",
@@ -140,6 +144,10 @@ export function defaultNodeConfig(
       return { stage: "contacted" };
     case "enroll_sequence":
       return { automationId: "" };
+    case "create_deal":
+      return { title: "", dealStageId: "" };
+    case "move_deal_stage":
+      return { dealStageId: "" };
     case "set_field":
       return { field: "name", value: "" };
     case "http_request":
@@ -200,6 +208,8 @@ export interface NodeSummaryResolvers {
   productName?: (productId: string) => string | undefined;
   /** Fase 13G: nama layanan janji temu untuk ringkasan book_appointment. */
   serviceName?: (serviceId: string) => string | undefined;
+  /** G12: nama tahap deal untuk ringkasan create_deal/move_deal_stage. */
+  dealStageName?: (stageId: string) => string | undefined;
 }
 
 /**
@@ -308,6 +318,17 @@ export function summarizeNodeConfig(
       const id = asString(c.automationId);
       if (!id) return t("flows.summaryNotConfigured");
       return sequenceName?.(id) ?? `${id.slice(0, 8)}…`;
+    }
+    case "create_deal": {
+      const title = asString(c.title);
+      if (!title) return t("flows.summaryNotConfigured");
+      return truncate(t("flows.summaryCreateDeal", { title }));
+    }
+    case "move_deal_stage": {
+      const id = asString(c.dealStageId);
+      if (!id) return t("flows.summaryNotConfigured");
+      const stage = resolvers?.dealStageName?.(id) ?? `${id.slice(0, 8)}…`;
+      return t("flows.summaryMoveDealStage", { stage });
     }
     case "set_field": {
       const field = asString(c.field);

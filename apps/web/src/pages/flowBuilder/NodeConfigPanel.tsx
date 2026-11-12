@@ -6,16 +6,28 @@
  * memecahnya per tipe akan menyebarkan satu kontrak ke belasan berkas
  * tanpa memisahkan tanggung jawab apa pun.
  */
-import { type AppointmentServiceResponse, type AutomationResponse, type FlowResponse, type ProductResponse } from "@sahabat-kreator/contracts";
+import { type AppointmentServiceResponse, type AutomationResponse, type FlowResponse, type ProductResponse, type TeamMemberResponse } from "@sahabat-kreator/contracts";
 import { useMemo } from "react";
 import { FLOW_NODE_LABEL_KEYS } from "../../flows/graphModel";
 import { CUSTOM_FIELD_OPTION_LABEL, KNOWN_STAGES, stageLabel } from "./graph";
 import { type FlowRfNode, type Translate } from "./types";
 
+/** Satu tahap deal untuk pemilih node deals (G12) — nama pipeline ikut agar tahap dari pipeline berbeda bisa dibedakan. */
+export interface DealStageOption {
+  id: string;
+  name: string;
+  pipelineName: string;
+  kind: "open" | "won" | "lost";
+}
+
 export interface TenantMeta {
   tags: string[];
   stages: string[];
   sequences: AutomationResponse[];
+  /** Tahap deal semua pipeline tenant (pemilih create_deal/move_deal_stage, G12). */
+  dealStages: DealStageOption[];
+  /** Member tenant (pemilih assignee create_deal, G12). */
+  members: TeamMemberResponse[];
   /** Flow AKTIF tenant (pemilih goto_flow); flow yang diedit ditambah terpisah. */
   flows: FlowResponse[];
   /** Flow yang sedang diedit (boleh jadi tujuan goto dirinya sendiri). */
@@ -602,6 +614,101 @@ export function NodeConfigPanel({
             </select>
           )}
         </div>
+      ) : null}
+
+      {type === "create_deal" || type === "move_deal_stage" ? (
+        <div>
+          <label className={labelClass} htmlFor="cfg-deal-stage">
+            {t("flows.dealStageLabel")}
+          </label>
+          {meta.dealStages.length === 0 ? (
+            <p className="text-sm text-muted">{t("flows.dealStageNone")}</p>
+          ) : (
+            <select
+              id="cfg-deal-stage"
+              className={inputClass}
+              disabled={readOnly}
+              value={str(config.dealStageId)}
+              onChange={(e) => set({ dealStageId: e.target.value })}
+            >
+              <option value="">{t("flows.dealStagePlaceholder")}</option>
+              {meta.dealStages.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.pipelineName} · {s.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      ) : null}
+
+      {type === "create_deal" ? (
+        <>
+          <div>
+            <label className={labelClass} htmlFor="cfg-deal-title">
+              {t("flows.dealTitleLabel")}
+            </label>
+            <input
+              id="cfg-deal-title"
+              className={inputClass}
+              disabled={readOnly}
+              placeholder={t("flows.dealTitlePlaceholder")}
+              value={str(config.title)}
+              onChange={(e) => set({ title: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-deal-value">
+              {t("flows.dealValueLabel")}
+            </label>
+            <input
+              id="cfg-deal-value"
+              className={inputClass}
+              disabled={readOnly}
+              type="number"
+              min={0}
+              step="any"
+              value={
+                typeof config.value === "number" ? String(config.value) : ""
+              }
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                const parsed = raw === "" ? undefined : Number(raw);
+                set({
+                  value:
+                    parsed !== undefined && Number.isFinite(parsed) && parsed >= 0
+                      ? parsed
+                      : undefined,
+                });
+              }}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-deal-assignee">
+              {t("flows.dealAssigneeLabel")}
+            </label>
+            <select
+              id="cfg-deal-assignee"
+              className={inputClass}
+              disabled={readOnly}
+              value={str(config.assigneeUserId)}
+              onChange={(e) =>
+                set({
+                  assigneeUserId: e.target.value
+                    ? e.target.value
+                    : undefined,
+                })
+              }
+            >
+              <option value="">{t("flows.dealAssigneeUnassigned")}</option>
+              {meta.members.map((m) => (
+                <option key={m.userId} value={m.userId}>
+                  {m.name ?? m.email}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
       ) : null}
 
       {type === "set_field" ? (

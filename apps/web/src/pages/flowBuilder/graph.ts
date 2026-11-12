@@ -46,6 +46,10 @@ export const NODE_ICON_PATHS: Record<FlowNodeType, string> = {
     "M3.5 4.5h2.4l2.3 11.2a1.8 1.8 0 0 0 1.8 1.4h7.6a1.8 1.8 0 0 0 1.8-1.4L20.8 8H6.2M10 20.8h.01M17.5 20.8h.01",
   book_appointment:
     "M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v12A1.5 1.5 0 0 1 18.5 20h-13A1.5 1.5 0 0 1 4 18.5v-12zM4 10h16M8 3v4M16 3v4M8 14.5h3",
+  create_deal:
+    "M3.5 7.5A1.5 1.5 0 0 1 5 6h14a1.5 1.5 0 0 1 1.5 1.5v9A1.5 1.5 0 0 1 19 18H5a1.5 1.5 0 0 1-1.5-1.5v-9zM3.5 10h17M7 15h4",
+  move_deal_stage:
+    "M3.5 5A1.5 1.5 0 0 1 5 3.5h1.5A1.5 1.5 0 0 1 8 5v14.5A1.5 1.5 0 0 1 6.5 21H5A1.5 1.5 0 0 1 3.5 19.5V5zM13.5 8.5 17 12l-3.5 3.5M17 12H9.5",
 };
 
 /** Warna label chip cabang: positif hijau, timeout kuning (bila ada cabang ketiga), selainnya merah. */

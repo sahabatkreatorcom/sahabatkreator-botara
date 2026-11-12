@@ -40,6 +40,8 @@ export interface BuilderShared {
   productName: (productId: string) => string | undefined;
   /** Fase 13G: nama layanan janji temu untuk ringkasan book_appointment. */
   serviceName: (serviceId: string) => string | undefined;
+  /** G12: nama tahap deal untuk ringkasan create_deal/move_deal_stage. */
+  dealStageName: (stageId: string) => string | undefined;
 }
 
 export const BuilderCtx = createContext<BuilderShared | null>(null);

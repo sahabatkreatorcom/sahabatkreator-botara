@@ -13,6 +13,24 @@ import type {
   OutboundWebhookListResponse,
   OutboundWebhookDeliveryResponse,
   OutboundWebhookDeliveryListResponse,
+  CreateDealPipelineRequest,
+  CreateDealRequest,
+  CreateDealStageRequest,
+  DealDetailResponse,
+  DealListResponse,
+  DealPipelineAnalyticsResponse,
+  DealPipelineListResponse,
+  DealPipelineResponse,
+  DealResponse,
+  DealSettingsResponse,
+  DealStageResponse,
+  DeleteDealStageRequest,
+  MoveDealStageRequest,
+  ReorderDealStagesRequest,
+  UpdateDealPipelineRequest,
+  UpdateDealRequest,
+  UpdateDealSettingsRequest,
+  UpdateDealStageRequest,
   AgentResponse,
   AgentInstructionTemplateListResponse,
   AgentInstructionTemplateResponse,
@@ -1943,6 +1961,186 @@ export const api = {
       return request<OutboundWebhookDeliveryResponse>(
         `/api/tenants/${tenantId}/outbound-webhooks/${endpointId}/test`,
         { method: "POST" },
+      );
+    },
+  },
+  deals: {
+    /** GET /api/tenants/:tenantId/deal-pipelines → pipeline + tahapnya (pipeline bawaan disemai server bila belum ada). */
+    async listPipelines(tenantId: string): Promise<DealPipelineResponse[]> {
+      const body = await request<DealPipelineListResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines`,
+        { method: "GET" },
+      );
+      return body.pipelines;
+    },
+    /** POST → buat pipeline baru (tahap bawaan ikut tersemai) → 201. */
+    createPipeline(
+      tenantId: string,
+      input: CreateDealPipelineRequest,
+    ): Promise<DealPipelineResponse> {
+      return request<DealPipelineResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH → ganti nama pipeline. */
+    updatePipeline(
+      tenantId: string,
+      pipelineId: string,
+      input: UpdateDealPipelineRequest,
+    ): Promise<DealPipelineResponse> {
+      return request<DealPipelineResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE → hapus pipeline kosong (berisi deal → 409 PIPELINE_HAS_DEALS). */
+    async removePipeline(tenantId: string, pipelineId: string): Promise<void> {
+      await request<unknown>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}`,
+        { method: "DELETE" },
+      );
+    },
+    /** POST .../stages → tambah tahap di akhir urutan → 201. */
+    createStage(
+      tenantId: string,
+      pipelineId: string,
+      input: CreateDealStageRequest,
+    ): Promise<DealStageResponse> {
+      return request<DealStageResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}/stages`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH .../stages/:sid → ubah nama/warna/kind tahap. */
+    updateStage(
+      tenantId: string,
+      pipelineId: string,
+      stageId: string,
+      input: UpdateDealStageRequest,
+    ): Promise<DealStageResponse> {
+      return request<DealStageResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}/stages/${stageId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** POST .../stages/reorder → urutan tahap baru (daftar id utuh). */
+    reorderStages(
+      tenantId: string,
+      pipelineId: string,
+      input: ReorderDealStagesRequest,
+    ): Promise<DealPipelineResponse> {
+      return request<DealPipelineResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}/stages/reorder`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE .../stages/:sid → hapus tahap; berisi deal → wajib moveDealsToStageId (tanpa itu 409 STAGE_NOT_EMPTY). */
+    async removeStage(
+      tenantId: string,
+      pipelineId: string,
+      stageId: string,
+      input?: DeleteDealStageRequest,
+    ): Promise<void> {
+      await request<unknown>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}/stages/${stageId}`,
+        {
+          method: "DELETE",
+          ...(input ? { body: JSON.stringify(input) } : {}),
+        },
+      );
+    },
+    /** GET .../analytics → hitungan + total per tahap per mata uang + rata-rata hari ke won. */
+    analytics(
+      tenantId: string,
+      pipelineId: string,
+    ): Promise<DealPipelineAnalyticsResponse> {
+      return request<DealPipelineAnalyticsResponse>(
+        `/api/tenants/${tenantId}/deal-pipelines/${pipelineId}/analytics`,
+        { method: "GET" },
+      );
+    },
+    /** GET /api/tenants/:tenantId/deals → daftar deal (filter opsional). */
+    async list(
+      tenantId: string,
+      filter: {
+        pipelineId?: string;
+        stageId?: string;
+        status?: string;
+        contactId?: string;
+        limit?: number;
+      } = {},
+    ): Promise<DealResponse[]> {
+      const params = new URLSearchParams();
+      if (filter.pipelineId) params.set("pipelineId", filter.pipelineId);
+      if (filter.stageId) params.set("stageId", filter.stageId);
+      if (filter.status) params.set("status", filter.status);
+      if (filter.contactId) params.set("contactId", filter.contactId);
+      if (filter.limit) params.set("limit", String(filter.limit));
+      const qs = params.toString();
+      const body = await request<DealListResponse>(
+        `/api/tenants/${tenantId}/deals${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+      return body.deals;
+    },
+    /** POST → buat deal → 201. */
+    create(tenantId: string, input: CreateDealRequest): Promise<DealResponse> {
+      return request<DealResponse>(`/api/tenants/${tenantId}/deals`, {
+        method: "POST",
+        body: JSON.stringify(input),
+      });
+    },
+    /** GET .../deals/:id → detail + riwayat tahap. */
+    get(tenantId: string, dealId: string): Promise<DealDetailResponse> {
+      return request<DealDetailResponse>(
+        `/api/tenants/${tenantId}/deals/${dealId}`,
+        { method: "GET" },
+      );
+    },
+    /** PATCH .../deals/:id → ubah field deal (bukan tahap — pakai move). */
+    update(
+      tenantId: string,
+      dealId: string,
+      input: UpdateDealRequest,
+    ): Promise<DealResponse> {
+      return request<DealResponse>(`/api/tenants/${tenantId}/deals/${dealId}`, {
+        method: "PATCH",
+        body: JSON.stringify(input),
+      });
+    },
+    /** POST .../deals/:id/move → pindah tahap (seret Kanban & pemilih tahap). */
+    move(
+      tenantId: string,
+      dealId: string,
+      input: MoveDealStageRequest,
+    ): Promise<DealResponse> {
+      return request<DealResponse>(
+        `/api/tenants/${tenantId}/deals/${dealId}/move`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE .../deals/:id → hapus deal (owner/admin). */
+    async remove(tenantId: string, dealId: string): Promise<void> {
+      await request<unknown>(`/api/tenants/${tenantId}/deals/${dealId}`, {
+        method: "DELETE",
+      });
+    },
+    /** GET /api/tenants/:tenantId/deal-settings → mata uang bawaan akun. */
+    getSettings(tenantId: string): Promise<DealSettingsResponse> {
+      return request<DealSettingsResponse>(
+        `/api/tenants/${tenantId}/deal-settings`,
+        { method: "GET" },
+      );
+    },
+    /** PATCH /api/tenants/:tenantId/deal-settings → ubah mata uang bawaan (deal baru saja yang terpengaruh). */
+    updateSettings(
+      tenantId: string,
+      input: UpdateDealSettingsRequest,
+    ): Promise<DealSettingsResponse> {
+      return request<DealSettingsResponse>(
+        `/api/tenants/${tenantId}/deal-settings`,
+        { method: "PATCH", body: JSON.stringify(input) },
       );
     },
   },

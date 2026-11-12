@@ -46,7 +46,7 @@ describe("kelompok registry navigasi", () => {
     expect(groupedIds(desktopItems)).toEqual([
       ["utama", ["dashboard", "inbox"]],
       ["konten", ["broadcasts", "posts", "growth", "products"]],
-      ["layanan", ["agents", "contacts", "automations", "flows", "appointments"]],
+      ["layanan", ["agents", "contacts", "automations", "flows", "appointments", "deals"]],
       ["kelola", ["channels", "analytics"]],
       ["akun", ["billing", "settings"]],
       ["sistem", ["logs", "audit", "admin"]],
@@ -59,7 +59,7 @@ describe("kelompok registry navigasi", () => {
     // jadi ia harus hilang dari hasil, bukan tampil sebagai tajuk kosong.
     expect(groupedIds(moreItems)).toEqual([
       ["konten", ["posts", "growth", "products"]],
-      ["layanan", ["contacts", "automations", "flows", "appointments"]],
+      ["layanan", ["contacts", "automations", "flows", "appointments", "deals"]],
       ["kelola", ["channels", "analytics"]],
       ["akun", ["billing", "settings"]],
       ["sistem", ["logs", "audit", "admin"]],

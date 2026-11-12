@@ -7,14 +7,14 @@ import { NODE_ICON_PATHS, branchColorClass } from "./graph";
 import { type FlowRfNode, useBuilderShared } from "./types";
 
 export function FlowNodeCard({ data, selected }: NodeProps<FlowRfNode>) {
-  const { t, sequenceName, flowName, productName, serviceName } =
+  const { t, sequenceName, flowName, productName, serviceName, dealStageName } =
     useBuilderShared();
   const type = data.nodeType;
   const summary = summarizeNodeConfig(
     t,
     { type, config: data.config },
     sequenceName,
-    { flowName, productName, serviceName },
+    { flowName, productName, serviceName, dealStageName },
   );
   const branches = FLOW_BRANCHED_TYPES[type];
   const borderClass =
