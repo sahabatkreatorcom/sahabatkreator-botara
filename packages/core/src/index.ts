@@ -188,6 +188,15 @@ export {
   type InstantiateAutomationTemplateResult,
 } from "./automations";
 export {
+  createSequenceTemplate,
+  listSequenceTemplates,
+  getSequenceTemplate,
+  deleteSequenceTemplate,
+  instantiateSequenceTemplate,
+  type CreateSequenceTemplateInput,
+  type InstantiateSequenceTemplateResult,
+} from "./sequence-templates";
+export {
   JOB_FAILED_ACTION,
   recordPermanentJobFailure,
   type RecordPermanentJobFailureInput,

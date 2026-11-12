@@ -7,28 +7,39 @@ import {
   AutomationRunListResponseSchema,
   AutomationRunResponseSchema,
   AutomationTemplateListResponseSchema,
+  AutomationTemplateLocaleSchema,
   CreateAutomationRequestSchema,
+  CreateSequenceTemplateRequestSchema,
   InstantiateAutomationTemplateRequestSchema,
+  InstantiateSequenceTemplateRequestSchema,
   SequenceEnrollmentListResponseSchema,
   SequenceEnrollmentResponseSchema,
+  SequenceTemplateListResponseSchema,
+  SequenceTemplateResponseSchema,
   UpdateAutomationRequestSchema,
   summarizeAutomationTemplate,
   type AutomationResponse,
   type AutomationRunResponse,
+  type AutomationTemplateLocale,
   type SequenceEnrollmentResponse,
+  type SequenceTemplateResponse,
 } from "@sahabat-kreator/contracts";
 import {
   createAutomation,
+  createSequenceTemplate,
+  deleteSequenceTemplate,
   getChannelAccount,
   instantiateAutomationTemplate,
+  instantiateSequenceTemplate,
   listAutomationRuns,
   listAutomations,
   listSequenceEnrollments,
+  listSequenceTemplates,
   updateAutomation,
   type AutomationWithRunCount,
   type SequenceEnrollmentWithTotal,
 } from "@sahabat-kreator/core";
-import type { AutomationRun } from "@sahabat-kreator/db";
+import type { AutomationRun, SequenceTemplate } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
 import { resolveTenantForUser } from "../tenants/guard";
@@ -57,6 +68,24 @@ export function serializeAutomation(row: AutomationWithRunCount): AutomationResp
     stepCount: row.stepCount,
     isActive: row.isActive,
     runCount: row.runCount,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  });
+}
+
+export function serializeSequenceTemplate(
+  row: SequenceTemplate,
+): SequenceTemplateResponse {
+  return SequenceTemplateResponseSchema.parse({
+    id: row.id,
+    name: row.name,
+    keywords: row.keywords,
+    match: row.match === "contains" ? "contains" : "exact",
+    steps: row.steps.map((s, i) => ({
+      position: i + 1,
+      delayMinutes: s.delayMinutes,
+      text: s.text,
+    })),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });
@@ -101,10 +130,20 @@ function serializeRun(row: AutomationRun): AutomationRunResponse {
  *         kind 'sequence': {name, keywords, match, steps[{delayMinutes, text}]}
  *   GET   /tenants/:tenantId/automations            daftar + jumlah run +
  *                                                   kind & langkah sequence
- *   GET   /tenants/:tenantId/automations/templates  katalog template (14A)
+ *   GET   /tenants/:tenantId/automations/templates  katalog template (14A);
+ *                                                   ?locale=id|en memilih isi
+ *                                                   sequence (G2)
  *   POST  /tenants/:tenantId/automations/templates/:slug
  *                                                   buat automation NONAKTIF
  *                                                   dari template → 201
+ *   POST  /tenants/:tenantId/sequence-templates     simpan templat sequence
+ *                                                   pribadi → 201 (G2)
+ *   GET   /tenants/:tenantId/sequence-templates     daftar templat pribadi
+ *   DELETE /tenants/:tenantId/sequence-templates/:id
+ *                                                   hapus templat pribadi
+ *   POST  /tenants/:tenantId/sequence-templates/:id/instantiate
+ *                                                   pakai templat pribadi →
+ *                                                   automation NONAKTIF 201
  *   PATCH /tenants/:tenantId/automations/:id        ubah isActive/name/keywords/match/text
  *                                                   (langkah sequence TIDAK bisa
  *                                                   diubah — buat automation baru)
@@ -118,6 +157,7 @@ function serializeRun(row: AutomationRun): AutomationRunResponse {
 export function createAutomationsRoutes(bundle: AuthBundle | null) {
   const app = new Hono<{ Variables: AppVariables }>();
   const base = "/tenants/:tenantId/automations";
+  const seqTemplatesBase = "/tenants/:tenantId/sequence-templates";
 
   if (!bundle) {
     const notConfigured = (c: Parameters<typeof apiError>[0]) =>
@@ -129,6 +169,10 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
     app.patch(`${base}/:id`, notConfigured);
     app.get(`${base}/:id/runs`, notConfigured);
     app.get(`${base}/:id/enrollments`, notConfigured);
+    app.post(seqTemplatesBase, notConfigured);
+    app.get(seqTemplatesBase, notConfigured);
+    app.delete(`${seqTemplatesBase}/:id`, notConfigured);
+    app.post(`${seqTemplatesBase}/:id/instantiate`, notConfigured);
     return app;
   }
 
@@ -238,8 +282,19 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
   app.get(`${base}/templates`, async (c) => {
     const tenant = await resolveTenant(c);
     if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    // G2: isi sequence dwibahasa — ?locale=id|en memilih teks langkah
+    // pratinjau (dan jumlah kata kunci) yang dikembalikan; nilai tak
+    // dikenal jatuh ke "id", bukan kesalahan.
+    const localeParsed = AutomationTemplateLocaleSchema.safeParse(
+      c.req.query("locale"),
+    );
+    const locale: AutomationTemplateLocale = localeParsed.success
+      ? localeParsed.data
+      : "id";
     const body = AutomationTemplateListResponseSchema.parse({
-      templates: AUTOMATION_TEMPLATES.map(summarizeAutomationTemplate),
+      templates: AUTOMATION_TEMPLATES.map((tpl) =>
+        summarizeAutomationTemplate(tpl, locale),
+      ),
     });
     return c.json(body);
   });
@@ -248,19 +303,28 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
   // catatan keselamatan di kontrak automation-templates): pemilik
   // meninjau kata kunci & teks, menyunting placeholder, baru
   // mengaktifkannya. Body boleh kosong; {name} opsional menimpa nama
-  // bawaan. Slug tak dikenal → 404 AUTOMATION_TEMPLATE_NOT_FOUND.
+  // bawaan, {locale} memilih isi sequence dwibahasa. Slug tak dikenal
+  // → 404 AUTOMATION_TEMPLATE_NOT_FOUND.
   app.post(`${base}/templates/:slug`, async (c) => {
     const tenant = await resolveTenant(c);
     if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
     let name: string | undefined;
+    let locale: AutomationTemplateLocale | undefined;
     try {
-      const json = (await c.req.json()) as { name?: unknown } | null;
-      if (json && typeof json === "object" && json.name !== undefined) {
+      const json = (await c.req.json()) as
+        | { name?: unknown; locale?: unknown }
+        | null;
+      if (
+        json &&
+        typeof json === "object" &&
+        (json.name !== undefined || json.locale !== undefined)
+      ) {
         const parsed = InstantiateAutomationTemplateRequestSchema.safeParse(json);
         if (!parsed.success) {
           return apiError(c, 400, "VALIDATION_ERROR", "Invalid template payload");
         }
         name = parsed.data.name;
+        locale = parsed.data.locale;
       }
     } catch {
       // Body kosong sah = pakai nama bawaan template.
@@ -268,7 +332,7 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
     const result = await instantiateAutomationTemplate(
       bundle.db,
       { tenantId: tenant.id },
-      { slug: c.req.param("slug") ?? "", name },
+      { slug: c.req.param("slug") ?? "", name, locale },
     );
     if (result.kind === "template_not_found") {
       return apiError(
@@ -277,6 +341,104 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
         "AUTOMATION_TEMPLATE_NOT_FOUND",
         "Automation template not found",
       );
+    }
+    return c.json(
+      serializeAutomation({
+        ...result.automation,
+        runCount: 0,
+        stepCount: result.automation.steps.length,
+      }),
+      201,
+    );
+  });
+
+  // ---- Templat sequence pribadi (G2) --------------------------------------
+  // Pola bersama "simpan templat pribadi" (lihat kontrak agents.ts):
+  // buat/daftar/hapus salinan keadaan formulir sequence. Penanda
+  // "[...]" yang belum diganti BUKAN kesalahan di sini — skema kontrak
+  // sengaja hanya membatasi bentuk & panjang, sama seperti pembuatan
+  // automation sequence itu sendiri.
+  app.post(seqTemplatesBase, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = CreateSequenceTemplateRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid sequence template payload");
+    }
+    const created = await createSequenceTemplate(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      parsed.data,
+    );
+    return c.json(serializeSequenceTemplate(created), 201);
+  });
+
+  app.get(seqTemplatesBase, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const rows = await listSequenceTemplates(bundle.db, {
+      tenantId: tenant.id,
+    });
+    const body = SequenceTemplateListResponseSchema.parse({
+      templates: rows.map(serializeSequenceTemplate),
+    });
+    return c.json(body);
+  });
+
+  app.delete(`${seqTemplatesBase}/:id`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Sequence template not found");
+    }
+    const deleted = await deleteSequenceTemplate(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+    );
+    if (!deleted) {
+      return apiError(c, 404, "NOT_FOUND", "Sequence template not found");
+    }
+    return c.json(serializeSequenceTemplate(deleted));
+  });
+
+  // Pakai templat pribadi → automation sequence BARU yang selalu
+  // NONAKTIF (keselamatan instantiate katalog). Id bukan uuid / milik
+  // tenant lain → 404 yang sama (isolasi tidak bocor lewat beda kode).
+  app.post(`${seqTemplatesBase}/:id/instantiate`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Sequence template not found");
+    }
+    let name: string | undefined;
+    try {
+      const json = (await c.req.json()) as { name?: unknown } | null;
+      if (json && typeof json === "object" && json.name !== undefined) {
+        const parsed = InstantiateSequenceTemplateRequestSchema.safeParse(json);
+        if (!parsed.success) {
+          return apiError(c, 400, "VALIDATION_ERROR", "Invalid template payload");
+        }
+        name = parsed.data.name;
+      }
+    } catch {
+      // Body kosong sah = pakai nama templat.
+    }
+    const result = await instantiateSequenceTemplate(
+      bundle.db,
+      { tenantId: tenant.id },
+      { templateId: id, name },
+    );
+    if (result.kind === "template_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Sequence template not found");
     }
     return c.json(
       serializeAutomation({

@@ -62,7 +62,9 @@ import type {
   CreateAgentRequest,
   CreateAgentInstructionTemplateRequest,
   CreateAutomationRequest,
+  CreateSequenceTemplateRequest,
   InstantiateAutomationTemplateRequest,
+  InstantiateSequenceTemplateRequest,
   CreateContactRequest,
   CreateFlowRequest,
   CreateGrowthLinkRequest,
@@ -175,6 +177,8 @@ import type {
   UpdatePaymentSettingsRequest,
   SequenceEnrollmentListResponse,
   SequenceEnrollmentResponse,
+  SequenceTemplateListResponse,
+  SequenceTemplateResponse,
   TenantListResponse,
   TenantResponse,
   UpdateAgentRequest,
@@ -1045,11 +1049,15 @@ export const api = {
     },
     /**
      * GET /api/tenants/:tenantId/automations/templates — katalog template
-     * (Fase 16B). Ringkasan saja; teks lengkap disalin server.
+     * (Fase 16B). Ringkasan + langkah sequence pada locale yang diminta
+     * (G2: untuk pratinjau linimasa galeri; bawaan server "id").
      */
-    listTemplates(tenantId: string): Promise<AutomationTemplateListResponse> {
+    listTemplates(
+      tenantId: string,
+      locale?: "id" | "en",
+    ): Promise<AutomationTemplateListResponse> {
       return request<AutomationTemplateListResponse>(
-        `/api/tenants/${tenantId}/automations/templates`,
+        `/api/tenants/${tenantId}/automations/templates${locale ? `?locale=${locale}` : ""}`,
         { method: "GET" },
       );
     },
@@ -1225,6 +1233,51 @@ export const api = {
       return request<AgentInstructionTemplateResponse>(
         `/api/tenants/${tenantId}/agent-templates/${templateId}`,
         { method: "DELETE" },
+      );
+    },
+  },
+  sequenceTemplates: {
+    /** GET /api/tenants/:tenantId/sequence-templates → templat sequence pribadi tenant (G2). */
+    async list(tenantId: string): Promise<SequenceTemplateResponse[]> {
+      const body = await request<SequenceTemplateListResponse>(
+        `/api/tenants/${tenantId}/sequence-templates`,
+        { method: "GET" },
+      );
+      return body.templates;
+    },
+    /** POST /api/tenants/:tenantId/sequence-templates → 201 templat sequence baru. */
+    create(
+      tenantId: string,
+      input: CreateSequenceTemplateRequest,
+    ): Promise<SequenceTemplateResponse> {
+      return request<SequenceTemplateResponse>(
+        `/api/tenants/${tenantId}/sequence-templates`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE /api/tenants/:tenantId/sequence-templates/:id → templat terhapus. */
+    remove(
+      tenantId: string,
+      templateId: string,
+    ): Promise<SequenceTemplateResponse> {
+      return request<SequenceTemplateResponse>(
+        `/api/tenants/${tenantId}/sequence-templates/${templateId}`,
+        { method: "DELETE" },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/sequence-templates/:id/instantiate —
+     * membuat automation sequence NYATA dari templat pribadi, SELALU
+     * nonaktif (keselamatan yang sama dengan template katalog).
+     */
+    instantiate(
+      tenantId: string,
+      templateId: string,
+      input: InstantiateSequenceTemplateRequest = {},
+    ): Promise<AutomationResponse> {
+      return request<AutomationResponse>(
+        `/api/tenants/${tenantId}/sequence-templates/${templateId}/instantiate`,
+        { method: "POST", body: JSON.stringify(input) },
       );
     },
   },
