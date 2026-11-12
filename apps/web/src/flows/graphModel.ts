@@ -218,6 +218,17 @@ export function summarizeNodeConfig(
   switch (node.type) {
     case "trigger": {
       if (c.kind === "any_message") return t("flows.summaryAnyMessage");
+      if (c.kind === "welcome") return t("flows.summaryWelcome");
+      if (c.kind === "postback" || c.kind === "quick_reply") {
+        const payloads = Array.isArray(c.payloads)
+          ? c.payloads.filter((k): k is string => typeof k === "string")
+          : [];
+        return payloads.length > 0
+          ? truncate(
+              t("flows.summaryPayloads", { payloads: payloads.join(", ") }),
+            )
+          : t("flows.summaryNotConfigured");
+      }
       const keywords = Array.isArray(c.keywords)
         ? c.keywords.filter((k): k is string => typeof k === "string")
         : [];

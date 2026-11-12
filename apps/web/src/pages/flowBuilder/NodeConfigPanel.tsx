@@ -98,6 +98,9 @@ export function NodeConfigPanel({
                 [
                   ["keyword", "flows.triggerKindKeyword"],
                   ["any_message", "flows.triggerKindAny"],
+                  ["postback", "flows.triggerKindPostback"],
+                  ["quick_reply", "flows.triggerKindQuickReply"],
+                  ["welcome", "flows.triggerKindWelcome"],
                 ] as const
               ).map(([kind, key]) => (
                 <label
@@ -125,7 +128,14 @@ export function NodeConfigPanel({
                                   ? "contains"
                                   : "exact",
                             }
-                          : { kind: "any_message" },
+                          : kind === "postback" || kind === "quick_reply"
+                            ? {
+                                kind,
+                                payloads: Array.isArray(config.payloads)
+                                  ? config.payloads
+                                  : [],
+                              }
+                            : { kind },
                       )
                     }
                   />
@@ -134,7 +144,43 @@ export function NodeConfigPanel({
               ))}
             </div>
           </div>
-          {config.kind !== "any_message" ? (
+          {config.kind === "postback" || config.kind === "quick_reply" ? (
+            <div>
+              <label className={labelClass} htmlFor="cfg-payloads">
+                {t("flows.triggerPayloadsLabel")}
+              </label>
+              <textarea
+                id="cfg-payloads"
+                className={inputClass}
+                rows={3}
+                disabled={readOnly}
+                value={
+                  Array.isArray(config.payloads)
+                    ? config.payloads
+                        .filter((k): k is string => typeof k === "string")
+                        .join("\n")
+                    : ""
+                }
+                onChange={(e) =>
+                  set({
+                    payloads: e.target.value
+                      .split("\n")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  })
+                }
+              />
+              <p className="mt-1 text-xs text-muted">
+                {t("flows.triggerPayloadsHint")}
+              </p>
+            </div>
+          ) : null}
+          {config.kind === "welcome" ? (
+            <p className="text-xs text-muted">
+              {t("flows.triggerWelcomeHint")}
+            </p>
+          ) : null}
+          {config.kind === undefined || config.kind === "keyword" ? (
             <>
               <div>
                 <label className={labelClass} htmlFor="cfg-keywords">

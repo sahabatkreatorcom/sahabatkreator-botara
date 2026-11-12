@@ -515,11 +515,17 @@ export function AutomationsPage({ t, locale, onOpenWaTemplates }: AutomationsPag
                     {automation.name}
                   </span>
                   <span className="mt-0.5 block text-xs text-muted">
-                    {t(
-                      automation.match === "exact"
-                        ? "automations.matchExact"
-                        : "automations.matchContains",
-                    )}
+                    {automation.triggerType === "postback"
+                      ? t("automations.triggerPostback")
+                      : automation.triggerType === "quick_reply"
+                        ? t("automations.triggerQuickReply")
+                        : automation.triggerType === "welcome"
+                          ? t("automations.triggerWelcome")
+                          : t(
+                              automation.match === "exact"
+                                ? "automations.matchExact"
+                                : "automations.matchContains",
+                            )}
                     {" · "}
                     {automation.kind === "comment"
                       ? t("automations.commentOnAccount", {
@@ -546,6 +552,19 @@ export function AutomationsPage({ t, locale, onOpenWaTemplates }: AutomationsPag
                         : "automations.kindChipKeyword",
                   )}
                 </span>
+                {automation.triggerType === "postback" ||
+                automation.triggerType === "quick_reply" ||
+                automation.triggerType === "welcome" ? (
+                  <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
+                    {t(
+                      automation.triggerType === "postback"
+                        ? "automations.triggerChipPostback"
+                        : automation.triggerType === "quick_reply"
+                          ? "automations.triggerChipQuickReply"
+                          : "automations.triggerChipWelcome",
+                    )}
+                  </span>
+                ) : null}
                 <span
                   className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
                     automation.isActive
@@ -583,6 +602,18 @@ export function AutomationsPage({ t, locale, onOpenWaTemplates }: AutomationsPag
                       className="rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium text-ink"
                     >
                       {keyword}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {automation.payloads.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {automation.payloads.map((payload) => (
+                    <span
+                      key={payload}
+                      className="rounded-full bg-accent/10 px-2 py-0.5 text-[11px] font-medium text-accent"
+                    >
+                      {payload}
                     </span>
                   ))}
                 </div>
@@ -978,6 +1009,22 @@ function AutomationFormModal({
   const [kind, setKind] = useState<AutomationKind>(
     automation?.kind ?? "keyword",
   );
+  // G5 — jenis PEMICU (ortogonal dari jenis aksi di atas): hanya bisa
+  // dipilih saat membuat aturan keyword/sequence; aturan komentar
+  // selalu berpemicu komentar. Saat edit mengikuti yang tersimpan.
+  const [triggerType, setTriggerType] = useState<
+    "keyword" | "postback" | "quick_reply" | "welcome"
+  >(
+    automation &&
+      (automation.triggerType === "postback" ||
+        automation.triggerType === "quick_reply" ||
+        automation.triggerType === "welcome")
+      ? automation.triggerType
+      : "keyword",
+  );
+  const [payloads, setPayloads] = useState(
+    automation ? automation.payloads.join(", ") : "",
+  );
   const [text, setText] = useState(automation?.text ?? "");
   const [stepRows, setStepRows] = useState<
     { delay: string; text: string }[]
@@ -1080,6 +1127,16 @@ function AutomationFormModal({
   };
 
   const isCommentForm = automation?.kind === "comment" || kind === "comment";
+  // G5 — turunan pemicu efektif formulir ini (tersimpan saat edit,
+  // pilihan saat buat) untuk memilah field yang relevan.
+  const effectiveTriggerType = automation
+    ? automation.triggerType
+    : triggerType;
+  const isSignalForm =
+    !isCommentForm &&
+    (effectiveTriggerType === "postback" ||
+      effectiveTriggerType === "quick_reply");
+  const usesKeywordsForm = isCommentForm || effectiveTriggerType === "keyword";
   useEffect(() => {
     if (!isCommentForm) return;
     let cancelled = false;
@@ -1111,10 +1168,21 @@ function AutomationFormModal({
     const trimmedName = name.trim();
     if (!trimmedName) return setError(t("automations.nameRequired"));
     const parsedKeywords = parseKeywords(keywords);
-    if (parsedKeywords.length === 0)
-      return setError(t("automations.keywordsRequired"));
-    if (parsedKeywords.length > 10)
-      return setError(t("automations.keywordsTooMany"));
+    // G5: kata kunci hanya wajib untuk pemicu keyword & aturan
+    // komentar; pemicu sinyal memakai payload, welcome tanpa syarat.
+    if (usesKeywordsForm) {
+      if (parsedKeywords.length === 0)
+        return setError(t("automations.keywordsRequired"));
+      if (parsedKeywords.length > 10)
+        return setError(t("automations.keywordsTooMany"));
+    }
+    const parsedPayloads = parseKeywords(payloads);
+    if (isSignalForm) {
+      if (parsedPayloads.length === 0)
+        return setError(t("automations.payloadsRequired"));
+      if (parsedPayloads.length > 10)
+        return setError(t("automations.payloadsTooMany"));
+    }
     setError(null);
     setSubmitting(true);
     try {
@@ -1141,12 +1209,20 @@ function AutomationFormModal({
         }
         if (automation.kind === "keyword" && !text.trim())
           return setError(t("automations.textRequired"));
-        // Edit: nama/keywords/match untuk kedua jenis; teks hanya keyword.
-        // Langkah sequence tidak bisa diubah (catatan di formulir).
+        // Edit: field pencocokan mengikuti PEMICU tersimpan (G5) —
+        // keyword/match untuk pemicu keyword, payloads untuk pemicu
+        // sinyal, tanpa keduanya untuk welcome; teks hanya kind
+        // keyword. Langkah sequence tidak bisa diubah (catatan di
+        // formulir). Jenis pemicu sendiri tidak bisa diubah saat edit.
         const saved = await api.automations.update(tenantId, automation.id, {
           name: trimmedName,
-          keywords: parsedKeywords,
-          match,
+          ...(automation.triggerType === "keyword"
+            ? { keywords: parsedKeywords, match }
+            : {}),
+          ...(automation.triggerType === "postback" ||
+          automation.triggerType === "quick_reply"
+            ? { payloads: parsedPayloads }
+            : {}),
           ...(automation.kind === "keyword" ? { text: text.trim() } : {}),
         });
         onSaved(saved);
@@ -1171,6 +1247,73 @@ function AutomationFormModal({
           publicReplyText: replyText ? replyText : null,
           hideComment,
         });
+        onSaved(saved);
+        return;
+      }
+      if (triggerType !== "keyword") {
+        // G5 — buat aturan berpemicu postback/quick_reply/welcome.
+        // kind di titik ini hanya 'keyword' | 'sequence' (komentar
+        // sudah ditangani di atas); aksi mengikuti kind seperti biasa.
+        // Cabang per varian eksplisit agar bentuk request-nya persis
+        // skema kontrak (welcome tanpa payloads, sinyal wajib ada).
+        if (kind === "sequence") {
+          if (stepRows.length === 0)
+            return setError(t("automations.stepsRequired"));
+          if (stepRows.length > 10)
+            return setError(t("automations.stepsTooMany"));
+          const signalSteps = stepRows.map((row) => ({
+            delayMinutes: Number(row.delay),
+            text: row.text.trim(),
+          }));
+          if (
+            signalSteps.some(
+              (s) =>
+                !Number.isInteger(s.delayMinutes) ||
+                s.delayMinutes < 0 ||
+                s.delayMinutes > 43200,
+            )
+          )
+            return setError(t("automations.stepDelayInvalid"));
+          if (signalSteps.some((s) => !s.text))
+            return setError(t("automations.stepTextRequired"));
+          const saved = await api.automations.create(
+            tenantId,
+            triggerType === "welcome"
+              ? {
+                  triggerType: "welcome",
+                  kind: "sequence",
+                  name: trimmedName,
+                  steps: signalSteps,
+                }
+              : {
+                  triggerType,
+                  kind: "sequence",
+                  name: trimmedName,
+                  payloads: parsedPayloads,
+                  steps: signalSteps,
+                },
+          );
+          onSaved(saved);
+          return;
+        }
+        if (!text.trim()) return setError(t("automations.textRequired"));
+        const saved = await api.automations.create(
+          tenantId,
+          triggerType === "welcome"
+            ? {
+                triggerType: "welcome",
+                kind: "keyword",
+                name: trimmedName,
+                text: text.trim(),
+              }
+            : {
+                triggerType,
+                kind: "keyword",
+                name: trimmedName,
+                payloads: parsedPayloads,
+                text: text.trim(),
+              },
+        );
         onSaved(saved);
         return;
       }
@@ -1253,6 +1396,59 @@ function AutomationFormModal({
               className={inputClassName}
             />
           </label>
+          {!automation && kind !== "comment" ? (
+            <fieldset>
+              <legend className="mb-1 text-xs font-medium text-muted">
+                {t("automations.triggerLabel")}
+              </legend>
+              <div className="space-y-2">
+                {(
+                  [
+                    ["keyword", "automations.triggerKeyword", "automations.triggerKeywordHint"],
+                    ["postback", "automations.triggerPostback", "automations.triggerPostbackHint"],
+                    ["quick_reply", "automations.triggerQuickReply", "automations.triggerQuickReplyHint"],
+                    ["welcome", "automations.triggerWelcome", "automations.triggerWelcomeHint"],
+                  ] as const
+                ).map(([value, labelKey, hintKey]) => (
+                  <label
+                    key={value}
+                    className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-surface p-3"
+                  >
+                    <input
+                      type="radio"
+                      name="automation-trigger"
+                      value={value}
+                      checked={triggerType === value}
+                      onChange={() => setTriggerType(value)}
+                      className="mt-0.5"
+                    />
+                    <span>
+                      <span className="block text-sm font-medium text-ink">
+                        {t(labelKey)}
+                      </span>
+                      <span className="mt-0.5 block text-xs text-muted">
+                        {t(hintKey)}
+                      </span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          ) : null}
+          {automation &&
+          automation.kind !== "comment" &&
+          automation.triggerType !== "keyword" ? (
+            <p className="rounded-lg border border-line bg-surface p-3 text-xs text-muted">
+              {t(
+                automation.triggerType === "postback"
+                  ? "automations.triggerPostbackHint"
+                  : automation.triggerType === "quick_reply"
+                    ? "automations.triggerQuickReplyHint"
+                    : "automations.triggerWelcomeHint",
+              )}{" "}
+              {t("automations.triggerLockedNote")}
+            </p>
+          ) : null}
           {!automation ? (
             <fieldset>
               <legend className="mb-1 text-xs font-medium text-muted">
@@ -1297,6 +1493,8 @@ function AutomationFormModal({
               </div>
             </fieldset>
           ) : null}
+          {usesKeywordsForm ? (
+            <>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted">
               {t("automations.keywordsLabel")} *
@@ -1349,6 +1547,24 @@ function AutomationFormModal({
               ))}
             </div>
           </fieldset>
+            </>
+          ) : null}
+          {isSignalForm ? (
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted">
+                {t("automations.payloadsLabel")} *
+              </span>
+              <input
+                value={payloads}
+                onChange={(e) => setPayloads(e.target.value)}
+                placeholder={t("automations.payloadsPlaceholder")}
+                className={inputClassName}
+              />
+              <span className="mt-1 block text-[11px] text-muted">
+                {t("automations.payloadsHint")}
+              </span>
+            </label>
+          ) : null}
           {automation?.kind === "comment" ||
           (!automation && kind === "comment") ? (
             <div className="space-y-3">
@@ -1638,8 +1854,10 @@ function AutomationFormModal({
           </div>
           {/* Aksi sekunder (G2, pola formulir agent): simpan susunan
               sequence formulir ini sebagai templat pribadi untuk
-              dipakai ulang dari galeri — salinan, bukan rujukan. */}
-          {isSequenceForm ? (
+              dipakai ulang dari galeri — salinan, bukan rujukan.
+              G5: templat sequence selalu berpemicu kata kunci, jadi
+              lipatan ini hanya untuk sequence pemicu keyword. */}
+          {isSequenceForm && effectiveTriggerType === "keyword" ? (
             <>
               <div className="flex flex-wrap gap-2 border-t border-line pt-3">
                 <button
