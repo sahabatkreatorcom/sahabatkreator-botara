@@ -55,6 +55,7 @@ export const KB_EMBED_JOB = "kb.embed";
 export const TEAM_INVITATION_EMAIL_JOB = "team.invitation_email";
 export const APPOINTMENT_GOOGLE_SYNC_JOB = "appointment.google_sync";
 export const POST_PUBLISH_JOB = "post.publish";
+export const OUTBOUND_WEBHOOK_FANOUT_JOB = "outbound-webhook.fanout";
 
 export interface AutomationEvaluateJobData {
   tenantId: string;
@@ -208,6 +209,21 @@ export interface PostPublishJobData {
   scheduledAt: string;
 }
 
+/**
+ * Job G11: fan-out SATU event outbox katalog webhook keluar
+ * (`message.received` / `message.status_updated`) ke endpoint tenant
+ * yang melanggan. Di-enqueue oleh relay outbox; jobId deterministik
+ * dari id event outbox — relay yang mengulang event yang sama tidak
+ * melahirkan fan-out kedua (dan core pun idempoten lewat UNIQUE
+ * (endpoint_id, source_event_id) pada baris pengiriman).
+ */
+export interface OutboundWebhookFanoutJobData {
+  tenantId: string;
+  outboxEventId: string;
+  eventType: string;
+  payload: Record<string, unknown>;
+}
+
 /** jobId deterministik dari id event outbox — fondasi idempotensi relay. */
 export function automationEvaluateJobId(outboxEventId: string): string {
   return `automation-evaluate-${outboxEventId}`;
@@ -256,6 +272,11 @@ export function appointmentGoogleSyncJobId(outboxEventId: string): string {
   return `appointment-google-sync-${outboxEventId}`;
 }
 
+/** jobId deterministik fan-out webhook keluar dari id event outbox. */
+export function outboundWebhookFanoutJobId(outboxEventId: string): string {
+  return `outbound-webhook-fanout-${outboxEventId}`;
+}
+
 /**
  * Koneksi Redis untuk BullMQ. `maxRetriesPerRequest: null` adalah syarat
  * BullMQ untuk koneksi blocking (Worker). Buat SATU instance per peran
@@ -299,7 +320,8 @@ export type MainJobData =
   | KbEmbedJobData
   | InvitationEmailJobData
   | AppointmentGoogleSyncJobData
-  | PostPublishJobData;
+  | PostPublishJobData
+  | OutboundWebhookFanoutJobData;
 
 export type MainQueue = Queue<MainJobData>;
 
@@ -561,6 +583,27 @@ export async function enqueuePostPublish(
     ...options,
   });
   return job.id ?? jobId;
+}
+
+/**
+ * Meng-enqueue fan-out webhook keluar untuk satu event outbox.
+ * Aman dipanggil berulang: jobId diturunkan dari id event outbox,
+ * BullMQ mengembalikan job yang sudah ada.
+ */
+export async function enqueueOutboundWebhookFanout(
+  queue: MainQueue,
+  data: OutboundWebhookFanoutJobData,
+  options?: JobsOptions,
+): Promise<string> {
+  const job = await queue.add(OUTBOUND_WEBHOOK_FANOUT_JOB, data, {
+    jobId: outboundWebhookFanoutJobId(data.outboxEventId),
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1_000 },
+    removeOnComplete: 1_000,
+    removeOnFail: 1_000,
+    ...options,
+  });
+  return job.id ?? outboundWebhookFanoutJobId(data.outboxEventId);
 }
 
 export {

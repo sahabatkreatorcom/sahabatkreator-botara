@@ -33,6 +33,9 @@ import {
   pruneIntegrationLogs,
   pruneOutboxEvents,
   processBroadcastRecurrences,
+  dispatchOutboundWebhookEvent,
+  processDueOutboundWebhookRetries,
+  OUTBOUND_WEBHOOK_EVENT_TYPES,
   purgeExpiredTrashedChannels,
   reconcileBroadcasts,
   recordPermanentJobFailure,
@@ -74,6 +77,7 @@ import {
   TEAM_INVITATION_EMAIL_JOB,
   APPOINTMENT_GOOGLE_SYNC_JOB,
   POST_PUBLISH_JOB,
+  OUTBOUND_WEBHOOK_FANOUT_JOB,
   createAutomationQueue,
   createRealtimePublisher,
   createRedisConnection,
@@ -85,6 +89,7 @@ import {
   enqueueAppointmentGoogleSync,
   enqueueInvitationEmail,
   enqueuePostPublish,
+  enqueueOutboundWebhookFanout,
   enqueueKbEmbed,
   enqueueSequenceStep,
   type AgentRespondJobData,
@@ -94,6 +99,7 @@ import {
   type FlowStepJobData,
   type AppointmentGoogleSyncJobData,
   type PostPublishJobData,
+  type OutboundWebhookFanoutJobData,
   type InvitationEmailJobData,
   type KbEmbedJobData,
   type MainJobData,
@@ -490,6 +496,32 @@ const commentGraphActions: CommentGraphActions = {
 const bullWorker = new Worker<MainJobData>(
   MAIN_QUEUE_NAME,
   async (job) => {
+    if (job.name === OUTBOUND_WEBHOOK_FANOUT_JOB) {
+      // G11: fan-out satu event outbox katalog webhook keluar ke
+      // endpoint tenant yang melanggan. Core membuat baris pengiriman
+      // (idempoten per (endpoint, event)) + melakukan percobaan
+      // pertama; percobaan ulang ditangani penyapu berbasis
+      // next_attempt_at, BUKAN retry job ini. Kegagalan tingkat DB
+      // dilempar agar BullMQ mencoba lagi (jobId deterministik
+      // menjaga tidak ada fan-out ganda).
+      const data = job.data as OutboundWebhookFanoutJobData;
+      const result = await dispatchOutboundWebhookEvent(
+        db,
+        {
+          tenantId: data.tenantId,
+          eventType: data.eventType,
+          sourceEventId: data.outboxEventId,
+          sourcePayload: data.payload ?? {},
+        },
+        { encryptionSecret: env.CHANNEL_TOKEN_SECRET ?? "" },
+      );
+      if (result.created > 0) {
+        console.log(
+          `[worker] outbound-webhook.fanout event=${data.outboxEventId} type=${data.eventType} matched=${result.matched} created=${result.created}`,
+        );
+      }
+      return result;
+    }
     if (job.name === AUTOMATION_EVALUATE_JOB) {
       const data = job.data as AutomationEvaluateJobData;
       const result = await evaluateInboundMessageForAutomations(
@@ -921,6 +953,21 @@ async function relayTick(): Promise<void> {
   try {
     const relay = await relayUnpublishedOutboxEvents(db, async (_tx, event) => {
       if (!event.tenantId) return;
+      // G11: event katalog webhook keluar → job fan-out ke endpoint
+      // tenant yang melanggan (di SAMPING konsumen yang sudah ada di
+      // bawah — automation untuk message.received tetap berjalan).
+      // jobId deterministik dari id event: relay ulang tidak
+      // menggandakan, dan core idempoten per (endpoint, event).
+      if (
+        (OUTBOUND_WEBHOOK_EVENT_TYPES as readonly string[]).includes(event.type)
+      ) {
+        await enqueueOutboundWebhookFanout(queue, {
+          tenantId: event.tenantId,
+          outboxEventId: event.id,
+          eventType: event.type,
+          payload: event.payload,
+        });
+      }
       // Fase 2C: langkah sequence jatuh tempo → job BullMQ TERTUNDA.
       // Titik mulai delay digeser ke saat event ter-relay (±2 dtk dari
       // jadwal ideal di next_run_at) — toleransi terdokumentasi.
@@ -1383,6 +1430,40 @@ const broadcastRecurrenceTimer = setInterval(
 void broadcastRecurrenceTick();
 
 // ---------------------------------------------------------------------------
+// Webhook keluar (G11): penyapu percobaan ulang pengiriman — memindai
+// baris `outbound_webhook_deliveries` yang jatuh tempo lintas tenant
+// (lengan baca system_outbound_webhook_scan), lalu tiap baris dicoba
+// lagi di konteks tenant-nya lewat jalur percobaan yang sama seperti
+// percobaan pertama (klaim sewa per baris menjaga tidak ada kirim
+// ganda bersamaan). Interval 30 detik: jeda backoff terpendek core
+// juga 30 detik, jadi sapuan ini tidak pernah terlambat berarti.
+const OUTBOUND_WEBHOOK_RETRY_INTERVAL_MS = 30_000;
+let outboundWebhookRetryRunning = false;
+async function outboundWebhookRetryTick(): Promise<void> {
+  if (outboundWebhookRetryRunning) return;
+  outboundWebhookRetryRunning = true;
+  try {
+    const result = await processDueOutboundWebhookRetries(db, {
+      encryptionSecret: env.CHANNEL_TOKEN_SECRET ?? "",
+    });
+    if (result.scanned > 0) {
+      console.log(
+        `[worker] webhook keluar: ${result.scanned} pengiriman jatuh tempo — delivered=${result.delivered} retry=${result.retryScheduled} failed=${result.failed} skipped=${result.skipped}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] webhook keluar gagal (akan dicoba lagi):", err);
+  } finally {
+    outboundWebhookRetryRunning = false;
+  }
+}
+const outboundWebhookRetryTimer = setInterval(
+  () => void outboundWebhookRetryTick(),
+  OUTBOUND_WEBHOOK_RETRY_INTERVAL_MS,
+);
+void outboundWebhookRetryTick();
+
+// ---------------------------------------------------------------------------
 // Lifecycle token Meta (0010): worker harian memindai akun Meta aktif yang
 // tokennya mendekati kedaluwarsa (≤7 hari), mencoba REFRESH `tbft` untuk
 // varian refreshable (system_user_token/business_token — token Unified
@@ -1660,6 +1741,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(authSessionPruneTimer);
   clearInterval(broadcastReconcileTimer);
   clearInterval(broadcastRecurrenceTimer);
+  clearInterval(outboundWebhookRetryTimer);
   clearInterval(tokenLifecycleTimer);
   clearInterval(threadsTokenLifecycleTimer);
   clearInterval(tiktokTokenLifecycleTimer);

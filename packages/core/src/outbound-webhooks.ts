@@ -927,10 +927,9 @@ export async function attemptOutboundWebhookDelivery(
     return finalizeFailed(`url_unsafe: ${validation.code}`, null, true);
   }
 
-  const secret = decryptChannelSecret(
-    deps.encryptionSecret,
-    endpoint.secretEncrypted,
-  );
+  const secret = deps.encryptionSecret
+    ? decryptChannelSecret(deps.encryptionSecret, endpoint.secretEncrypted)
+    : null;
   if (!secret) {
     return finalizeFailed("secret_undecryptable", null, true);
   }
