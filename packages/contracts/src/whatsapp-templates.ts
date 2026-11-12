@@ -159,3 +159,24 @@ export const CreateWhatsAppTemplateRequestSchema = z.object({
 export type CreateWhatsAppTemplateRequest = z.infer<
   typeof CreateWhatsAppTemplateRequestSchema
 >;
+
+/**
+ * Perbaiki template REJECTED (G10) — diteruskan ke Meta
+ * `POST /{message_template_id}`. Nama & bahasa TIDAK ikut: keduanya
+ * tidak bisa diubah di Meta. Hanya template berstatus REJECTED yang
+ * boleh lewat jalur ini (ditegakkan lapisan API: APPROVED tidak diubah
+ * di tempat, PENDING terkunci selama tinjauan). Sesudah diperbaiki
+ * template masuk tinjauan ulang (kembali PENDING).
+ */
+export const UpdateWhatsAppTemplateRequestSchema = z.object({
+  category: WhatsAppTemplateCategorySchema,
+  headerText: z.string().min(1).max(60).optional(),
+  bodyText: z.string().min(1).max(1024),
+  /** Contoh nilai variabel BODY secara berurutan ({{1}}, {{2}}, …). */
+  bodyExamples: z.array(z.string().min(1).max(200)).max(25).optional(),
+  footerText: z.string().min(1).max(60).optional(),
+  buttons: z.array(WhatsAppTemplateButtonSchema).max(3).optional(),
+});
+export type UpdateWhatsAppTemplateRequest = z.infer<
+  typeof UpdateWhatsAppTemplateRequestSchema
+>;

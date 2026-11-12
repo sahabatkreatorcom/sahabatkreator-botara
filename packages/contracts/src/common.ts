@@ -109,6 +109,10 @@ export const ErrorCodeSchema = z.enum([
   // akun WhatsApp tanpa WABA induk tercatat → 422.
   "META_TEMPLATE_INVALID",
   "META_WABA_MISSING",
+  // G10: perbaikan-di-tempat template WhatsApp hanya sah untuk status
+  // REJECTED (APPROVED tidak diubah di tempat — buat versi baru;
+  // PENDING sedang ditinjau dan terkunci) → 409.
+  "WHATSAPP_TEMPLATE_NOT_EDITABLE",
   // Fase 10B: aturan komentar terikat ke akun selain IG/Messenger yang
   // terhubung (atau akun tenant lain) → 422; moderasi manual komentar
   // ditolak Meta / token akun tak tersedia → 422 (status lokal tidak
