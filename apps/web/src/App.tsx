@@ -327,7 +327,7 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
         {activeId === "dashboard" ? (
           <DashboardPage t={t} locale={locale} />
         ) : activeId === "contacts" ? (
-          <ContactsPage t={t} locale={locale} />
+          <ContactsPage t={t} locale={locale} onNavigateTo={onNavigateTo} />
         ) : activeId === "inbox" ? (
           <InboxPage
             t={t}

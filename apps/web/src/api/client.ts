@@ -44,7 +44,11 @@ import type {
   ChannelAccountResponse,
   CommentListResponse,
   CommentResponse,
+  ContactBulkRequest,
+  ContactBulkResponse,
+  ContactConversationListResponse,
   ContactDuplicatesResponse,
+  ContactImportResponse,
   ContactListResponse,
   ContactResponse,
   ConversationListResponse,
@@ -472,7 +476,7 @@ export const api = {
     },
   },
   contacts: {
-    /** GET /api/tenants/:tenantId/contacts?search=&limit=&offset=&segmentId= → {contacts,total} */
+    /** GET /api/tenants/:tenantId/contacts?search=&limit=&offset=&segmentId=&stage= → {contacts,total} */
     list(
       tenantId: string,
       opts?: {
@@ -480,6 +484,7 @@ export const api = {
         limit?: number;
         offset?: number;
         segmentId?: string;
+        stage?: string;
       },
     ): Promise<ContactListResponse> {
       const q = new URLSearchParams();
@@ -487,11 +492,86 @@ export const api = {
       if (opts?.limit !== undefined) q.set("limit", String(opts.limit));
       if (opts?.offset !== undefined) q.set("offset", String(opts.offset));
       if (opts?.segmentId) q.set("segmentId", opts.segmentId);
+      if (opts?.stage) q.set("stage", opts.stage);
       const qs = q.toString();
       return request<ContactListResponse>(
         `/api/tenants/${tenantId}/contacts${qs ? `?${qs}` : ""}`,
         { method: "GET" },
       );
+    },
+    /** GET /api/tenants/:tenantId/contacts/:id/conversations → percakapan milik kontak (panel detail). */
+    conversations(
+      tenantId: string,
+      contactId: string,
+    ): Promise<ContactConversationListResponse> {
+      return request<ContactConversationListResponse>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/conversations`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/contacts/bulk → satu aksi untuk banyak kontak; hasil per aksi dilaporkan. */
+    bulk(
+      tenantId: string,
+      input: ContactBulkRequest,
+    ): Promise<ContactBulkResponse> {
+      return request<ContactBulkResponse>(
+        `/api/tenants/${tenantId}/contacts/bulk`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/contacts/import {csv} → laporan impor per baris. */
+    importCsv(
+      tenantId: string,
+      csv: string,
+    ): Promise<ContactImportResponse> {
+      return request<ContactImportResponse>(
+        `/api/tenants/${tenantId}/contacts/import`,
+        { method: "POST", body: JSON.stringify({ csv }) },
+      );
+    },
+    /**
+     * GET /api/tenants/:tenantId/contacts/export?search=&segmentId=&stage=
+     * — unduh CSV seluruh kontak sesuai filter daftar aktif. Pola
+     * unduhan yang sama seperti ekspor channel: fetch berkredensial
+     * langsung lalu simpan lewat blob URL.
+     */
+    async downloadExport(
+      tenantId: string,
+      opts?: { search?: string; segmentId?: string; stage?: string },
+    ): Promise<void> {
+      const q = new URLSearchParams();
+      if (opts?.search) q.set("search", opts.search);
+      if (opts?.segmentId) q.set("segmentId", opts.segmentId);
+      if (opts?.stage) q.set("stage", opts.stage);
+      const qs = q.toString();
+      let res: Response;
+      try {
+        res = await fetch(
+          `/api/tenants/${tenantId}/contacts/export${qs ? `?${qs}` : ""}`,
+          { credentials: "include" },
+        );
+      } catch {
+        throw new ApiClientError(0, "NETWORK_ERROR", "Network request failed");
+      }
+      if (!res.ok) {
+        throw new ApiClientError(
+          res.status,
+          fallbackCodeForStatus(res.status),
+          res.statusText,
+        );
+      }
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? "contacts.csv";
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
     },
     create(
       tenantId: string,

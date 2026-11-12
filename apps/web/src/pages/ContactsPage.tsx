@@ -6,7 +6,10 @@ import {
   type FormEvent,
 } from "react";
 import type {
+  ContactBulkRequest,
+  ContactConversation,
   ContactDuplicatesResponse,
+  ContactImportResponse,
   ContactResponse,
   EffectiveOptInStatus,
   OptInStatus,
@@ -111,6 +114,8 @@ function PlatformBadges({
 interface ContactsPageProps {
   t: Translate;
   locale: Locale;
+  /** Navigasi shell — dipakai tautan "Buka di Inbox" pada panel detail. */
+  onNavigateTo?: (path: string) => void;
 }
 
 /**
@@ -118,7 +123,7 @@ interface ContactsPageProps {
  * pencarian server-side (?search=), pagination offset ("Muat lebih banyak"),
  * tambah kontak, dan detail/edit (nama, tags, pipeline stage, opt-in) via PATCH.
  */
-export function ContactsPage({ t, locale }: ContactsPageProps) {
+export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
   const { status, tenants, active, reload } = useWorkspace();
   const tenantId = active?.id ?? null;
 
@@ -132,8 +137,28 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
   // Segmen (Fase 13C): daftar untuk filter + pengelola; filter aktif.
   const [segments, setSegments] = useState<SegmentResponse[]>([]);
   const [segmentFilter, setSegmentFilter] = useState("");
+  // Filter tahap pipeline (daftar utama + ekspor berbagi filter ini).
+  const [stageFilter, setStageFilter] = useState("");
   const canManageSegments =
     active?.role === "owner" || active?.role === "admin";
+
+  // Pilihan massal: id kontak yang dicentang dari daftar yang tampil.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(
+    new Set(),
+  );
+  const [bulkTag, setBulkTag] = useState("");
+  const [bulkStage, setBulkStage] = useState<string>(KNOWN_STAGES[0]);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkResult, setBulkResult] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+
+  // Impor CSV: input berkas tersembunyi + laporan hasil terakhir.
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] =
+    useState<ContactImportResponse | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   const loadSegments = useCallback(async () => {
     if (!tenantId) return;
@@ -214,10 +239,14 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
         limit: PAGE_SIZE,
         offset: 0,
         segmentId: segmentFilter || undefined,
+        stage: stageFilter || undefined,
       });
       if (requestSeq.current !== seq) return;
       setItems(body.contacts);
       setTotal(body.total);
+      // Muat ulang dari halaman pertama = konteks daftar baru;
+      // pilihan massal dari daftar lama tidak diteruskan.
+      setSelectedIds(new Set());
     } catch (err) {
       if (requestSeq.current !== seq) return;
       setError(translateApiError(t, err));
@@ -226,7 +255,7 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
     } finally {
       if (requestSeq.current === seq) setLoading(false);
     }
-  }, [tenantId, search, segmentFilter, t]);
+  }, [tenantId, search, segmentFilter, stageFilter, t]);
 
   useEffect(() => {
     void loadFirst();
@@ -241,6 +270,7 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
         limit: PAGE_SIZE,
         offset: items.length,
         segmentId: segmentFilter || undefined,
+        stage: stageFilter || undefined,
       });
       setItems((prev) => [...prev, ...body.contacts]);
       setTotal(body.total);
@@ -249,6 +279,99 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
     } finally {
       setLoadingMore(false);
     }
+  };
+
+  // --- Aksi massal -------------------------------------------------
+  const toggleSelected = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const runBulk = async (
+    build: (ids: string[]) => ContactBulkRequest | null,
+  ) => {
+    if (!tenantId) return;
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+    const request = build(ids);
+    if (!request) return;
+    setBulkBusy(true);
+    setBulkError(null);
+    setBulkResult(null);
+    try {
+      const result = await api.contacts.bulk(tenantId, request);
+      setBulkResult(
+        t("contacts.bulk.result", {
+          succeeded: formatNumber(result.succeeded, locale),
+          failed: formatNumber(result.failed.length, locale),
+        }) +
+          (result.failed.length > 0
+            ? ` (${t("contacts.bulk.notFoundSuffix")})`
+            : ""),
+      );
+      setConfirmBulkDelete(false);
+      await Promise.all([loadFirst(), loadDuplicates()]);
+    } catch (err) {
+      setBulkError(translateApiError(t, err));
+      setConfirmBulkDelete(false);
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const runTagBulk = (action: "add_tag" | "remove_tag") => {
+    const tag = bulkTag.trim();
+    if (!tag) {
+      setBulkError(t("contacts.bulk.tagRequired"));
+      return;
+    }
+    void runBulk((ids) => ({ action, ids, tag }));
+  };
+
+  // --- Impor / ekspor CSV -------------------------------------------
+  const handleImportFile = async (file: File) => {
+    if (!tenantId) return;
+    setImporting(true);
+    setBulkError(null);
+    try {
+      const text = await file.text();
+      const report = await api.contacts.importCsv(tenantId, text);
+      setImportReport(report);
+      await Promise.all([loadFirst(), loadDuplicates()]);
+    } catch (err) {
+      setBulkError(translateApiError(t, err));
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleExport = async () => {
+    if (!tenantId) return;
+    setExporting(true);
+    setBulkError(null);
+    try {
+      await api.contacts.downloadExport(tenantId, {
+        search: search || undefined,
+        segmentId: segmentFilter || undefined,
+        stage: stageFilter || undefined,
+      });
+    } catch (err) {
+      setBulkError(translateApiError(t, err));
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const importReasonLabel = (reason: string): string => {
+    const key = `contacts.importReasons.${reason}` as TranslationKey;
+    const label = t(key);
+    // Kunci tak dikenal (alasan baru dari server) tampil apa adanya —
+    // lebih baik daripada menyembunyikan alasan barisnya.
+    return label === key ? reason : label;
   };
 
   if (status === "loading") {
@@ -295,14 +418,90 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
           <h1 className="text-2xl font-bold text-ink">{t("contacts.title")}</h1>
           <p className="mt-1 text-sm text-muted">{t("contacts.subtitle")}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowForm((v) => !v)}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
-        >
-          {t("contacts.addButton")}
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              e.target.value = "";
+              if (file) void handleImportFile(file);
+            }}
+          />
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={importing}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
+          >
+            {importing ? t("contacts.importing") : t("contacts.importButton")}
+          </button>
+          <button
+            type="button"
+            onClick={() => void handleExport()}
+            disabled={exporting}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
+          >
+            {t("contacts.exportButton")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowForm((v) => !v)}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          >
+            {t("contacts.addButton")}
+          </button>
+        </div>
       </div>
+
+      {importReport ? (
+        <div className="mt-5 rounded-xl border border-line bg-surface p-4">
+          <h2 className="text-sm font-semibold text-ink">
+            {t("contacts.importReportTitle")}
+          </h2>
+          <p className="mt-1 text-sm text-muted">
+            {t("contacts.importReportImported", {
+              count: formatNumber(importReport.imported, locale),
+            })}
+          </p>
+          {importReport.duplicates.length > 0 ? (
+            <>
+              <p className="mt-2 text-xs font-medium text-muted">
+                {t("contacts.importReportDuplicates", {
+                  count: formatNumber(importReport.duplicates.length, locale),
+                })}
+              </p>
+              <ul className="mt-1 space-y-0.5 text-xs text-muted">
+                {importReport.duplicates.map((issue) => (
+                  <li key={`dup-${issue.row}`}>
+                    {t("contacts.importRowLabel", { row: issue.row })} —{" "}
+                    {importReasonLabel(issue.reason)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {importReport.invalid.length > 0 ? (
+            <>
+              <p className="mt-2 text-xs font-medium text-muted">
+                {t("contacts.importReportInvalid", {
+                  count: formatNumber(importReport.invalid.length, locale),
+                })}
+              </p>
+              <ul className="mt-1 space-y-0.5 text-xs text-muted">
+                {importReport.invalid.map((issue) => (
+                  <li key={`inv-${issue.row}`}>
+                    {t("contacts.importRowLabel", { row: issue.row })} —{" "}
+                    {importReasonLabel(issue.reason)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {showForm ? (
         <CreateContactForm
@@ -446,6 +645,21 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
             ))}
           </select>
         </label>
+        <label className="flex items-center gap-2 text-sm text-muted">
+          <span>{t("contacts.stageFilterLabel")}</span>
+          <select
+            value={stageFilter}
+            onChange={(e) => setStageFilter(e.target.value)}
+            className="rounded-lg border border-line bg-surface px-2 py-2 text-sm text-ink"
+          >
+            <option value="">{t("contacts.stageFilterAll")}</option>
+            {KNOWN_STAGES.map((stage) => (
+              <option key={stage} value={stage}>
+                {stageLabel(t, stage)}
+              </option>
+            ))}
+          </select>
+        </label>
         <span className="text-sm text-muted">
           {t("contacts.totalLabel", { count: formatNumber(total, locale) })}
         </span>
@@ -459,27 +673,149 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
       </div>
 
       <FieldError message={error} />
+      <FieldError message={bulkError} />
+      {bulkResult ? (
+        <p className="mt-2 text-sm text-muted">{bulkResult}</p>
+      ) : null}
+
+      {selectedIds.size > 0 ? (
+        <div className="mt-4 rounded-xl border border-line bg-surface p-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-semibold text-ink">
+              {t("contacts.bulk.selectedLabel", {
+                count: formatNumber(selectedIds.size, locale),
+              })}
+            </span>
+            <button
+              type="button"
+              onClick={() => setSelectedIds(new Set())}
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+            >
+              {t("contacts.bulk.clearSelection")}
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              value={bulkTag}
+              onChange={(e) => setBulkTag(e.target.value)}
+              placeholder={t("contacts.bulk.tagPlaceholder")}
+              aria-label={t("contacts.bulk.tagPlaceholder")}
+              className="w-40 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+            />
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => runTagBulk("add_tag")}
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-60"
+            >
+              {t("contacts.bulk.addTag")}
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => runTagBulk("remove_tag")}
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-60"
+            >
+              {t("contacts.bulk.removeTag")}
+            </button>
+            <span className="mx-1 hidden h-5 w-px bg-line sm:block" />
+            <select
+              value={bulkStage}
+              onChange={(e) => setBulkStage(e.target.value)}
+              aria-label={t("contacts.stageLabel")}
+              className="rounded-lg border border-line bg-surface px-2 py-1.5 text-sm text-ink"
+            >
+              {KNOWN_STAGES.map((stage) => (
+                <option key={stage} value={stage}>
+                  {stageLabel(t, stage)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() =>
+                void runBulk((ids) => ({ action: "set_stage", ids, stage: bulkStage }))
+              }
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-60"
+            >
+              {t("contacts.bulk.stageApply")}
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => void runBulk((ids) => ({ action: "opt_out", ids }))}
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-semibold text-ink disabled:opacity-60"
+            >
+              {t("contacts.bulk.optOut")}
+            </button>
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={() => setConfirmBulkDelete(true)}
+              className="rounded-lg bg-danger px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {t("contacts.bulk.delete")}
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="mt-6 text-sm text-muted">{t("common.loading")}</p>
       ) : items.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center">
           <h2 className="text-base font-semibold text-ink">
-            {search ? t("contacts.emptySearchTitle") : t("contacts.emptyTitle")}
+            {search || segmentFilter || stageFilter
+              ? t("contacts.emptySearchTitle")
+              : t("contacts.emptyTitle")}
           </h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted">
-            {search ? t("contacts.emptySearchBody") : t("contacts.emptyBody")}
+            {search || segmentFilter || stageFilter
+              ? t("contacts.emptySearchBody")
+              : t("contacts.emptyBody")}
           </p>
         </div>
       ) : (
         <>
-          <ul className="mt-5 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
+          <label className="mt-5 flex items-center gap-2 text-sm text-muted">
+            <input
+              type="checkbox"
+              checked={
+                items.length > 0 &&
+                items.every((contact) => selectedIds.has(contact.id))
+              }
+              onChange={(e) => {
+                setSelectedIds((prev) => {
+                  const next = new Set(prev);
+                  for (const contact of items) {
+                    if (e.target.checked) next.add(contact.id);
+                    else next.delete(contact.id);
+                  }
+                  return next;
+                });
+              }}
+              className="h-4 w-4"
+            />
+            <span>{t("contacts.bulk.selectAllLoaded")}</span>
+          </label>
+          <ul className="mt-3 divide-y divide-line overflow-hidden rounded-xl border border-line bg-surface">
             {items.map((contact) => (
-              <li key={contact.id}>
+              <li
+                key={contact.id}
+                className="flex items-center gap-2 px-4 py-3 hover:bg-elevated"
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedIds.has(contact.id)}
+                  onChange={() => toggleSelected(contact.id)}
+                  aria-label={contact.name}
+                  className="h-4 w-4 shrink-0"
+                />
                 <button
                   type="button"
                   onClick={() => setSelected(contact)}
-                  className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-elevated"
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
                   <Avatar name={contact.name} imageUrl={contact.avatarUrl} />
                   <span className="min-w-0 flex-1">
@@ -537,6 +873,11 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
           tenantId={active.id}
           contact={selected}
           onClose={() => setSelected(null)}
+          onOpenConversation={(conversationId) => {
+            const path = `/inbox/${encodeURIComponent(conversationId)}`;
+            if (onNavigateTo) onNavigateTo(path);
+            else window.location.href = path;
+          }}
           onUpdated={(updated) => {
             setItems((prev) =>
               prev.map((c) => (c.id === updated.id ? updated : c)),
@@ -544,6 +885,41 @@ export function ContactsPage({ t, locale }: ContactsPageProps) {
             setSelected(updated);
           }}
         />
+      ) : null}
+
+      {confirmBulkDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-2xl border border-line bg-surface p-5">
+            <h2 className="text-base font-semibold text-ink">
+              {t("contacts.bulk.confirmDeleteTitle")}
+            </h2>
+            <p className="mt-2 text-sm text-muted">
+              {t("contacts.bulk.confirmDeleteBody", {
+                count: formatNumber(selectedIds.size, locale),
+              })}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmBulkDelete(false)}
+                disabled={bulkBusy}
+                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
+              >
+                {t("common.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runBulk((ids) => ({ action: "delete", ids }))}
+                disabled={bulkBusy}
+                className="rounded-lg bg-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {bulkBusy
+                  ? t("contacts.bulk.deleting")
+                  : t("contacts.bulk.confirmDeleteButton")}
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {mergePair ? (
@@ -710,12 +1086,14 @@ function ContactDetailModal({
   contact,
   onClose,
   onUpdated,
+  onOpenConversation,
 }: {
   t: Translate;
   tenantId: string;
   contact: ContactResponse;
   onClose: () => void;
   onUpdated: (contact: ContactResponse) => void;
+  onOpenConversation: (conversationId: string) => void;
 }) {
   const [name, setName] = useState(contact.name);
   const [tags, setTags] = useState(contact.tags.join(", "));
@@ -723,6 +1101,38 @@ function ContactDetailModal({
   const [optIn, setOptIn] = useState<OptInStatus>(contact.optInStatus);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Percakapan milik kontak (dimuat sekali saat panel dibuka).
+  const [conversations, setConversations] = useState<
+    ContactConversation[] | null
+  >(null);
+  const [conversationsError, setConversationsError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await api.contacts.conversations(tenantId, contact.id);
+        if (!cancelled) setConversations(body.conversations);
+      } catch {
+        if (!cancelled) setConversationsError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, contact.id]);
+
+  // Editor field kustom: pasangan kunci–nilai dari peta tersimpan.
+  // Kunci asli diingat agar yang dihapus dari formulir bisa dikirim
+  // sebagai penghapusan eksplisit (gabung API tidak bisa menghapus).
+  const [cfRows, setCfRows] = useState<Array<{ key: string; value: string }>>(
+    () =>
+      Object.entries(contact.customFields).map(([key, value]) => ({
+        key,
+        value: String(value),
+      })),
+  );
+  const originalCfKeys = useRef(Object.keys(contact.customFields));
 
   const stageOptions = (KNOWN_STAGES as readonly string[]).includes(stage)
     ? [...KNOWN_STAGES]
@@ -735,11 +1145,22 @@ function ContactDetailModal({
     setError(null);
     setSaving(true);
     try {
+      const customFields: Record<string, string> = {};
+      for (const row of cfRows) {
+        const key = row.key.trim();
+        if (!key) continue;
+        customFields[key] = row.value;
+      }
+      const customFieldsDelete = originalCfKeys.current.filter(
+        (key) => !(key in customFields),
+      );
       const updated = await api.contacts.update(tenantId, contact.id, {
         name: trimmedName,
         tags: parseTags(tags),
         pipelineStage: stage,
         optInStatus: optIn,
+        customFields,
+        ...(customFieldsDelete.length > 0 ? { customFieldsDelete } : {}),
       });
       onUpdated(updated);
       onClose();
@@ -775,6 +1196,14 @@ function ContactDetailModal({
                   showEmpty
                 />
               </p>
+              {contact.lastContactedAt ? (
+                <p className="mt-1 text-[11px] text-muted">
+                  <span className="font-medium text-ink">
+                    {t("contacts.detail.lastContactedLabel")}:
+                  </span>{" "}
+                  {new Date(contact.lastContactedAt).toLocaleString()}
+                </p>
+              ) : null}
             </div>
           </div>
           <button
@@ -867,6 +1296,70 @@ function ContactDetailModal({
               </p>
             ) : null}
           </div>
+          {/* Editor field kustom: pasangan kunci–nilai sederhana.
+              Nilai tampil apa adanya; menghapus baris menghapus
+              kuncinya saat disimpan (customFieldsDelete). */}
+          <div>
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("contacts.detail.customFieldsTitle")}
+            </span>
+            {cfRows.length === 0 ? (
+              <p className="text-xs text-muted">
+                {t("contacts.detail.customFieldsEmpty")}
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {cfRows.map((row, idx) => (
+                  <div key={idx} className="flex items-center gap-2">
+                    <input
+                      value={row.key}
+                      onChange={(e) =>
+                        setCfRows((prev) =>
+                          prev.map((r, i) =>
+                            i === idx ? { ...r, key: e.target.value } : r,
+                          ),
+                        )
+                      }
+                      placeholder={t("contacts.detail.customFieldKeyPlaceholder")}
+                      aria-label={t("contacts.detail.customFieldKeyPlaceholder")}
+                      className={`${inputClassName} min-w-0 flex-1`}
+                    />
+                    <input
+                      value={row.value}
+                      onChange={(e) =>
+                        setCfRows((prev) =>
+                          prev.map((r, i) =>
+                            i === idx ? { ...r, value: e.target.value } : r,
+                          ),
+                        )
+                      }
+                      placeholder={t("contacts.detail.customFieldValuePlaceholder")}
+                      aria-label={t("contacts.detail.customFieldValuePlaceholder")}
+                      className={`${inputClassName} min-w-0 flex-1`}
+                    />
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCfRows((prev) => prev.filter((_, i) => i !== idx))
+                      }
+                      className="shrink-0 rounded-lg bg-elevated px-2 py-1.5 text-xs font-medium text-ink"
+                    >
+                      {t("contacts.detail.customFieldRemove")}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() =>
+                setCfRows((prev) => [...prev, { key: "", value: "" }])
+              }
+              className="mt-2 text-xs font-medium text-accent"
+            >
+              + {t("contacts.detail.customFieldAdd")}
+            </button>
+          </div>
           <FieldError message={error} />
           <div className="flex gap-2 pt-1">
             <button
@@ -885,6 +1378,70 @@ function ContactDetailModal({
             </button>
           </div>
         </form>
+
+        {/* Percakapan milik kontak. Hanya percakapan PESAN
+            (private/group) yang diberi tautan Inbox — baris channel
+            adalah linimasa postingan dan Inbox menyaringnya keluar,
+            jadi menautkannya akan menyesatkan. */}
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold text-ink">
+            {t("contacts.detail.conversationsTitle")}
+          </h3>
+          {conversationsError ? (
+            <p className="mt-2 text-xs text-danger">
+              {t("contacts.detail.conversationsLoadError")}
+            </p>
+          ) : conversations === null ? (
+            <p className="mt-2 text-xs text-muted">{t("common.loading")}</p>
+          ) : conversations.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">
+              {t("contacts.detail.conversationsEmpty")}
+            </p>
+          ) : (
+            <>
+              <ul className="mt-2 divide-y divide-line overflow-hidden rounded-lg border border-line">
+                {conversations.map((conv) => (
+                  <li
+                    key={conv.id}
+                    className="flex items-center gap-2 px-3 py-2 text-sm"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-ink">
+                        {conv.title ?? contact.name}
+                      </span>
+                      <span className="block text-xs text-muted">
+                        {t(`inbox.providers.${conv.provider}` as TranslationKey)}
+                        {" · "}
+                        {conv.kind === "private"
+                          ? t("contacts.detail.kindPrivate")
+                          : conv.kind === "group"
+                            ? t("contacts.detail.kindGroup")
+                            : t("contacts.detail.kindChannel")}
+                        {conv.lastMessageAt
+                          ? ` · ${new Date(conv.lastMessageAt).toLocaleString()}`
+                          : ""}
+                      </span>
+                    </span>
+                    {conv.kind !== "channel" ? (
+                      <button
+                        type="button"
+                        onClick={() => onOpenConversation(conv.id)}
+                        className="shrink-0 rounded-lg bg-elevated px-2 py-1.5 text-xs font-semibold text-ink"
+                      >
+                        {t("contacts.detail.openInInbox")}
+                      </button>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+              {conversations.some((conv) => conv.kind === "channel") ? (
+                <p className="mt-2 text-[11px] text-muted">
+                  {t("contacts.detail.channelNote")}
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
