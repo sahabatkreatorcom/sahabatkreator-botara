@@ -1307,6 +1307,7 @@ export async function createDealForContact(
     title: input.title,
     value: input.value,
     currency: defaultCurrency,
+    assigneeUserId: input.assigneeUserId ?? null,
     actor: input.actor,
     auditMetaExtra: input.auditMetaExtra,
   });

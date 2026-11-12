@@ -36,7 +36,8 @@
     "backfill:kb-embeddings": "tsx scripts/backfill-kb-embeddings.ts",
     "verify:contacts": "tsx scripts/verify-contacts.ts",
     "verify:contact-timeline": "tsx scripts/verify-contact-timeline.ts",
-    "verify:gap-tier2": "tsx scripts/verify-gap-tier2.ts"
+    "verify:gap-tier2": "tsx scripts/verify-gap-tier2.ts",
+    "verify:deals": "tsx scripts/verify-deals.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
