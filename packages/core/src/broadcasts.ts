@@ -1141,7 +1141,25 @@ export async function createBroadcast(
   db: Database,
   input: {
     tenantId: string;
-    userId: string;
+    /**
+     * User pembuat (kolom created_by_user_id). Boleh null bila
+     * broadcast dibuat SISTEM (G9: materialisasi aturan berulang
+     * yang pemiliknya sudah terhapus) — auditActor wajib menyertai.
+     */
+    userId: string | null;
+    /**
+     * G9: aktor audit alternatif. Tanpa bidang ini audit ditulis
+     * sebagai user `userId` (perilaku lama). Materialisasi berulang
+     * mengisinya { actorType: "system", actorId:
+     * "broadcast-recurrence:<ruleId>", meta: { recurrenceRuleId } }
+     * agar broadcast anak terbaca sebagai buatan sistem, bukan
+     * seolah dibuat manual oleh pemilik aturan.
+     */
+    auditActor?: {
+      actorType: "user" | "system";
+      actorId: string;
+      meta?: Record<string, unknown>;
+    };
     name: string;
     channelAccountId: string;
     /** Wajib untuk provider teks; untuk whatsapp diabaikan (template). */
@@ -1235,8 +1253,8 @@ export async function createBroadcast(
       .returning();
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "broadcast.created",
       meta: {
         broadcastId: row.id,
@@ -1246,6 +1264,7 @@ export async function createBroadcast(
         ...(ab.abSplitPercentB !== null
           ? { abSplitPercentB: ab.abSplitPercentB }
           : {}),
+        ...(input.auditActor?.meta ?? {}),
       },
     });
     const broadcast = await selectBroadcastWithChannel(
@@ -1484,7 +1503,14 @@ export async function scheduleBroadcast(
   input: {
     tenantId: string;
     broadcastId: string;
-    userId: string;
+    /** Boleh null untuk penjadwalan oleh sistem (G9) — lihat createBroadcast. */
+    userId: string | null;
+    /** G9: aktor audit alternatif (sistem), selaras createBroadcast. */
+    auditActor?: {
+      actorType: "user" | "system";
+      actorId: string;
+      meta?: Record<string, unknown>;
+    };
     /** Null/tidak diisi = kirim sekarang. Waktu lampau diperlakukan sekarang. */
     scheduledAt?: Date | null;
   },
@@ -1596,13 +1622,14 @@ export async function scheduleBroadcast(
     });
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "broadcast.scheduled",
       meta: {
         broadcastId: input.broadcastId,
         channelAccountId: existing.channelAccountId,
         scheduledAt: dispatchAt.toISOString(),
+        ...(input.auditActor?.meta ?? {}),
       },
     });
     const broadcast = await selectBroadcastWithChannel(
@@ -1629,7 +1656,18 @@ export type CancelBroadcastResult =
 
 export async function cancelBroadcast(
   db: Database,
-  input: { tenantId: string; broadcastId: string; userId: string },
+  input: {
+    tenantId: string;
+    broadcastId: string;
+    /** Boleh null untuk pembatalan oleh sistem (G9) — lihat createBroadcast. */
+    userId: string | null;
+    /** G9: aktor audit alternatif (sistem), selaras createBroadcast. */
+    auditActor?: {
+      actorType: "user" | "system";
+      actorId: string;
+      meta?: Record<string, unknown>;
+    };
+  },
 ): Promise<CancelBroadcastResult> {
   return withTenantDb(db, input.tenantId, async (tx) => {
     const existing = await selectBroadcastWithChannel(
@@ -1730,13 +1768,14 @@ export async function cancelBroadcast(
     }
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "broadcast.cancelled",
       meta: {
         broadcastId: input.broadcastId,
         fromStatus: existing.status,
         cancelledRecipients,
+        ...(input.auditActor?.meta ?? {}),
       },
     });
     const broadcast = await selectBroadcastWithChannel(
