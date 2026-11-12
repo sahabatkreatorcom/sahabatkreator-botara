@@ -127,6 +127,21 @@ export const PLATFORM_SETTING_KEYS = [
   // Google menjawab GOOGLE_NOT_CONFIGURED secara jujur (pola Resend).
   "google_oauth_client_id",
   "google_oauth_client_secret",
+  // Gelombang Pemisahan Google (keputusan pemilik 2026-11-12): klien
+  // OAuth PER LAYANAN — google_calendar_* / google_youtube_* /
+  // google_business_* — agar billing/kuota/persetujuan API tiap
+  // layanan terpisah per proyek Cloud. client_id identifier publik
+  // (lihat PLATFORM_PUBLIC_CONFIG_KEYS); client_secret rahasia.
+  // Resolusi berjenjang per layanan ditangani resolver bertipe
+  // `resolveGoogleServiceClient` di core/google-calendar: pasangan
+  // per-layanan dulu, pasangan bersama di atas sebagai fallback —
+  // koneksi lama tidak putus.
+  "google_calendar_client_id",
+  "google_calendar_client_secret",
+  "google_youtube_client_id",
+  "google_youtube_client_secret",
+  "google_business_client_id",
+  "google_business_client_secret",
   // Instruksi pemilik 2026-11-12: SEMUA kredensial integrasi platform
   // diisi lewat Panel Admin, env hanya fallback — kunci-kunci di bawah
   // menutup sisa pembacaan env langsung agar perlakuannya konsisten.
@@ -193,6 +208,12 @@ export const PLATFORM_PUBLIC_CONFIG_KEYS = [
   // di setiap URL dialog OAuth Google (sifatnya sama seperti Meta App
   // ID). Client secret TIDAK ikut: rahasia penuh seperti kunci lain.
   "google_oauth_client_id",
+  // Gelombang Pemisahan Google: Client ID per layanan — identifier
+  // publik yang sama sifatnya (tampil di URL dialog layanan itu).
+  // Secret per layanannya TIDAK ikut: rahasia penuh seperti di atas.
+  "google_calendar_client_id",
+  "google_youtube_client_id",
+  "google_business_client_id",
   // Pengaturan content schedule: base URL publik menurut definisinya
   // PUBLIK (itulah gunanya — provider mengambil media dari sana), dan
   // dua status privasi adalah pilihan enum yang memang harus terlihat
@@ -239,6 +260,9 @@ export async function getPlatformPublicConfig(
     resendFromEmail,
     resendFromName,
     googleClientId,
+    googleCalendarClientId,
+    googleYoutubeClientId,
+    googleBusinessClientId,
     postMediaPublicBaseUrl,
     youtubePrivacyStatus,
     tiktokPrivacyLevel,
@@ -256,6 +280,9 @@ export async function getPlatformPublicConfig(
     getProviderSecret(db, "resend_from_email", opts),
     getProviderSecret(db, "resend_from_name", opts),
     getProviderSecret(db, "google_oauth_client_id", opts),
+    getProviderSecret(db, "google_calendar_client_id", opts),
+    getProviderSecret(db, "google_youtube_client_id", opts),
+    getProviderSecret(db, "google_business_client_id", opts),
     getProviderSecret(db, "post_media_public_base_url", opts),
     getProviderSecret(db, "youtube_privacy_status", opts),
     getProviderSecret(db, "tiktok_privacy_level", opts),
@@ -277,6 +304,9 @@ export async function getPlatformPublicConfig(
     resend_from_email: resendFromEmail,
     resend_from_name: resendFromName,
     google_oauth_client_id: googleClientId,
+    google_calendar_client_id: googleCalendarClientId,
+    google_youtube_client_id: googleYoutubeClientId,
+    google_business_client_id: googleBusinessClientId,
     post_media_public_base_url: postMediaPublicBaseUrl,
     youtube_privacy_status: youtubePrivacyStatus,
     tiktok_privacy_level: tiktokPrivacyLevel,

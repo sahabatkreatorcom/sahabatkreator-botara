@@ -141,6 +141,15 @@ const platformOptions: PlatformSettingsOptions = {
     // + client_secret rahasia).
     google_oauth_client_id: env.GOOGLE_OAUTH_CLIENT_ID,
     google_oauth_client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+    // Gelombang Pemisahan Google: klien OAuth per layanan (Calendar /
+    // YouTube / Business) — env hanya fallback berjenjang di bawah
+    // panel per-layanan dan panel bersama; sumber utama Panel Admin.
+    google_calendar_client_id: env.GOOGLE_CALENDAR_CLIENT_ID,
+    google_calendar_client_secret: env.GOOGLE_CALENDAR_CLIENT_SECRET,
+    google_youtube_client_id: env.GOOGLE_YOUTUBE_CLIENT_ID,
+    google_youtube_client_secret: env.GOOGLE_YOUTUBE_CLIENT_SECRET,
+    google_business_client_id: env.GOOGLE_BUSINESS_CLIENT_ID,
+    google_business_client_secret: env.GOOGLE_BUSINESS_CLIENT_SECRET,
     // Instruksi pemilik 2026-11-12: sisa kredensial/pengaturan platform
     // ikut dikelola Panel Admin — env hanya fallback per kunci.
     meta_webhook_verify_token: env.META_WEBHOOK_VERIFY_TOKEN,

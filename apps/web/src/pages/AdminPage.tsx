@@ -112,6 +112,13 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   resend_from_name: "admin.resendFromNameLabel",
   google_oauth_client_id: "admin.googleOauthClientIdLabel",
   google_oauth_client_secret: "admin.googleOauthClientSecretLabel",
+  // Gelombang Pemisahan Google: kredensial aplikasi per layanan.
+  google_calendar_client_id: "admin.googleCalendarClientIdLabel",
+  google_calendar_client_secret: "admin.googleCalendarClientSecretLabel",
+  google_youtube_client_id: "admin.googleYoutubeClientIdLabel",
+  google_youtube_client_secret: "admin.googleYoutubeClientSecretLabel",
+  google_business_client_id: "admin.googleBusinessClientIdLabel",
+  google_business_client_secret: "admin.googleBusinessClientSecretLabel",
   post_media_public_base_url: "admin.postMediaPublicBaseUrlLabel",
   youtube_privacy_status: "admin.youtubePrivacyStatusLabel",
   tiktok_privacy_level: "admin.tiktokPrivacyLevelLabel",
@@ -754,10 +761,15 @@ export function AdminPage({ t, locale }: AdminPageProps) {
       </section>
 
       {/*
-        Fase 13G — klien OAuth Google milik platform untuk sinkron
-        Google Calendar janji temu. Client ID publik (baris teks +
-        nilai efektif ditampilkan); client secret rahasia (baris
-        password, SENGAJA tanpa tombol Uji — pola Meta app secret).
+        Fase 13G — klien OAuth Google milik platform. Client ID publik
+        (baris teks + nilai efektif ditampilkan); client secret rahasia
+        (baris password, SENGAJA tanpa tombol Uji — pola Meta app
+        secret). Gelombang Pemisahan Google: pasangan pertama kini
+        berperan BERSAMA/fallback; tiga pasangan per layanan di bawah
+        membolehkan proyek Cloud terpisah per layanan (billing/kuota/
+        persetujuan API sendiri-sendiri). Client ID efektif per
+        layanan ditampilkan agar pemilik bisa memverifikasi rantai
+        fallback-nya.
       */}
       <section className="mt-8">
         <h2 className="text-base font-semibold text-ink">
@@ -781,6 +793,21 @@ export function AdminPage({ t, locale }: AdminPageProps) {
               label={t("admin.googleOauthRedirectLabel")}
               url={googleInfo.oauthRedirectUri}
             />
+            <div className="rounded-xl bg-surface p-3">
+              <dt className="text-xs text-muted">
+                {t("admin.googleServiceEffectiveLabel")}
+              </dt>
+              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+                {t("admin.googleServiceCalendarName")}:{" "}
+                {googleInfo.services.calendar.clientId ?? "—"}
+                <br />
+                {t("admin.googleServiceYoutubeName")}:{" "}
+                {googleInfo.services.youtube.clientId ?? "—"}
+                <br />
+                {t("admin.googleServiceBusinessName")}:{" "}
+                {googleInfo.services.business.clientId ?? "—"}
+              </dd>
+            </div>
           </dl>
         ) : null}
         <div className="mt-4 space-y-3">
@@ -800,6 +827,60 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             locale={locale}
             settingKey="google_oauth_client_secret"
             status={byKey("google_oauth_client_secret")}
+            onStatusChanged={onStatusChanged}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="google_calendar_client_id"
+            status={byKey("google_calendar_client_id")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="google_calendar_client_secret"
+            status={byKey("google_calendar_client_secret")}
+            onStatusChanged={onStatusChanged}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="google_youtube_client_id"
+            status={byKey("google_youtube_client_id")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="google_youtube_client_secret"
+            status={byKey("google_youtube_client_secret")}
+            onStatusChanged={onStatusChanged}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="google_business_client_id"
+            status={byKey("google_business_client_id")}
+            secret={false}
+            onStatusChanged={(next) => {
+              onStatusChanged(next);
+              void load();
+            }}
+          />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="google_business_client_secret"
+            status={byKey("google_business_client_secret")}
             onStatusChanged={onStatusChanged}
           />
         </div>

@@ -87,6 +87,22 @@ export const PlatformSettingKeySchema = z.enum([
   // menjawab GOOGLE_NOT_CONFIGURED secara jujur (pola Resend 11B).
   "google_oauth_client_id",
   "google_oauth_client_secret",
+  // Gelombang Pemisahan Google (keputusan pemilik 2026-11-12): klien
+  // OAuth PER LAYANAN agar billing/kuota/persetujuan API tiap layanan
+  // Google benar-benar terpisah per proyek Cloud. Tiga pasangan kunci:
+  // google_calendar_* (Calendar API), google_youtube_* (YouTube Data
+  // API v3), google_business_* (Business Profile API). client_id
+  // identifier PUBLIK (ditampilkan panel lewat PlatformGoogleInfo);
+  // client_secret RAHASIA (pola kunci lain). Rantai resolusi per
+  // layanan: panel per-layanan → panel Google bersama (pasangan
+  // google_oauth_* di atas) → env per-layanan → env bersama — koneksi
+  // yang dibuat dengan kredensial bersama TIDAK putus (fallback utuh).
+  "google_calendar_client_id",
+  "google_calendar_client_secret",
+  "google_youtube_client_id",
+  "google_youtube_client_secret",
+  "google_business_client_id",
+  "google_business_client_secret",
   // Instruksi pemilik 2026-11-12: semua kredensial integrasi diisi lewat
   // Panel Admin, env hanya fallback. `meta_webhook_verify_token` adalah
   // token handshake webhook Meta (nilai yang KITA tentukan) — RAHASIA
@@ -216,8 +232,20 @@ export type PlatformEmailInfo = z.infer<typeof PlatformEmailInfoSchema>;
  * redirect URIs). Client secret TIDAK PERNAH muncul di kontrak.
  */
 export const PlatformGoogleInfoSchema = z.object({
+  /** Client ID klien BERSAMA (fallback semua layanan) — efektif panel → env. */
   clientId: z.string().nullable(),
   oauthRedirectUri: z.string(),
+  /**
+   * Client ID efektif PER LAYANAN (gelombang Pemisahan Google):
+   * resolusi berjenjang per-layanan → bersama — nilai yang benar-benar
+   * akan dipakai dialog OAuth layanan itu. null = layanan berjalan
+   * tanpa klien terkonfigurasi (connect menjawab NOT_CONFIGURED).
+   */
+  services: z.object({
+    calendar: z.object({ clientId: z.string().nullable() }),
+    youtube: z.object({ clientId: z.string().nullable() }),
+    business: z.object({ clientId: z.string().nullable() }),
+  }),
 });
 export type PlatformGoogleInfo = z.infer<typeof PlatformGoogleInfoSchema>;
 

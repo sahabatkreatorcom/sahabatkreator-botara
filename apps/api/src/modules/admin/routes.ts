@@ -117,6 +117,14 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   // format Google (client ID ±72 char, secret ±40 char) + ruang aman.
   google_oauth_client_id: 256,
   google_oauth_client_secret: 512,
+  // Gelombang Pemisahan Google: klien OAuth per layanan — batas
+  // panjang sama seperti pasangan bersama di atas.
+  google_calendar_client_id: 256,
+  google_calendar_client_secret: 512,
+  google_youtube_client_id: 256,
+  google_youtube_client_secret: 512,
+  google_business_client_id: 256,
+  google_business_client_secret: 512,
   // Token verifikasi webhook Meta: nilai bebas yang ditempel ke
   // dashboard Meta App; panjang mengikuti kunci rahasia lain.
   meta_webhook_verify_token: 512,
@@ -142,6 +150,8 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
  * klien saat ada authorization code / refresh token yang ditukar —
  * tidak ada panggilan validasi klien yang berdiri sendiri. Kebenarannya
  * terbukti dari dialog Hubungkan Google tenant yang berhasil/gagal.
+ * Secret per layanan (google_calendar/youtube/business_client_secret)
+ * sama: tidak diuji, dengan alasan yang persis sama.
  * `threads_app_secret` juga tidak diuji — alasan yang sama seperti
  * meta_app_secret (dan alur OAuth Threads-nya sendiri belum dibuka).
  * `tiktok_client_secret` sama: tidak ada panggilan validasi mandiri
@@ -285,9 +295,30 @@ export function createAdminRoutes(
       },
       // Fase 13G: Client ID OAuth Google efektif (publik) + redirect
       // URI yang harus didaftarkan persis di Google Cloud Console.
+      // Gelombang Pemisahan Google: `services` menampilkan client ID
+      // EFEKTIF per layanan (per-layanan → bersama) — nilai yang
+      // benar-benar dipakai dialog OAuth layanan itu; redirect URI
+      // tetap SATU untuk semua proyek.
       google: {
         clientId: publicConfig.google_oauth_client_id,
         oauthRedirectUri: options.googleOAuthRedirectUri ?? "",
+        services: {
+          calendar: {
+            clientId:
+              publicConfig.google_calendar_client_id ??
+              publicConfig.google_oauth_client_id,
+          },
+          youtube: {
+            clientId:
+              publicConfig.google_youtube_client_id ??
+              publicConfig.google_oauth_client_id,
+          },
+          business: {
+            clientId:
+              publicConfig.google_business_client_id ??
+              publicConfig.google_oauth_client_id,
+          },
+        },
       },
       // Pengaturan content schedule efektif — diselesaikan lewat
       // resolver BERTIPE core (panel → env tervalidasi → bawaan aman),

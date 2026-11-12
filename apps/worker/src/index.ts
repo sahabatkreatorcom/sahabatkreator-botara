@@ -247,6 +247,16 @@ const platformSettingsOptions: PlatformSettingsOptions = {
     // me-resolve klien yang sama seperti API.
     google_oauth_client_id: env.GOOGLE_OAUTH_CLIENT_ID,
     google_oauth_client_secret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+    // Gelombang Pemisahan Google: klien OAuth per layanan — refresh
+    // token YouTube/Business di worker WAJIB memakai klien layanan
+    // penerbit tokennya; env di sini fallback berjenjang yang sama
+    // seperti API (panel per-layanan → panel bersama → env).
+    google_calendar_client_id: env.GOOGLE_CALENDAR_CLIENT_ID,
+    google_calendar_client_secret: env.GOOGLE_CALENDAR_CLIENT_SECRET,
+    google_youtube_client_id: env.GOOGLE_YOUTUBE_CLIENT_ID,
+    google_youtube_client_secret: env.GOOGLE_YOUTUBE_CLIENT_SECRET,
+    google_business_client_id: env.GOOGLE_BUSINESS_CLIENT_ID,
+    google_business_client_secret: env.GOOGLE_BUSINESS_CLIENT_SECRET,
     // Kredensial aplikasi LinkedIn (gelombang Semua OAuth): lifecycle
     // token LinkedIn tidak me-refresh (LinkedIn tidak menerbitkan
     // refresh token untuk program standar), tetapi resolusi panel →

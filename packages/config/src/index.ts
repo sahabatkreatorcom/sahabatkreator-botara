@@ -348,6 +348,22 @@ const EnvSchema = z.object({
   GOOGLE_OAUTH_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_OAUTH_CLIENT_SECRET: z.string().min(1).optional(),
   /**
+   * Klien OAuth Google PER LAYANAN (gelombang Pemisahan Google,
+   * keputusan pemilik 2026-11-12) — FALLBACK env saja; sumber utama
+   * Panel Admin (kunci google_calendar_* / google_youtube_* /
+   * google_business_*). Pasangan bersama di atas tetap menjadi
+   * fallback terakhir tiap layanan (rantai: panel per-layanan →
+   * panel bersama → env per-layanan → env bersama), jadi mengisi
+   * env ini OPSIONAL — hanya bila layanan itu memakai proyek Google
+   * Cloud sendiri demi billing/kuota/persetujuan API terpisah.
+   */
+  GOOGLE_CALENDAR_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_CALENDAR_CLIENT_SECRET: z.string().min(1).optional(),
+  GOOGLE_YOUTUBE_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_YOUTUBE_CLIENT_SECRET: z.string().min(1).optional(),
+  GOOGLE_BUSINESS_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_BUSINESS_CLIENT_SECRET: z.string().min(1).optional(),
+  /**
    * Base URL Google untuk mock rantai uji (Fase 13G) — pola yang sama
    * dengan RESEND_API_BASE: GOOGLE_API_BASE (Calendar API + userinfo;
    * default https://www.googleapis.com), GOOGLE_TOKEN_BASE (token
