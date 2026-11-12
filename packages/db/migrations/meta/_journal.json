@@ -211,6 +211,13 @@
       "when": 1794477824041,
       "tag": "0029_flow_versions",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1794477824042,
+      "tag": "0030_trigger_postback_quickreply_welcome",
+      "breakpoints": true
     }
   ]
 }

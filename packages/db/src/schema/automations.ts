@@ -62,6 +62,14 @@ export const automationTriggerTypeEnum = pgEnum("automation_trigger_type", [
   "keyword",
   // Fase 10B: pemicu komentar publik IG/Messenger (aturan comment-to-DM).
   "comment",
+  // G5 (migrasi 0030): pemicu ketukan tombol & pesan pertama. 'kind'
+  // tetap keluarga aksi ('keyword' balasan langsung / 'sequence'
+  // pendaftaran); trigger_config.payloads memuat payload tombol yang
+  // dicocokkan PERSIS untuk 'postback' & 'quick_reply'; 'welcome'
+  // tidak membawa syarat tambahan (menyala untuk pesan pertama kontak).
+  "postback",
+  "quick_reply",
+  "welcome",
 ]);
 
 export const automationKindEnum = pgEnum("automation_kind", [
@@ -96,6 +104,14 @@ export interface AutomationTriggerConfig {
    * mengisinya (undefined).
    */
   channelAccountId?: string;
+  /**
+   * G5 — hanya untuk trigger_type='postback' / 'quick_reply': daftar
+   * payload tombol yang mengaktifkan aturan ini. Pencocokan PERSIS
+   * dan case-sensitive (payload adalah string mesin platform).
+   * Aturan keyword/comment/welcome tidak mengisinya (undefined);
+   * `keywords` untuk aturan sinyal selalu array kosong.
+   */
+  payloads?: string[];
 }
 
 export interface AutomationActionConfig {

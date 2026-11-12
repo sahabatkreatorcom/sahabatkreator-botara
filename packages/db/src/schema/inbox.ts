@@ -210,6 +210,19 @@ export const conversations = pgTable(
   ],
 );
 
+/**
+ * Sinyal pemicu pada satu pesan masuk (G5) — bentuk kolom
+ * `messages.trigger_signal`. `payload` adalah string mesin dari
+ * platform (dicocokkan PERSIS ke trigger_config.payloads aturan);
+ * `title` adalah label tombol yang terlihat pengguna (Meta/WA),
+ * null untuk Telegram callback_query yang hanya membawa data.
+ */
+export interface MessageTriggerSignal {
+  kind: "postback" | "quick_reply";
+  payload: string;
+  title: string | null;
+}
+
 export const messages = pgTable(
   "messages",
   {
@@ -283,6 +296,24 @@ export const messages = pgTable(
       authorLabel: string | null;
       contentPreview: string | null;
     }>(),
+    /**
+     * Sinyal pemicu ketukan tombol (G5, migrasi 0030): diisi parser
+     * channel saat pesan masuk ini SEBENARNYA adalah ketukan tombol,
+     * bukan ketikan teks:
+     * - 'postback'    — Meta messaging postback (payload + title) atau
+     *                   Telegram callback_query (payload = data tombol;
+     *                   Telegram tidak memisahkan judul, title null).
+     * - 'quick_reply' — pesan teks yang membawa payload quick reply
+     *                   (Meta message.quick_reply.payload; WhatsApp
+     *                   interactive button/list reply id).
+     * NULL untuk semua pesan lain. Evaluator automation/flow membaca
+     * kolom ini untuk mengklasifikasikan pesan ke kelas pemicu —
+     * urutan prioritasnya hidup di packages/core/src/trigger-priority.ts.
+     * `contentText` baris yang sama tetap memuat teks yang manusiawi
+     * (judul tombol Meta/WA; data payload untuk Telegram) agar inbox
+     * menampilkan apa yang diketuk pengguna.
+     */
+    triggerSignal: jsonb("trigger_signal").$type<MessageTriggerSignal>(),
     /**
      * Muatan template WhatsApp (Fase 10A) untuk pesan keluar bertipe
      * 'template': nama + bahasa template Meta dan parameter BODY yang
