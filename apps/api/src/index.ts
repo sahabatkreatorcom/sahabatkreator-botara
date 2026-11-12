@@ -56,6 +56,7 @@ import { createAdminRoutes } from "./modules/admin/routes";
 import { createLogsRoutes } from "./modules/logs/routes";
 import { createAuditRoutes } from "./modules/audit/routes";
 import { createBroadcastsRoutes } from "./modules/broadcasts/routes";
+import { createBroadcastRecurrenceRoutes } from "./modules/broadcast-recurrences/routes";
 import { createPostsRoutes } from "./modules/posts/routes";
 import { createWhatsAppTemplatesRoutes } from "./modules/whatsapp-templates/routes";
 import { createCommentsRoutes } from "./modules/comments/routes";
@@ -308,6 +309,10 @@ routes.route(
 // Modul broadcasts (Fase 7C) — kampanye siaran /tenants/:tenantId/broadcasts;
 // eksekusi dispatch ada di worker (event outbox broadcast.dispatch_due).
 routes.route("/", createBroadcastsRoutes(authBundle));
+// Modul broadcast berulang (G9) — aturan penjadwal di atas broadcasts:
+// /tenants/:tenantId/broadcast-recurrences; materialisasi slot oleh
+// penyapu worker menjadi broadcast biasa lewat jalur Fase 7C.
+routes.route("/", createBroadcastRecurrenceRoutes(authBundle));
 // Modul posts (Fase 23) — Content Schedule untuk channel Telegram
 // /tenants/:tenantId/posts; penerbitan oleh worker (event outbox
 // post.publish_due → job post.publish). Opsi modul dipakai
