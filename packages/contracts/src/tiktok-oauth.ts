@@ -67,6 +67,8 @@ export type TikTokOAuthStartResponse = z.infer<
 export const TikTokOAuthInfoResponseSchema = z.object({
   /** Redirect URI yang harus didaftarkan persis di aplikasi TikTok. */
   oauthRedirectUri: z.string(),
+  /** URL webhook yang didaftarkan di portal TikTok: `{publicBaseUrl}/api/webhooks/tiktok`. */
+  webhookUrl: z.string(),
   /** Client Key aplikasi TikTok platform (pengenal publik); null bila belum diatur. */
   clientKey: z.string().nullable(),
   clientKeyConfigured: z.boolean(),

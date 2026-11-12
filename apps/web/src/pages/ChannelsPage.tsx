@@ -1759,6 +1759,7 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                     keys={{
                       body: "channels.tiktokConnectBody",
                       redirectUriLabel: "channels.tiktokRedirectUriLabel",
+                      webhookUrlLabel: "channels.tiktokWebhookUrlLabel",
                       continueLabel: "channels.tiktokContinue",
                       startingLabel: "channels.tiktokStarting",
                       notConfigured: "channels.tiktokNotConfigured",

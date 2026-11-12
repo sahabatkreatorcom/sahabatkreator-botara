@@ -45,6 +45,7 @@ import { createMetaRoutes } from "./modules/meta/routes";
 import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
 import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
 import { createTikTokOAuthRoutes } from "./modules/tiktok-oauth/routes";
+import { createTikTokWebhookRoutes } from "./modules/tiktok-webhook/routes";
 import { createLinkedInOAuthRoutes } from "./modules/linkedin-oauth/routes";
 import { createPinterestOAuthRoutes } from "./modules/pinterest-oauth/routes";
 import { createBlueskyConnectRoutes } from "./modules/bluesky-connect/routes";
@@ -633,6 +634,11 @@ routes.route(
     stateSecret: env.BETTER_AUTH_SECRET,
   }),
 );
+// Webhook TikTok tingkat platform: POST /webhooks/tiktok (publik
+// /api/webhooks/tiktok) — tanda tangan TikTok-Signature berbasis
+// client secret (resolver panel); consumer pencabutan otorisasi
+// (akun ditandai disconnected) + pencatatan event resmi lainnya.
+routes.route("/", createTikTokWebhookRoutes(authBundle, { platform: platformOptions }));
 // Modul LinkedIn OAuth Connect (gelombang Semua OAuth) —
 // "Hubungkan dengan LinkedIn" untuk profil pribadi: start ber-state
 // sekali pakai + callback tunggal publik /oauth/linkedin/callback +

@@ -174,7 +174,7 @@ export function ProviderOAuthStepBlock({
   buttonStyle,
 }: {
   t: Translate;
-  info: { available: boolean; oauthRedirectUri: string } | null;
+  info: { available: boolean; oauthRedirectUri: string; webhookUrl?: string } | null;
   starting: boolean;
   startError: string | null;
   onStart: () => void;
@@ -184,6 +184,8 @@ export function ProviderOAuthStepBlock({
     continueLabel: TranslationKey;
     startingLabel: TranslationKey;
     notConfigured: TranslationKey;
+    /** Label baris URL webhook — hanya TikTok yang punya webhook untuk didaftarkan. */
+    webhookUrlLabel?: TranslationKey;
   };
   buttonId: string;
   buttonStyle: CSSProperties;
@@ -198,6 +200,16 @@ export function ProviderOAuthStepBlock({
           <div className="mt-0.5 break-all font-mono text-xs text-ink">
             {info.oauthRedirectUri}
           </div>
+          {keys.webhookUrlLabel && info.webhookUrl ? (
+            <>
+              <div className="mt-2 text-xs text-muted">
+                {t(keys.webhookUrlLabel)}
+              </div>
+              <div className="mt-0.5 break-all font-mono text-xs text-ink">
+                {info.webhookUrl}
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
       <button

@@ -31,6 +31,10 @@ export const ErrorCodeSchema = z.enum([
   // terpisah dari Meta App. Kode-kode ini juga menjadi nilai penanda
   // redirect callback (?threads_oauth_error=<KODE>).
   "THREADS_OAUTH_NOT_CONFIGURED",
+  // Webhook Threads (pola Meta, aplikasi Threads sendiri): verify
+  // token webhook belum terisi → 503; tanda tangan POST tidak sah → 401.
+  "THREADS_NOT_CONFIGURED",
+  "THREADS_SIGNATURE_INVALID",
   "THREADS_OAUTH_STATE_INVALID",
   "THREADS_OAUTH_EXCHANGE_FAILED",
   "THREADS_OAUTH_CANCELLED",
@@ -41,6 +45,10 @@ export const ErrorCodeSchema = z.enum([
   // ini juga menjadi nilai penanda redirect callback
   // (?<provider>_oauth_error=<KODE>).
   "TIKTOK_OAUTH_NOT_CONFIGURED",
+  // Webhook TikTok: client secret belum terisi → 503; tanda tangan
+  // TikTok-Signature tidak sah/basi → 401.
+  "TIKTOK_NOT_CONFIGURED",
+  "TIKTOK_SIGNATURE_INVALID",
   "TIKTOK_OAUTH_STATE_INVALID",
   "TIKTOK_OAUTH_EXCHANGE_FAILED",
   "TIKTOK_OAUTH_CANCELLED",

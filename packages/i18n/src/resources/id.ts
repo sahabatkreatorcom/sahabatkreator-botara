@@ -422,6 +422,8 @@ export const id: Resources = {
     metaWebhookUrlLabel: "Callback URL",
     whatsappWebhookUrlLabel: "Callback URL WhatsApp",
     dataDeletionCallbackUrlLabel: "Callback URL Penghapusan Data",
+    tiktokWebhookUrlLabel: "URL Webhook TikTok",
+    threadsWebhookUrlLabel: "URL Webhook Threads",
     metaWebhookTokenLabel: "Verify Token",
     metaWebhookNotConfigured: "Pengaturan webhook belum tersedia.",
     metaWebhookSecretMissing: "Webhook masuk akan ditolak sampai app secret dikonfigurasi.",

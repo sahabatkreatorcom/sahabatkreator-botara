@@ -423,6 +423,8 @@ export const en = {
     metaWebhookUrlLabel: "Callback URL",
     whatsappWebhookUrlLabel: "WhatsApp Callback URL",
     dataDeletionCallbackUrlLabel: "Data Deletion Callback URL",
+    tiktokWebhookUrlLabel: "TikTok Webhook URL",
+    threadsWebhookUrlLabel: "Threads Webhook URL",
     metaWebhookTokenLabel: "Verify Token",
     metaWebhookNotConfigured: "Webhook setup is not available yet.",
     metaWebhookSecretMissing: "Incoming webhooks will be rejected until the app secret is configured.",

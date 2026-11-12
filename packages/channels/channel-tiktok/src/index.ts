@@ -3,8 +3,12 @@
  * untuk PUBLIKASI content schedule saja (Gelombang 4, gelombang
  * terakhir roadmap).
  *
- * TikTok bukan channel inbox: tidak ada webhook, pesan, atau DM di
- * paket ini, dan paket ini SENGAJA bukan `ChannelAdapter`. Satu post
+ * TikTok bukan channel inbox: tidak ada pesan atau DM di paket ini,
+ * dan paket ini SENGAJA bukan `ChannelAdapter`. Satu-satunya fungsi
+ * webhook di sini adalah verifikasi tanda tangan webhook manajemen
+ * TikTok (pencabutan otorisasi & status publikasi) di akhir berkas —
+ * consumer-nya hidup di modul API `tiktok-webhook`, bukan di sini.
+ * Satu post
  * = satu DIRECT POST ke akun kreator yang terhubung, dalam dua
  * bentuk yang protokolnya berbeda:
  *
@@ -81,6 +85,8 @@
  * `TikTokApiError` hanya membawa status HTTP + kode/pesan resmi
  * provider yang dipotong.
  */
+
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const DEFAULT_TIKTOK_API_BASE = "https://open.tiktokapis.com";
 
@@ -1050,4 +1056,58 @@ export function planTikTokUploadChunks(
     }
   }
   return chunks;
+}
+
+// ---------------------------------------------------------------------------
+// Webhook: verifikasi tanda tangan TikTok-Signature (fungsi murni)
+// ---------------------------------------------------------------------------
+
+/** Hasil verifikasi header `TikTok-Signature`. */
+export interface TikTokWebhookSignatureResult {
+  /** true hanya bila format header terbaca DAN HMAC cocok. */
+  valid: boolean;
+  /** Detik unix dari komponen `t=` header (null bila tak terbaca). */
+  timestampSeconds: number | null;
+}
+
+/**
+ * Verifikasi header webhook TikTok `TikTok-Signature: t=<unix>,s=<hex>`:
+ * tanda tangan = HMAC-SHA256 atas string `<t>.<raw body>` dikunci
+ * CLIENT SECRET aplikasi, heksadesimal. Perbandingan aman-timing.
+ * Fungsi ini TIDAK menilai kesegaran cap waktu — jendela toleransi
+ * adalah keputusan pemanggil (gerbang webhook API memakai ±5 menit,
+ * mengikuti jendela yang didokumentasikan TikTok).
+ */
+export function verifyTikTokWebhookSignature(
+  rawBody: string,
+  signatureHeader: string | undefined,
+  clientSecret: string,
+): TikTokWebhookSignatureResult {
+  if (!signatureHeader) return { valid: false, timestampSeconds: null };
+  let timestampRaw: string | null = null;
+  let signatureHex: string | null = null;
+  for (const part of signatureHeader.split(",")) {
+    const eq = part.indexOf("=");
+    if (eq <= 0) continue;
+    const key = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+    if (key === "t") timestampRaw = value;
+    if (key === "s") signatureHex = value;
+  }
+  const timestampSeconds =
+    timestampRaw !== null && /^\d+$/.test(timestampRaw)
+      ? Number(timestampRaw)
+      : null;
+  if (timestampSeconds === null || !signatureHex) {
+    return { valid: false, timestampSeconds };
+  }
+  const expected = createHmac("sha256", clientSecret)
+    .update(`${timestampRaw}.${rawBody}`, "utf8")
+    .digest("hex");
+  const presented = Buffer.from(signatureHex, "utf8");
+  const wanted = Buffer.from(expected, "utf8");
+  if (presented.length !== wanted.length) {
+    return { valid: false, timestampSeconds };
+  }
+  return { valid: timingSafeEqual(presented, wanted), timestampSeconds };
 }

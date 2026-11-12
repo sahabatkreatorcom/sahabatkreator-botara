@@ -171,6 +171,7 @@ export function createTikTokOAuthRoutes(
     const config = await resolveTikTokConfig();
     const body = TikTokOAuthInfoResponseSchema.parse({
       oauthRedirectUri: redirectUri,
+      webhookUrl: `${webBase}/api/webhooks/tiktok`,
       clientKey: config.clientKey,
       clientKeyConfigured: Boolean(config.clientKey),
       clientSecretConfigured: Boolean(config.clientSecret),
