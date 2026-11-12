@@ -381,7 +381,12 @@ masing-masing). Yang tersisa murni tindakan pemilik per platform:
    pengembangan foto/carousel; (c) daftarkan Redirect URI dari blok
    TikTok di Channels ke aplikasi (Login Kit → Redirect URI);
    (d) ajukan audit Content Posting API (tanpa audit, postingan
-   API hanya `SELF_ONLY`); (e) hubungkan akun contoh dari Channels.
+   API hanya `SELF_ONLY`); (e) hubungkan akun contoh dari Channels;
+   (f) pastikan scope `user.info.basic` (produk Login Kit) aktif/
+   disetujui di aplikasi — tanpa scope itu akun tetap terhubung
+   tetapi tampil TANPA nama & foto profil (Channels menampilkan
+   banner peringatan "profil belum lengkap"); aktifkan scope-nya
+   lalu hubungkan ulang akun yang sama agar nama & avatar terisi.
 2. **LinkedIn** — (a) buat aplikasi di LinkedIn Developers dan
    aktifkan produk "Sign In with LinkedIn using OpenID Connect" +
    "Share on LinkedIn" (scope `openid profile w_member_social`);
