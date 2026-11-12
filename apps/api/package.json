@@ -37,6 +37,7 @@
     "verify:contacts": "tsx scripts/verify-contacts.ts",
     "verify:contact-timeline": "tsx scripts/verify-contact-timeline.ts",
     "verify:gap-tier2": "tsx scripts/verify-gap-tier2.ts",
+    "verify:wacrm-extras": "tsx scripts/verify-wacrm-extras.ts",
     "verify:deals": "tsx scripts/verify-deals.ts"
   },
   "dependencies": {
