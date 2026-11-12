@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Locale, createTranslator } from "@sahabat-kreator/i18n";
 import {
   getPostProviderCapability,
@@ -14,14 +14,30 @@ import { api } from "../api/client";
 import { translateApiError } from "../api/errorText";
 import { formatDateTime, formatTime, zonedLocalToIso } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
+import {
+  composerFormForDay,
+  composerFormForPost,
+  emptyComposerForm,
+  isComposerDirty,
+  localDateTimeValue,
+  type ComposerFormState,
+} from "./postsComposer";
 
 /**
  * Halaman Jadwal Konten (Fase 23, diperluas Gelombang 0).
  *
- * Satu halaman: formulir di kiri, tampilan jadwal di kanan dengan tiga
- * mode — Kalender (bulan), Minggu, Daftar. Tidak ada modal — pola dua
- * langkah sebaris (klik → tombol berubah jadi konfirmasi) dipakai
- * untuk aksi yang tidak bisa dibatalkan, sama seperti Broadcasts.
+ * Satu halaman: tampilan jadwal LEBAR PENUH dengan tiga mode —
+ * Kalender (bulan), Minggu, Daftar — dan komposer postingan sebagai
+ * DRAWER geser dari kanan (gelombang Drawer). Kalender adalah
+ * permukaan kerja utama; formulir hanya muncul saat dibutuhkan:
+ * tombol "Postingan baru", klik tanggal pada kalender (jam tayang
+ * terisi awal pada tanggal itu), atau klik postingan draf (mode
+ * ubah — edit memang hanya berlaku untuk draf, ditegakkan core).
+ * Menutup drawer dengan isi yang berubah dari keadaan awal membuka
+ * konfirmasi buang perubahan; drawer bersih menutup tanpa tanya.
+ * Aksi baris yang tidak bisa dibatalkan tetap memakai pola dua
+ * langkah sebaris (klik → tombol berubah jadi konfirmasi), sama
+ * seperti Broadcasts.
  *
  * Keputusan yang terlihat di UI:
  * - Pemilih channel KOSONG berarti bot belum menjadi admin di channel
@@ -145,10 +161,9 @@ function mondayOf(day: DayTuple): DayTuple {
   return addDays(day, -((dow + 6) % 7));
 }
 
-function localDateTimeValue(day: DayTuple, hh: number, mm: number): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${day.y}-${pad(day.m)}-${pad(day.d)}T${pad(hh)}:${pad(mm)}`;
-}
+// `localDateTimeValue` tinggal di ./postsComposer (logika murni
+// komposer) dan diimpor di atas — satu-satunya pemakai lain di sini
+// adalah geser jadwal drag di bawah.
 
 type ViewMode = "month" | "week" | "list";
 
@@ -204,6 +219,97 @@ export function PostsPage({ t, locale }: PostsPageProps) {
     ) as PostPublishOptions;
     return Object.keys(clean).length > 0 ? clean : undefined;
   };
+
+  // -- Drawer komposer -------------------------------------------------------
+  // Komposer tidak lagi kolom permanen: ia drawer dari kanan dengan
+  // tiga keadaan — tertutup, buat-baru, ubah (draf). `composerInitial`
+  // adalah potret keadaan formulir saat drawer dibuka; penjaga tutup
+  // membandingkan isi sekarang terhadap potret itu (postsComposer).
+  type ComposerMode =
+    | { kind: "closed" }
+    | { kind: "create" }
+    | { kind: "edit"; postId: string };
+  const [composer, setComposer] = useState<ComposerMode>({ kind: "closed" });
+  const [composerInitial, setComposerInitial] =
+    useState<ComposerFormState | null>(null);
+  const composerOpen = composer.kind !== "closed";
+
+  const currentForm = (): ComposerFormState => ({
+    selectedTargets,
+    title,
+    caption,
+    mediaIds,
+    scheduleAt,
+    optionsByTarget,
+  });
+  const composerDirty =
+    composerInitial !== null && isComposerDirty(composerInitial, currentForm());
+
+  const applyForm = (form: ComposerFormState) => {
+    setSelectedTargets(form.selectedTargets);
+    setTitle(form.title);
+    setCaption(form.caption);
+    setMediaIds(form.mediaIds);
+    setScheduleAt(form.scheduleAt);
+    setOptionsByTarget(form.optionsByTarget);
+  };
+
+  /** Buka buat-baru; `day` terisi = klik tanggal (jam tayang terisi awal). */
+  const openCreate = (day?: DayTuple) => {
+    const fallbackTarget = targets[0]?.conversationId ?? null;
+    const form = day
+      ? composerFormForDay(day, fallbackTarget)
+      : emptyComposerForm(fallbackTarget);
+    applyForm(form);
+    setComposerInitial(form);
+    setError(null);
+    setComposer({ kind: "create" });
+  };
+
+  /** Buka mode ubah untuk satu draf (edit di core memang draf saja). */
+  const openEdit = (post: PostResponse) => {
+    if (post.status !== "draft") return;
+    const form = composerFormForPost(post, timezone);
+    applyForm(form);
+    setComposerInitial(form);
+    setError(null);
+    setComposer({ kind: "edit", postId: post.id });
+  };
+
+  const closeComposer = () => {
+    setComposer({ kind: "closed" });
+    setComposerInitial(null);
+  };
+
+  /**
+   * Semua jalur tutup (×, Esc, klik scrim) lewat sini: isi yang
+   * berubah dari keadaan awal wajib dikonfirmasi buangnya dulu —
+   * pola konfirmasi dialog belum ada di aplikasi ini, jadi memakai
+   * window.confirm yang sudah diterjemahkan (pesan posts.discardChanges).
+   */
+  const requestCloseComposer = () => {
+    if (composerDirty && !window.confirm(t("posts.discardChanges"))) return;
+    closeComposer();
+  };
+  const requestCloseRef = useRef(requestCloseComposer);
+  requestCloseRef.current = requestCloseComposer;
+
+  // Esc menutup drawer (tunduk pada penjaga kotor lewat ref di atas).
+  useEffect(() => {
+    if (!composerOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") requestCloseRef.current();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [composerOpen]);
+
+  // Fokus awal ke kolom judul setiap drawer dibuka (mode tidak bisa
+  // berganti selagi drawer terbuka, jadi transisi terbuka saja cukup).
+  const titleInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    if (composerOpen) titleInputRef.current?.focus();
+  }, [composerOpen]);
 
   const todayTuple = useMemo(
     () => zonedDayTuple(new Date().toISOString(), timezone) ?? { y: 1970, m: 1, d: 1 },
@@ -351,30 +457,56 @@ export function PostsPage({ t, locale }: PostsPageProps) {
     return null;
   };
 
-  const onSaveDraft = () =>
-    run(async () => {
-      await createDrafts();
-      resetForm();
-    });
-
-  const onSchedule = () => {
-    // Pilihan wajib diperiksa LOKAL lebih dulu: tanpa ini pengguna
-    // ditinggal dengan draft yang gagal di tengah penjadwalan
-    // (server menegakkan gerbang yang sama persis lewat API).
-    const optionsError = optionsScheduleError();
-    if (optionsError) {
-      setError(optionsError);
+  /**
+   * Simpan dari drawer — satu-satunya jalur kirim komposer sekarang.
+   * `scheduleAfter` = tombol utama (jadwalkan / terbitkan sekarang);
+   * tanpa itu tombol sekunder (simpan draf / simpan perubahan).
+   * Drawer HANYA menutup bila simpan berhasil; kegagalan meninggalkan
+   * drawer terbuka dengan banner error di dalamnya.
+   */
+  const submitComposer = async (scheduleAfter: boolean) => {
+    // Pilihan wajib diperiksa LOKAL lebih dulu sebelum penjadwalan:
+    // tanpa ini pengguna ditinggal dengan draft yang gagal di tengah
+    // penjadwalan (server menegakkan gerbang yang sama persis lewat API).
+    if (scheduleAfter) {
+      const optionsError = optionsScheduleError();
+      if (optionsError) {
+        setError(optionsError);
+        return;
+      }
+    }
+    if (composer.kind === "edit") {
+      const postId = composer.postId;
+      const ok = await run(async () => {
+        if (!tenantId) return;
+        // Sasaran terkunci pada sasaran postingan; opsi dikirim apa
+        // adanya dari formulir (kosong = null eksplisit = kosongkan,
+        // semantik PATCH di kontrak).
+        await api.posts.update(tenantId, postId, {
+          title: title.trim(),
+          caption,
+          mediaIds,
+          publishOptions: optionsFor(selectedTargets[0]!) ?? null,
+        });
+        if (scheduleAfter) {
+          await api.posts.schedule(tenantId, postId, toIso(scheduleAt));
+        }
+      });
+      if (ok) closeComposer();
       return;
     }
-    return run(async () => {
+    const ok = await run(async () => {
       if (!tenantId) return;
       const created = await createDrafts();
-      const iso = toIso(scheduleAt);
-      for (const post of created) {
-        await api.posts.schedule(tenantId, post.id, iso);
+      if (scheduleAfter) {
+        const iso = toIso(scheduleAt);
+        for (const post of created) {
+          await api.posts.schedule(tenantId, post.id, iso);
+        }
       }
       if (created.length > 0) resetForm();
     });
+    if (ok) closeComposer();
   };
 
   const onUpload = async (files: FileList | null) => {
@@ -476,9 +608,20 @@ export function PostsPage({ t, locale }: PostsPageProps) {
           <h1 className="text-xl font-semibold text-ink">{t("posts.title")}</h1>
           <p className="mt-0.5 text-sm text-muted">{t("posts.subtitle")}</p>
         </div>
-        <p className="text-xs text-muted">
-          {t("posts.timezoneNote", { timezone })}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-xs text-muted">
+            {t("posts.timezoneNote", { timezone })}
+          </p>
+          {canManage && (
+            <button
+              type="button"
+              onClick={() => openCreate()}
+              className="rounded-md bg-accent px-3 py-2 text-xs font-medium text-white"
+            >
+              + {t("posts.newPost")}
+            </button>
+          )}
+        </div>
       </header>
 
       {error && (
@@ -493,10 +636,20 @@ export function PostsPage({ t, locale }: PostsPageProps) {
         </div>
       )}
 
-      <div className="grid items-start gap-5 lg:grid-cols-12">
-        <section className="rounded-xl border border-line bg-surface p-5 lg:col-span-5 xl:col-span-4">
-          <h2 className="text-sm font-semibold text-ink">{t("posts.newPost")}</h2>
-          <div className="mt-3 space-y-3">
+      {composerOpen && (
+        <PostComposerDrawer
+          t={t}
+          title={
+            composer.kind === "edit" ? t("posts.editPost") : t("posts.newPost")
+          }
+          onClose={requestCloseComposer}
+        >
+          {error && (
+            <div className="mb-3 rounded-lg border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger">
+              {error}
+            </div>
+          )}
+          <div className="space-y-3">
             <div>
               <span className="text-xs font-medium text-muted">
                 {t("posts.targets")}
@@ -511,7 +664,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                       type="checkbox"
                       checked={selectedTargets.includes(target.conversationId)}
                       onChange={() => toggleTarget(target.conversationId)}
-                      disabled={!canManage}
+                      disabled={!canManage || composer.kind === "edit"}
                     />
                     <span className="truncate">
                       {target.title ?? target.providerChatId ?? target.conversationId}
@@ -556,6 +709,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
             <label className="block">
               <span className="text-xs font-medium text-muted">{t("posts.internalTitle")}</span>
               <input
+                ref={titleInputRef}
                 className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink"
                 value={title}
                 maxLength={255}
@@ -613,7 +767,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
               <button
                 type="button"
                 className="rounded-md bg-accent px-3 py-2 text-xs font-medium text-white disabled:opacity-40"
-                onClick={() => void onSchedule()}
+                onClick={() => void submitComposer(true)}
                 disabled={!canSubmit || busy}
               >
                 {scheduleAt ? t("posts.schedule") : t("posts.publishNow")}
@@ -621,19 +775,22 @@ export function PostsPage({ t, locale }: PostsPageProps) {
               <button
                 type="button"
                 className="rounded-md border border-line bg-surface px-3 py-2 text-xs font-medium text-ink disabled:opacity-40"
-                onClick={() => void onSaveDraft()}
+                onClick={() => void submitComposer(false)}
                 disabled={!canSubmit || busy}
               >
-                {t("posts.saveDraft")}
+                {composer.kind === "edit"
+                  ? t("posts.saveChanges")
+                  : t("posts.saveDraft")}
               </button>
             </div>
             {!canManage && (
               <p className="text-xs text-muted">{t("posts.ownerOnly")}</p>
             )}
           </div>
-        </section>
+        </PostComposerDrawer>
+      )}
 
-        <section className="lg:col-span-7 xl:col-span-8">
+      <section>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             {viewButton("month", t("posts.viewCalendar"))}
             {viewButton("week", t("posts.viewWeek"))}
@@ -717,6 +874,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                     toIso={toIso}
                     run={run}
                     tenantId={tenantId}
+                    onEdit={openEdit}
                   />
                 ))}
               </ul>
@@ -734,9 +892,60 @@ export function PostsPage({ t, locale }: PostsPageProps) {
               timezone={timezone}
               canManage={canManage}
               onDropPost={movePostToDay}
+              onSelectDay={openCreate}
+              onSelectPost={openEdit}
             />
           )}
-        </section>
+      </section>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Drawer komposer — panel geser dari kanan di atas scrim, mengikuti
+// pola overlay aplikasi (fixed inset-0 + bg-black/50 seperti modal
+// AgentsPage & lembar More). Lebar lapang ±700px (maks 94vw); di
+// layar kecil memenuhi layar. Klik pada scrim (area di luar panel)
+// adalah jalur tutup — semua jalur tutup melewati penjaga kotor di
+// PostsPage, komponen ini hanya meneruskan niat menutup.
+// ---------------------------------------------------------------------------
+
+interface PostComposerDrawerProps {
+  t: Translate;
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}
+
+function PostComposerDrawer({
+  t,
+  title,
+  onClose,
+  children,
+}: PostComposerDrawerProps) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex justify-end bg-black/50"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div className="flex h-full w-full flex-col bg-surface shadow-xl sm:w-[700px] sm:max-w-[94vw]">
+        <div className="flex items-center justify-between gap-3 border-b border-line px-5 py-4">
+          <h2 className="text-base font-semibold text-ink">{title}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("common.close")}
+            className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+          >
+            ×
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
       </div>
     </div>
   );
@@ -746,6 +955,9 @@ export function PostsPage({ t, locale }: PostsPageProps) {
 // Kisi kalender (bulan / minggu). Sel menerima jatuhan drag dari chip
 // postingan; chip hanya bisa diseret untuk draft/terjadwal oleh
 // owner/admin — status lain adalah riwayat atau sedang berjalan.
+// Klik sel membuka komposer buat-baru pada tanggal itu; klik chip
+// draf membuka mode ubah — klik tidak ikut campur drag (drag
+// berakhir tanpa klik, jatuhan ditangani onDrop seperti biasa).
 // ---------------------------------------------------------------------------
 
 interface CalendarGridProps {
@@ -760,6 +972,8 @@ interface CalendarGridProps {
   timezone: string;
   canManage: boolean;
   onDropPost: (post: PostResponse, day: DayTuple) => void;
+  onSelectDay: (day: DayTuple) => void;
+  onSelectPost: (post: PostResponse) => void;
 }
 
 function CalendarGrid({
@@ -774,6 +988,8 @@ function CalendarGrid({
   timezone,
   canManage,
   onDropPost,
+  onSelectDay,
+  onSelectPost,
 }: CalendarGridProps) {
   const cells: DayTuple[] = useMemo(() => {
     if (view === "week") {
@@ -825,7 +1041,7 @@ function CalendarGrid({
                 inMonth ? "" : "bg-elevated/50 text-muted"
               } ${key === todayKey ? "bg-warning/10" : ""} ${
                 dragOverKey === key ? "bg-accent/10" : ""
-              }`}
+              } ${canManage ? "cursor-pointer" : ""}`}
               onDragOver={(event) => {
                 if (canManage) {
                   event.preventDefault();
@@ -841,6 +1057,9 @@ function CalendarGrid({
                 const postId = event.dataTransfer.getData("text/post-id");
                 const post = postId ? postById.get(postId) : undefined;
                 if (post) onDropPost(post, day);
+              }}
+              onClick={() => {
+                if (canManage) onSelectDay(day);
               }}
             >
               <div className="text-xs font-medium">{day.d}</div>
@@ -858,8 +1077,22 @@ function CalendarGrid({
                         event.dataTransfer.effectAllowed = "move";
                       }}
                       title={post.title}
+                      onClick={(event) => {
+                        // Chip draf = pintu mode ubah; hentikan
+                        // rambatannya agar tidak ikut membuka
+                        // buat-baru tanggal selnya. Chip status lain
+                        // tidak menahan klik — kliknya milik sel.
+                        if (canManage && post.status === "draft") {
+                          event.stopPropagation();
+                          onSelectPost(post);
+                        }
+                      }}
                       className={`rounded px-1.5 py-0.5 text-[11px] leading-tight ${STATUS_STYLE[post.status]} ${
-                        draggable ? "cursor-grab" : ""
+                        canManage && post.status === "draft"
+                          ? "cursor-pointer"
+                          : draggable
+                            ? "cursor-grab"
+                            : ""
                       }`}
                     >
                       <span className="font-medium">
@@ -907,6 +1140,7 @@ interface PostCardProps {
   tenantId: string | null;
   toIso: (local: string) => string | null;
   run: (action: () => Promise<unknown>) => Promise<boolean>;
+  onEdit: (post: PostResponse) => void;
 }
 
 function PostCard({
@@ -919,6 +1153,7 @@ function PostCard({
   tenantId,
   toIso,
   run,
+  onEdit,
 }: PostCardProps) {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [confirmingRelease, setConfirmingRelease] = useState(false);
@@ -976,6 +1211,16 @@ function PostCard({
 
         {canManage && tenantId && (
           <div className="flex shrink-0 flex-col items-end gap-2">
+            {post.status === "draft" && (
+              <button
+                type="button"
+                className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink disabled:opacity-40"
+                disabled={busy}
+                onClick={() => onEdit(post)}
+              >
+                {t("common.edit")}
+              </button>
+            )}
             {post.status === "draft" && (
               <button
                 type="button"
