@@ -1,5 +1,9 @@
 import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
-import { findAutomationTemplate } from "@sahabat-kreator/contracts";
+import {
+  findAutomationTemplate,
+  resolveAutomationSequenceContent,
+  type AutomationTemplateLocale,
+} from "@sahabat-kreator/contracts";
 import {
   auditLogs,
   automationRuns,
@@ -202,25 +206,39 @@ export type InstantiateAutomationTemplateResult =
 export async function instantiateAutomationTemplate(
   db: Database,
   ctx: Pick<TenantContext, "tenantId">,
-  input: { slug: string; name?: string },
+  input: { slug: string; name?: string; locale?: AutomationTemplateLocale },
 ): Promise<InstantiateAutomationTemplateResult> {
   const template = findAutomationTemplate(input.slug);
   if (!template) return { kind: "template_not_found" };
 
-  const name = input.name?.trim() ? input.name.trim() : template.defaultName;
-  const shared = {
-    name,
+  // Isi sequence dwibahasa (G2): locale menentukan nama bawaan, kata
+  // kunci, dan teks langkah yang disalin. Klien web mengirim locale
+  // UI pemilik; tanpa locale, isi "id" yang dipakai (perilaku lama).
+  // Template keyword satu bahasa — locale tidak berpengaruh.
+  if (template.kind === "sequence") {
+    const content = resolveAutomationSequenceContent(
+      template,
+      input.locale ?? "id",
+    );
+    const automation = await createAutomation(db, ctx, {
+      name: input.name?.trim() ? input.name.trim() : content.defaultName,
+      keywords: content.keywords,
+      match: template.match,
+      isActive: false,
+      kind: "sequence",
+      steps: content.steps,
+    });
+    return { kind: "created", automation };
+  }
+
+  const automation = await createAutomation(db, ctx, {
+    name: input.name?.trim() ? input.name.trim() : template.defaultName,
     keywords: template.keywords,
     match: template.match,
     isActive: false,
-  };
-  const automation = await createAutomation(
-    db,
-    ctx,
-    template.kind === "sequence"
-      ? { ...shared, kind: "sequence", steps: template.steps }
-      : { ...shared, kind: "keyword", text: template.text },
-  );
+    kind: "keyword",
+    text: template.text,
+  });
   return { kind: "created", automation };
 }
 

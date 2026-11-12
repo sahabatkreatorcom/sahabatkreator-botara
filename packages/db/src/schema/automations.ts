@@ -15,6 +15,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
 import { contacts, conversations, messages } from "./inbox";
+import { users } from "./identity";
 
 /**
  * Kelompok Automation (Fase 2A, RANCANGAN §6; diperluas Fase 2C):
@@ -47,6 +48,12 @@ import { contacts, conversations, messages } from "./inbox";
  *                      idempotensi terakhir: relay/worker yang memproses
  *                      event yang sama dua kali tidak bisa menembak dua kali
  *                      untuk pesan pemicu yang sama.
+ * - sequence_templates : templat sequence PRIBADI tenant (gelombang G2,
+ *                      migrasi 0028): salinan keadaan formulir sequence
+ *                      (nama + kata kunci + mode cocok + langkah jsonb)
+ *                      yang disimpan pemilik untuk dipakai ulang dari
+ *                      galeri. Bukan tabel bersama dengan templat agen —
+ *                      yang dibagi adalah POLA simpan-pribadinya saja.
  * Semua tabel tenant-scoped: tenant_id + index, dilindungi RLS
  * (migrasi 0008 & 0014).
  */
@@ -293,3 +300,60 @@ export type AutomationStep = typeof automationSteps.$inferSelect;
 export type NewAutomationStep = typeof automationSteps.$inferInsert;
 export type SequenceEnrollment = typeof sequenceEnrollments.$inferSelect;
 export type NewSequenceEnrollment = typeof sequenceEnrollments.$inferInsert;
+
+/** Satu langkah templat sequence tersimpan (payload jsonb `steps`). */
+export interface SequenceTemplateStep {
+  delayMinutes: number;
+  text: string;
+}
+
+/**
+ * Templat sequence PRIBADI tenant (gelombang G2): satu baris = satu
+ * templat yang disimpan pemilik dari formulir buat/edit sequence
+ * (nama bebas dari pemilik; isi = kata kunci + mode cocok + langkah
+ * saat disimpan). Mengikuti POLA BERSAMA "SIMPAN TEMPLAT PRIBADI"
+ * (lihat kontrak agents.ts) — pola yang sama dengan
+ * `agent_instruction_templates`, TABEL yang berbeda: payload templat
+ * sequence adalah daftar langkah terurut, bukan satu teks instruction.
+ *
+ * Templat adalah SALINAN, bukan rujukan: memakainya membuat automation
+ * sequence BARU (selalu nonaktif, seperti instantiate katalog);
+ * mengubah/menghapus templat tidak menyentuh automation mana pun.
+ * Ubah templat tersimpan di v1 = hapus + simpan ulang.
+ * `steps` jsonb: array terurut {delayMinutes, text} — posisi adalah
+ * indeks array (mulai dari 1), divalidasi skema kontrak saat simpan
+ * dan saat instantiate (batas yang sama dengan langkah automation).
+ */
+export const sequenceTemplates = pgTable(
+  "sequence_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    /** Kata kunci pemicu sequence (pola trigger_config automation). */
+    keywords: text("keywords").array().notNull().default([]),
+    /** Mode cocok kata kunci: 'exact' | 'contains' (teks bebas divalidasi kontrak). */
+    match: varchar("match", { length: 16 }).notNull().default("exact"),
+    /** Langkah terurut {delayMinutes, text}; posisi = indeks + 1. */
+    steps: jsonb("steps")
+      .$type<SequenceTemplateStep[]>()
+      .notNull()
+      .default([]),
+    /** User penyimpan; SET NULL bila user hilang (pola saved_replies). */
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("sequence_templates_tenant_id_idx").on(t.tenantId)],
+);
+
+export type SequenceTemplate = typeof sequenceTemplates.$inferSelect;
+export type NewSequenceTemplate = typeof sequenceTemplates.$inferInsert;

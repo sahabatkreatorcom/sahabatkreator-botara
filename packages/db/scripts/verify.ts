@@ -109,7 +109,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 1 tabel Gelombang 0 / migrasi 0013 (post_groups)
 // + 1 tabel Pemisahan Google / migrasi 0023 (google_connections)
 // + 1 tabel Templat Instruction / migrasi 0027 (agent_instruction_templates)
-assert.equal(Number(tablesRes.rows[0].count), 65);
+// + 1 tabel Gelombang G2 / migrasi 0028 (sequence_templates)
+assert.equal(Number(tablesRes.rows[0].count), 66);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -267,7 +268,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-12: migrasi 0027 (Templat Instruction /agents) menambah
 // `agent_instruction_templates` dengan tenant_isolation → 90.
-assert.equal(Number(policies.rows[0].count), 90);
+//
+// 2026-11-12: migrasi 0028 (Gelombang G2 — templat sequence pribadi)
+// menambah `sequence_templates` dengan tenant_isolation → 91.
+assert.equal(Number(policies.rows[0].count), 91);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2416,8 +2420,11 @@ function oneHotVector(index: number): string {
   // 2026-11-12: migrasi 0027 (Templat Instruction /agents) menambah
   // agent_instruction_templates beserta tenant_isolation-nya → tabel 65,
   // policy 90.
-  assert.equal(counts.rows[0].tables, "65");
-  assert.equal(counts.rows[0].policies, "90");
+  // 2026-11-12: migrasi 0028 (Gelombang G2 — templat sequence pribadi)
+  // menambah sequence_templates beserta tenant_isolation-nya → tabel 66,
+  // policy 91.
+  assert.equal(counts.rows[0].tables, "66");
+  assert.equal(counts.rows[0].policies, "91");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

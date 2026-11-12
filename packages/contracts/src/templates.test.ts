@@ -170,33 +170,55 @@ describe("katalog template automation", () => {
   });
 
   it("setiap template memenuhi batas kontrak automation", () => {
+    // Isi yang diperiksa per template: template keyword datar; template
+    // sequence membawa isinya per locale (G2) — kedua locale diperiksa.
+    const contentsOf = (
+      tpl: (typeof AUTOMATION_TEMPLATES)[number],
+    ): {
+      defaultName: string;
+      keywords: string[];
+      text?: string;
+      steps?: { delayMinutes: number; text: string }[];
+    }[] =>
+      tpl.kind === "keyword"
+        ? [
+            {
+              defaultName: tpl.defaultName,
+              keywords: tpl.keywords,
+              text: tpl.text,
+            },
+          ]
+        : [tpl.content.id, tpl.content.en];
+
     for (const tpl of AUTOMATION_TEMPLATES) {
-      expect(tpl.defaultName.trim().length, `${tpl.slug}: defaultName kosong`).toBeGreaterThan(0);
-      expect(tpl.defaultName.length, `${tpl.slug}: defaultName terlalu panjang`).toBeLessThanOrEqual(255);
+      for (const content of contentsOf(tpl)) {
+        expect(content.defaultName.trim().length, `${tpl.slug}: defaultName kosong`).toBeGreaterThan(0);
+        expect(content.defaultName.length, `${tpl.slug}: defaultName terlalu panjang`).toBeLessThanOrEqual(255);
 
-      // Batas AutomationKeywordsSchema: 1..10 kata kunci, tiap 1..255.
-      expect(tpl.keywords.length, `${tpl.slug}: jumlah kata kunci`).toBeGreaterThanOrEqual(1);
-      expect(tpl.keywords.length).toBeLessThanOrEqual(10);
-      for (const kw of tpl.keywords) {
-        expect(kw.trim(), `${tpl.slug}: kata kunci kosong`).not.toBe("");
-        expect(kw.length, `${tpl.slug}: kata kunci terlalu panjang`).toBeLessThanOrEqual(255);
-      }
+        // Batas AutomationKeywordsSchema: 1..10 kata kunci, tiap 1..255.
+        expect(content.keywords.length, `${tpl.slug}: jumlah kata kunci`).toBeGreaterThanOrEqual(1);
+        expect(content.keywords.length).toBeLessThanOrEqual(10);
+        for (const kw of content.keywords) {
+          expect(kw.trim(), `${tpl.slug}: kata kunci kosong`).not.toBe("");
+          expect(kw.length, `${tpl.slug}: kata kunci terlalu panjang`).toBeLessThanOrEqual(255);
+        }
 
-      if (tpl.kind === "keyword") {
-        // AutomationStepInputSchema.text: 1..4096.
-        expect(tpl.text.trim(), `${tpl.slug}: teks balasan kosong`).not.toBe("");
-        expect(tpl.text.length, `${tpl.slug}: teks balasan terlalu panjang`).toBeLessThanOrEqual(4096);
-      } else {
-        // CreateSequenceAutomationRequestSchema: 1..10 langkah.
-        expect(tpl.steps.length, `${tpl.slug}: jumlah langkah`).toBeGreaterThanOrEqual(1);
-        expect(tpl.steps.length).toBeLessThanOrEqual(10);
-        for (const step of tpl.steps) {
-          // delayMinutes: 0..43200 (30 hari).
-          expect(Number.isInteger(step.delayMinutes)).toBe(true);
-          expect(step.delayMinutes).toBeGreaterThanOrEqual(0);
-          expect(step.delayMinutes).toBeLessThanOrEqual(43_200);
-          expect(step.text.trim(), `${tpl.slug}: langkah tanpa teks`).not.toBe("");
-          expect(step.text.length).toBeLessThanOrEqual(4096);
+        if (tpl.kind === "keyword") {
+          // AutomationStepInputSchema.text: 1..4096.
+          expect(content.text!.trim(), `${tpl.slug}: teks balasan kosong`).not.toBe("");
+          expect(content.text!.length, `${tpl.slug}: teks balasan terlalu panjang`).toBeLessThanOrEqual(4096);
+        } else {
+          // CreateSequenceAutomationRequestSchema: 1..10 langkah.
+          expect(content.steps!.length, `${tpl.slug}: jumlah langkah`).toBeGreaterThanOrEqual(1);
+          expect(content.steps!.length).toBeLessThanOrEqual(10);
+          for (const step of content.steps!) {
+            // delayMinutes: 0..43200 (30 hari).
+            expect(Number.isInteger(step.delayMinutes)).toBe(true);
+            expect(step.delayMinutes).toBeGreaterThanOrEqual(0);
+            expect(step.delayMinutes).toBeLessThanOrEqual(43_200);
+            expect(step.text.trim(), `${tpl.slug}: langkah tanpa teks`).not.toBe("");
+            expect(step.text.length).toBeLessThanOrEqual(4096);
+          }
         }
       }
     }
