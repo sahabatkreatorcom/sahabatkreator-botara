@@ -5,10 +5,16 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import type {
-  AgentMode,
-  AgentResponse,
-  AgentSuggestionResponse,
+import {
+  AGENT_INSTRUCTION_TEMPLATES,
+  extractInstructionPlaceholders,
+  resolveAgentTemplateFill,
+  type AgentInstructionTemplateDefinition,
+  type AgentInstructionTemplateResponse,
+  type AgentMode,
+  type AgentPlaygroundDraftConfig,
+  type AgentResponse,
+  type AgentSuggestionResponse,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
@@ -45,6 +51,16 @@ interface AgentsPageProps {
   locale: Locale;
 }
 
+interface AgentsListSectionProps extends AgentsPageProps {
+  /**
+   * Uji isi formulir agent saat ini di Playground tanpa menyimpan
+   * (gelombang Templat Instruction): hub /agents meneruskannya ke
+   * PlaygroundPanel sebagai draf. Opsional — tanpa prop ini tombol
+   * "Coba di Playground" tidak dirender di formulir.
+   */
+  onTryInPlayground?: (draft: AgentPlaygroundDraftConfig) => void;
+}
+
 /**
  * Seksi daftar agent untuk hub /agents (Fase 12E): pengelolaan agent
  * workspace aktif lewat API 3A — daftar + sakelar aktif, form buat/edit
@@ -52,7 +68,11 @@ interface AgentsPageProps {
  * (`SuggestionsSection`) di tabnya sendiri; keduanya dirangkai
  * AgentsHubPage. Semua teks lewat i18n; tanggal lewat Intl.
  */
-export function AgentsListSection({ t, locale }: AgentsPageProps) {
+export function AgentsListSection({
+  t,
+  locale,
+  onTryInPlayground,
+}: AgentsListSectionProps) {
   const { status, tenants, active, reload } = useWorkspace();
   const tenantId = active?.id ?? null;
 
@@ -276,9 +296,21 @@ export function AgentsListSection({ t, locale }: AgentsPageProps) {
       {formTarget ? (
         <AgentFormModal
           t={t}
+          locale={locale}
           tenantId={active.id}
           agent={formTarget === "create" ? null : formTarget}
           onClose={() => setFormTarget(null)}
+          onTryInPlayground={
+            onTryInPlayground
+              ? (draft) => {
+                  // Modal ditutup DULU, baru hub berpindah ke tab
+                  // playground dengan draf ini (urutan disengaja:
+                  // playground tidak boleh terbuka di balik modal).
+                  setFormTarget(null);
+                  onTryInPlayground(draft);
+                }
+              : undefined
+          }
           onSaved={(saved) => {
             setFormTarget(null);
             setAgents((prev) => {
@@ -296,24 +328,145 @@ export function AgentsListSection({ t, locale }: AgentsPageProps) {
 
 function AgentFormModal({
   t,
+  locale,
   tenantId,
   agent,
   onClose,
   onSaved,
+  onTryInPlayground,
 }: {
   t: Translate;
+  locale: Locale;
   tenantId: string;
   agent: AgentResponse | null;
   onClose: () => void;
   onSaved: (agent: AgentResponse) => void;
+  onTryInPlayground?: (draft: AgentPlaygroundDraftConfig) => void;
 }) {
   const [name, setName] = useState(agent?.name ?? "");
   const [systemPrompt, setSystemPrompt] = useState(agent?.systemPrompt ?? "");
   const [model, setModel] = useState(agent?.model ?? "");
   const [mode, setMode] = useState<AgentMode>(agent?.mode ?? "suggest");
+  // Bahasa balasan agent (config.language): "" = ikuti bahasa pelanggan.
+  const [language, setLanguage] = useState(agent?.config?.language ?? "");
   const [isActive, setIsActive] = useState(agent?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // --- Galeri templat instruction (gelombang Templat Instruction) ---
+  // Templat pribadi tenant dimuat saat modal dibuka; katalog bawaan
+  // statis dari kontrak. Gagal memuat daftar pribadi TIDAK menggagalkan
+  // formulir — galeri bawaan tetap jalan, cukup catatan kecil.
+  const [myTemplates, setMyTemplates] = useState<
+    AgentInstructionTemplateResponse[]
+  >([]);
+  const [myTemplatesLoaded, setMyTemplatesLoaded] = useState(false);
+  const [myTemplatesError, setMyTemplatesError] = useState(false);
+  const [deletingTemplateId, setDeletingTemplateId] = useState<string | null>(
+    null,
+  );
+
+  const loadMyTemplates = useCallback(async () => {
+    try {
+      const list = await api.agentTemplates.list(tenantId);
+      setMyTemplates(list);
+      setMyTemplatesError(false);
+    } catch {
+      setMyTemplatesError(true);
+    } finally {
+      setMyTemplatesLoaded(true);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    void loadMyTemplates();
+  }, [loadMyTemplates]);
+
+  // "Mulai dari kosong" (mode buat): kembalikan formulir ke keadaan awal.
+  const applyBlank = () => {
+    setName("");
+    setSystemPrompt("");
+    setModel("");
+    setMode("suggest");
+    setLanguage("");
+    setIsActive(true);
+    setError(null);
+  };
+
+  // Templat bawaan: isian mengikuti locale UI saat ini. Mode EDIT tidak
+  // menimpa nama agent yang sedang diedit (keputusan desain) — nama
+  // saran templat hanya dipakai pada mode BUAT.
+  const applyBuiltInTemplate = (def: AgentInstructionTemplateDefinition) => {
+    const fill = resolveAgentTemplateFill(def, locale);
+    if (!agent) setName(fill.name);
+    setSystemPrompt(fill.systemPrompt);
+    setMode(fill.mode);
+    setLanguage(fill.language);
+    setError(null);
+  };
+
+  // Templat pribadi tenant: isian dari baris tersimpan; aturan nama sama
+  // seperti templat bawaan (hanya mode buat yang menerima nama templat).
+  const applyMyTemplate = (tpl: AgentInstructionTemplateResponse) => {
+    if (!agent) setName(tpl.name);
+    setSystemPrompt(tpl.systemPrompt);
+    setMode(tpl.mode);
+    setLanguage(tpl.language ?? "");
+    setError(null);
+  };
+
+  const handleDeleteTemplate = async (
+    tpl: AgentInstructionTemplateResponse,
+  ) => {
+    if (deletingTemplateId) return;
+    if (
+      !window.confirm(
+        t("agents.templateDeleteConfirm", { name: tpl.name }),
+      )
+    ) {
+      return;
+    }
+    setDeletingTemplateId(tpl.id);
+    try {
+      await api.agentTemplates.remove(tenantId, tpl.id);
+      await loadMyTemplates();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setDeletingTemplateId(null);
+    }
+  };
+
+  // --- Simpan sebagai templat (lipatan sebaris di bawah formulir) ---
+  const [saveFoldOpen, setSaveFoldOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateSaved, setTemplateSaved] = useState(false);
+
+  const handleSaveAsTemplate = async () => {
+    const trimmed = templateName.trim();
+    if (!trimmed) return setError(t("agents.templateSaveNameRequired"));
+    setSavingTemplate(true);
+    try {
+      await api.agentTemplates.create(tenantId, {
+        name: trimmed,
+        systemPrompt,
+        mode,
+        language: language || null,
+      });
+      setSaveFoldOpen(false);
+      setTemplateSaved(true);
+      await loadMyTemplates();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
+
+  // Penanda [...] yang belum diganti di instruction — peringatan murni
+  // tampilan (non-blokir): tidak menyentuh validasi/submit sama sekali.
+  const placeholders = extractInstructionPlaceholders(systemPrompt);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -322,12 +475,21 @@ function AgentFormModal({
     setError(null);
     setSubmitting(true);
     try {
+      // Config lama dipertahankan; hanya kunci language yang
+      // diterapkan (pilihan terisi) atau dihapus (pilihan "").
+      const config = { ...(agent?.config ?? {}) };
+      if (language) {
+        config.language = language;
+      } else {
+        delete config.language;
+      }
       const payload = {
         name: trimmedName,
         systemPrompt: systemPrompt.trim(),
         model: model.trim(),
         mode,
         isActive,
+        config,
       };
       const saved = agent
         ? await api.agents.update(tenantId, agent.id, payload)
@@ -346,7 +508,7 @@ function AgentFormModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
         <div className="flex items-start justify-between gap-3">
           <h2 className="text-lg font-bold text-ink">
             {agent ? t("agents.editTitle") : t("agents.addTitle")}
@@ -360,6 +522,131 @@ function AgentFormModal({
           </button>
         </div>
         <form onSubmit={handleSubmit} className="mt-4 space-y-3">
+          {/* Galeri templat instruction: memilih kartu MENGISI formulir
+              (instruction + mode + bahasa, + nama hanya pada mode buat);
+              tidak ada yang tersimpan sampai formulir disimpan. */}
+          <div>
+            <h3 className="text-sm font-semibold text-ink">
+              {t("agents.templatesTitle")}
+            </h3>
+            <p className="mt-1 text-xs leading-relaxed text-muted">
+              {t("agents.templatesSubtitle")}
+            </p>
+            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+              {!agent ? (
+                <li className="flex flex-col rounded-xl border border-line bg-surface p-3">
+                  <span className="text-sm font-semibold text-ink">
+                    {t("agents.templateBlankName")}
+                  </span>
+                  <p className="mt-1 flex-1 text-xs leading-relaxed text-muted">
+                    {t("agents.templateBlankDesc")}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={applyBlank}
+                    className="mt-2 self-start rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                  >
+                    {t("agents.templateApplyButton")}
+                  </button>
+                </li>
+              ) : null}
+              {AGENT_INSTRUCTION_TEMPLATES.map((def) => (
+                <li
+                  key={def.slug}
+                  className="flex flex-col rounded-xl border border-line bg-surface p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-semibold text-ink">
+                      {t(def.nameKey as TranslationKey)}
+                    </span>
+                    <span className="rounded-full bg-elevated px-2 py-0.5 text-[10px] font-semibold text-muted">
+                      {t("agents.templateBuiltInBadge")}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        def.mode === "suggest"
+                          ? "bg-elevated text-ink"
+                          : "bg-accent/10 text-accent"
+                      }`}
+                    >
+                      {t(
+                        def.mode === "suggest"
+                          ? "agents.modeSuggest"
+                          : "agents.modeAuto",
+                      )}
+                    </span>
+                  </div>
+                  <p className="mt-1 flex-1 text-xs leading-relaxed text-muted">
+                    {t(def.descriptionKey as TranslationKey)}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => applyBuiltInTemplate(def)}
+                    className="mt-2 self-start rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                  >
+                    {t("agents.templateApplyButton")}
+                  </button>
+                </li>
+              ))}
+              {myTemplates.map((tpl) => (
+                <li
+                  key={tpl.id}
+                  className="flex flex-col rounded-xl border border-line bg-surface p-3"
+                >
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-semibold text-ink">
+                      {tpl.name}
+                    </span>
+                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                      {t("agents.templateMineBadge")}
+                    </span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                        tpl.mode === "suggest"
+                          ? "bg-elevated text-ink"
+                          : "bg-accent/10 text-accent"
+                      }`}
+                    >
+                      {t(
+                        tpl.mode === "suggest"
+                          ? "agents.modeSuggest"
+                          : "agents.modeAuto",
+                      )}
+                    </span>
+                  </div>
+                  <p className="mt-1 line-clamp-3 flex-1 whitespace-pre-wrap text-xs leading-relaxed text-muted">
+                    {tpl.systemPrompt}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => applyMyTemplate(tpl)}
+                      className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                    >
+                      {t("agents.templateApplyButton")}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={deletingTemplateId === tpl.id}
+                      onClick={() => void handleDeleteTemplate(tpl)}
+                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-60"
+                    >
+                      {t("agents.templateDeleteButton")}
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+            {myTemplatesError ? (
+              <p className="mt-2 text-xs text-danger">
+                {t("agents.templatesLoadError")}
+              </p>
+            ) : myTemplatesLoaded && myTemplates.length === 0 ? (
+              <p className="mt-2 text-xs text-muted">
+                {t("agents.templatesMineEmpty")}
+              </p>
+            ) : null}
+          </div>
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted">
               {t("agents.nameLabel")} *
@@ -386,6 +673,22 @@ function AgentFormModal({
               {t("agents.promptHint")}
             </span>
           </label>
+          {/* Peringatan penanda [...] belum diganti — murni tampilan,
+              TIDAK PERNAH menghalangi simpan (keputusan pemilik). */}
+          {placeholders.length > 0 ? (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2">
+              <p className="text-xs font-semibold text-warning">
+                {t("agents.templatePlaceholderWarningTitle")}
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-ink">
+                {t("agents.templatePlaceholderWarningBody", {
+                  placeholders: placeholders
+                    .map((p) => `[${p}]`)
+                    .join(", "),
+                })}
+              </p>
+            </div>
+          ) : null}
           <label className="block">
             <span className="mb-1 block text-xs font-medium text-muted">
               {t("agents.modelLabel")}
@@ -399,6 +702,20 @@ function AgentFormModal({
             <span className="mt-1 block text-[11px] text-muted">
               {t("agents.modelHint")}
             </span>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("agents.languageLabel")}
+            </span>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className={inputClassName}
+            >
+              <option value="">{t("agents.languageFollow")}</option>
+              <option value="id">{t("agents.languageId")}</option>
+              <option value="en">{t("agents.languageEn")}</option>
+            </select>
           </label>
           <fieldset>
             <legend className="mb-1 text-xs font-medium text-muted">
@@ -465,6 +782,78 @@ function AgentFormModal({
               {t("common.cancel")}
             </button>
           </div>
+          {/* Aksi sekunder: simpan susunan formulir ini sebagai templat
+              pribadi, dan/atau uji persis isi formulir ini di Playground
+              sebagai draf (tanpa menyimpan agent). */}
+          <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+            <button
+              type="button"
+              onClick={() => {
+                setTemplateSaved(false);
+                setTemplateName((prev) => prev || name);
+                setSaveFoldOpen((v) => !v);
+              }}
+              className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+            >
+              {t("agents.templateSaveButton")}
+            </button>
+            {onTryInPlayground ? (
+              <button
+                type="button"
+                onClick={() =>
+                  onTryInPlayground({
+                    name: name.trim() || undefined,
+                    systemPrompt,
+                    model: model.trim() || undefined,
+                    mode,
+                    language: language || null,
+                  })
+                }
+                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+              >
+                {t("agents.tryPlaygroundButton")}
+              </button>
+            ) : null}
+          </div>
+          {templateSaved ? (
+            <p className="rounded-lg bg-success/15 px-3 py-2 text-sm text-success">
+              {t("agents.templateSaved")}
+            </p>
+          ) : null}
+          {saveFoldOpen ? (
+            <div className="rounded-xl border border-line bg-surface p-3">
+              <label className="block">
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  {t("agents.templateSaveNameLabel")}
+                </span>
+                <input
+                  value={templateName}
+                  onChange={(e) => setTemplateName(e.target.value)}
+                  placeholder={t("agents.templateSaveNamePlaceholder")}
+                  className={inputClassName}
+                />
+              </label>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  disabled={savingTemplate}
+                  onClick={() => void handleSaveAsTemplate()}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                >
+                  {savingTemplate
+                    ? t("agents.templateSaving")
+                    : t("agents.templateSaveConfirmButton")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSaveFoldOpen(false)}
+                  className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                >
+                  {t("common.cancel")}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </form>
       </div>
     </div>
