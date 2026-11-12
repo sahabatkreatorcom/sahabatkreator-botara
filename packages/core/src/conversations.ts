@@ -6,6 +6,7 @@ import {
   conversations,
   media,
   messages,
+  outboxEvents,
   tenantMembers,
   users,
   whatsappTemplates,
@@ -1621,6 +1622,21 @@ export async function markOutboundMessageSent(
       },
     });
 
+    // G11: peristiwa outbox untuk webhook keluar tenant — transisi
+    // status yang benar-benar terjadi (queued → sent) di titik
+    // penanda pusat ini, mencakup semua provider delivery runner.
+    await tx.insert(outboxEvents).values({
+      tenantId: ctx.tenantId,
+      type: "message.status_updated",
+      payload: {
+        conversationId: updated.conversationId,
+        messageId: updated.id,
+        from: "queued",
+        to: "sent",
+        via,
+      },
+    });
+
     return updated;
   });
 }
@@ -1664,6 +1680,20 @@ export async function markOutboundMessageFailed(
       meta: {
         conversationId: updated.conversationId,
         messageId: updated.id,
+        via,
+        errorCode: safeCode,
+      },
+    });
+
+    // G11: peristiwa outbox untuk webhook keluar tenant (queued → failed).
+    await tx.insert(outboxEvents).values({
+      tenantId: ctx.tenantId,
+      type: "message.status_updated",
+      payload: {
+        conversationId: updated.conversationId,
+        messageId: updated.id,
+        from: "queued",
+        to: "failed",
         via,
         errorCode: safeCode,
       },

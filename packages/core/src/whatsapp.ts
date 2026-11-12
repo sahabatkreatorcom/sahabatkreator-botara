@@ -783,6 +783,21 @@ export async function applyWhatsAppMessageStatus(
           errorCode,
         },
       });
+      // G11: peristiwa outbox untuk webhook keluar tenant.
+      await tx.insert(outboxEvents).values({
+        tenantId: account.tenantId,
+        type: "message.status_updated",
+        payload: {
+          provider: "whatsapp",
+          channelAccountId: account.id,
+          conversationId: message.conversationId,
+          messageId: message.id,
+          from: current,
+          to: "failed",
+          via: "whatsapp-webhook",
+          errorCode,
+        },
+      });
       return {
         messageId: message.id,
         conversationId: message.conversationId,
@@ -811,6 +826,22 @@ export async function applyWhatsAppMessageStatus(
         via: "whatsapp-webhook",
         from: current,
         to: input.status,
+      },
+    });
+    // G11: peristiwa outbox untuk webhook keluar tenant (resi
+    // delivered/read yang benar-benar diterapkan — status basi yang
+    // diabaikan di atas tidak pernah sampai ke sini).
+    await tx.insert(outboxEvents).values({
+      tenantId: account.tenantId,
+      type: "message.status_updated",
+      payload: {
+        provider: "whatsapp",
+        channelAccountId: account.id,
+        conversationId: message.conversationId,
+        messageId: message.id,
+        from: current,
+        to: input.status,
+        via: "whatsapp-webhook",
       },
     });
     return {
