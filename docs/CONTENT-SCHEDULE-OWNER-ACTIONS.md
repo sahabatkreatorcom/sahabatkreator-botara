@@ -987,6 +987,48 @@ TENANT (per workspace yang mau memakai fitur ini):
 
 ---
 
+## Gelombang G17 — Ekstensi Flow (Tier 3 butir 17)
+
+### Butir 1 — Pemicu webhook masuk (tanpa tindakan pemilik platform)
+
+- Flow kini bisa dipicu panggilan HTTP dari sistem luar (CRM,
+  formulir, e-commerce): pemicu jenis **Webhook** di Flow Builder.
+  URL + token dikelola TENANT sendiri dari panel pemicu di builder
+  (token tampil satu kali saat dibuat/dirotasi; server hanya
+  menyimpan hash-nya). Tidak ada kredensial platform baru.
+- Catatan perilaku: panggilan dengan token salah/tidak ada dijawab
+  404 yang sama seperti flow tidak ada (disengaja, agar keberadaan
+  flow tidak bisa ditebak). Kontak sasaran dipilih dari isi payload
+  (`contactId`/`externalId`/`phone`/`email`); kontak yang sudah
+  opt-out tidak memulai run (dijawab 200 "ignored").
+
+### Butir 2 — Langkah Google Sheets (TINDAKAN PEMILIK PLATFORM)
+
+Node flow **Tambah baris Google Sheets** memakai layanan Google
+BARU yang mandiri: `sheets` (pola per-layanan yang sama seperti
+Calendar/YouTube/Business/Ads — consent, koneksi, dan klien OAuth
+sendiri; TIDAK menumpang scope layanan lain). Yang perlu dilakukan
+pemilik platform, sekali:
+
+1. Di proyek Google Cloud untuk Sheets (boleh proyek khusus, boleh
+   memakai ulang pasangan klien bersama): aktifkan **Google Sheets
+   API**.
+2. Daftarkan redirect URI kanonis persis:
+   `https://botara.my.id/api/oauth/google_sheets/callback`
+   (tertulis juga di kartu Google Sheets Panel Admin).
+3. Isi **Google Sheets — OAuth client ID/secret** di Panel Admin
+   (kartu "Google Sheets"), ATAU kosongkan dan biarkan fallback ke
+   pasangan klien Google bersama — dengan catatan proyek bersama itu
+   juga harus mengaktifkan Sheets API + mendaftarkan URI di atas.
+4. Scope `spreadsheets` tergolong **sensitif** di Google: untuk
+   consent publik, layar consent proyek Cloud Sheets mungkin perlu
+   **verifikasi OAuth Google** (dan selama belum terverifikasi,
+   Google membatasi jumlah pengguna consent). Ini gerbang Google,
+   bukan bug Botara.
+5. Tenant lalu menghubungkan akun Google-nya dari **Saluran →
+   Google → Google Sheets**; spreadsheet tujuan harus bisa diakses
+   (dimiliki/dibagikan ke) akun yang memberi consent itu.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -998,6 +1040,9 @@ pemilik baru, hanya catatan perilaku) + Gelombang G15 (jam kerja
 tim + SLA manusia — tanpa tindakan pemilik baru, hanya catatan
 perilaku) + Gelombang G16 (konversi iklan dari flow — tindakan
 platform: developer token Google Ads + proyek OAuth Ads; tindakan
-tenant: dataset + token Meta / akun + aksi konversi Google Ads).
+tenant: dataset + token Meta / akun + aksi konversi Google Ads) +
+Gelombang G17 (ekstensi flow — butir 1 pemicu webhook tanpa tindakan
+pemilik; butir 2 Sheets: tindakan platform proyek Cloud Sheets +
+proyek/consent tenant; butir 3–4 menyusul di bagian G17 yang sama).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._

@@ -153,6 +153,11 @@ export const PLATFORM_SETTING_KEYS = [
   "google_ads_client_id",
   "google_ads_client_secret",
   "google_ads_developer_token",
+  // G17 (langkah Google Sheets di flow): klien OAuth per layanan
+  // 'sheets' — pola per-layanan yang sama (client_id publik,
+  // client_secret rahasia; fallback pasangan bersama berlaku).
+  "google_sheets_client_id",
+  "google_sheets_client_secret",
   // Instruksi pemilik 2026-11-12: SEMUA kredensial integrasi platform
   // diisi lewat Panel Admin, env hanya fallback — kunci-kunci di bawah
   // menutup sisa pembacaan env langsung agar perlakuannya konsisten.
@@ -238,6 +243,8 @@ export const PLATFORM_PUBLIC_CONFIG_KEYS = [
   "google_business_client_id",
   // G16: Client ID layanan 'ads' — identifier publik, pola yang sama.
   "google_ads_client_id",
+  // G17: Client ID layanan 'sheets' — identifier publik, pola sama.
+  "google_sheets_client_id",
   // Pengaturan content schedule: base URL publik menurut definisinya
   // PUBLIK (itulah gunanya — provider mengambil media dari sana), dan
   // dua status privasi adalah pilihan enum yang memang harus terlihat
@@ -288,6 +295,7 @@ export async function getPlatformPublicConfig(
     googleYoutubeClientId,
     googleBusinessClientId,
     googleAdsClientId,
+    googleSheetsClientId,
     postMediaPublicBaseUrl,
     youtubePrivacyStatus,
     tiktokPrivacyLevel,
@@ -309,6 +317,7 @@ export async function getPlatformPublicConfig(
     getProviderSecret(db, "google_youtube_client_id", opts),
     getProviderSecret(db, "google_business_client_id", opts),
     getProviderSecret(db, "google_ads_client_id", opts),
+    getProviderSecret(db, "google_sheets_client_id", opts),
     getProviderSecret(db, "post_media_public_base_url", opts),
     getProviderSecret(db, "youtube_privacy_status", opts),
     getProviderSecret(db, "tiktok_privacy_level", opts),
@@ -334,6 +343,7 @@ export async function getPlatformPublicConfig(
     google_youtube_client_id: googleYoutubeClientId,
     google_business_client_id: googleBusinessClientId,
     google_ads_client_id: googleAdsClientId,
+    google_sheets_client_id: googleSheetsClientId,
     post_media_public_base_url: postMediaPublicBaseUrl,
     youtube_privacy_status: youtubePrivacyStatus,
     tiktok_privacy_level: tiktokPrivacyLevel,

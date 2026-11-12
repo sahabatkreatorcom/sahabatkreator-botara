@@ -85,14 +85,24 @@ export const GOOGLE_BUSINESS_MANAGE_SCOPE =
  */
 export const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 
+/** Scope Sheets (G17): baca+tulis spreadsheet akun yang memberi consent. */
+export const GOOGLE_SHEETS_SCOPE =
+  "https://www.googleapis.com/auth/spreadsheets";
+
 /** Layanan Google yang kini punya koneksi OAuth mandiri per tenant. */
-export type GoogleService = "calendar" | "youtube" | "business" | "ads";
+export type GoogleService =
+  | "calendar"
+  | "youtube"
+  | "business"
+  | "ads"
+  | "sheets";
 
 export const GOOGLE_SERVICES: readonly GoogleService[] = [
   "calendar",
   "youtube",
   "business",
   "ads",
+  "sheets",
 ];
 
 export function isGoogleService(value: string): value is GoogleService {
@@ -117,6 +127,7 @@ export const GOOGLE_SERVICE_SCOPES: Record<GoogleService, string[]> = {
   youtube: ["openid", "email", YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE],
   business: ["openid", "email", GOOGLE_BUSINESS_MANAGE_SCOPE],
   ads: ["openid", "email", GOOGLE_ADS_SCOPE],
+  sheets: ["openid", "email", GOOGLE_SHEETS_SCOPE],
 };
 
 /** Scope consent satu layanan sebagai string spasi-terpisah (bentuk dialog OAuth). */
@@ -137,6 +148,7 @@ export const GOOGLE_OAUTH_CALLBACK_SEGMENTS: Record<GoogleService, string> = {
   youtube: "youtube",
   business: "google_business",
   ads: "google_ads",
+  sheets: "google_sheets",
 };
 
 /** Path callback kanonis satu layanan, mis. `/api/oauth/youtube/callback`. */
@@ -246,6 +258,10 @@ const GOOGLE_SERVICE_CLIENT_KEYS: Record<GoogleService, GoogleClientKeyPair> =
     ads: {
       clientIdKey: "google_ads_client_id",
       clientSecretKey: "google_ads_client_secret",
+    },
+    sheets: {
+      clientIdKey: "google_sheets_client_id",
+      clientSecretKey: "google_sheets_client_secret",
     },
   };
 

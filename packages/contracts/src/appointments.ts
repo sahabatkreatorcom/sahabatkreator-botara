@@ -259,6 +259,10 @@ export const GoogleServiceSchema = z.enum([
   // untuk pengiriman konversi dari flow; callback kanonis
   // /api/oauth/google_ads/callback.
   "ads",
+  // G17: layanan 'sheets' — consent Google Sheets (scope
+  // spreadsheets) untuk node flow append_sheet_row; callback
+  // kanonis /api/oauth/google_sheets/callback.
+  "sheets",
 ]);
 export type GoogleService = z.infer<typeof GoogleServiceSchema>;
 

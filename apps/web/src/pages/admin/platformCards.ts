@@ -39,6 +39,7 @@ export type AdminCardId =
   | "youtube"
   | "google-business"
   | "google-ads"
+  | "google-sheets"
   | "google-shared"
   | "r2"
   | "openrouter"
@@ -97,6 +98,7 @@ export const OAUTH_CALLBACK_PATHS = {
   youtube: "/api/oauth/youtube/callback",
   googleBusiness: "/api/oauth/google_business/callback",
   googleAds: "/api/oauth/google_ads/callback",
+  googleSheets: "/api/oauth/google_sheets/callback",
 } as const;
 
 /** Path webhook kanonis per platform (gelombang URL). */
@@ -215,6 +217,21 @@ export const ADMIN_CARDS: readonly AdminCardSpec[] = [
       "google_ads_developer_token",
     ],
     callbackPath: OAUTH_CALLBACK_PATHS.googleAds,
+  },
+  {
+    // G17: layanan Google 'sheets' (node flow append_sheet_row).
+    // Pasangan klien OAuth per-layanan; fallback pasangan bersama
+    // tetap berlaku. Proyek Cloud-nya wajib mengaktifkan Sheets API.
+    id: "google-sheets",
+    fields: [
+      pub("google_sheets_client_id"),
+      sec("google_sheets_client_secret"),
+    ],
+    requiredKeys: [
+      "google_sheets_client_id",
+      "google_sheets_client_secret",
+    ],
+    callbackPath: OAUTH_CALLBACK_PATHS.googleSheets,
   },
   {
     // Pasangan klien OAuth Google BERSAMA — fallback ketiga layanan di

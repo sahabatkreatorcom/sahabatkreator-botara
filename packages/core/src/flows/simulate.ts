@@ -116,6 +116,7 @@ export type FlowSimEffectKind =
   | "checkout"
   | "appointment_offer"
   | "ad_conversion"
+  | "sheet_append"
   | "park";
 
 export interface FlowSimEffect {
@@ -606,6 +607,41 @@ export function simulateFlowRun(
           eventName,
           value: typeof c.value === "number" ? c.value : null,
           currency: typeof c.currency === "string" ? c.currency : null,
+        });
+        return { type: "advance" };
+      }
+
+      case "append_sheet_row": {
+        const spreadsheetId =
+          typeof c.spreadsheetId === "string" ? c.spreadsheetId : "";
+        if (!spreadsheetId) {
+          throw new SimNodeError("append_sheet_row tanpa config.spreadsheetId");
+        }
+        // Sheets API TIDAK dipanggil — baris yang AKAN ditambahkan
+        // dirender dengan substitusi mesin yang sama seperti
+        // eksekutor dan dicatat sebagai efek "recorded".
+        const columns = (
+          Array.isArray(c.columns) ? c.columns : []
+        ) as { header?: unknown; value?: unknown }[];
+        const values = columns.map((col) =>
+          renderFlowHttpTemplate(
+            typeof col.value === "string" ? col.value : "",
+            contactLike(),
+          ),
+        );
+        pushStep(node, {
+          outcome: "simulated",
+          reason: "sheet_append_not_sent",
+          spreadsheetId,
+          values,
+        });
+        pushEffect("sheet_append", node, "recorded", {
+          spreadsheetId,
+          sheetName: typeof c.sheetName === "string" ? c.sheetName : null,
+          headers: columns.map((col) =>
+            typeof col.header === "string" ? col.header : "",
+          ),
+          values,
         });
         return { type: "advance" };
       }

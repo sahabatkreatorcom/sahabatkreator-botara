@@ -82,6 +82,7 @@ import {
   renderSlotListText,
 } from "../appointments";
 import { GoogleDeps } from "../google-calendar";
+import { appendGoogleSheetRow } from "../google-sheets";
 
 import {
   isNonEmptyString,
@@ -1854,6 +1855,118 @@ export async function executeFlowStep(
                 })
                 .where(eq(contacts.id, run.contactId));
             }
+          }
+          const adv = await advanceRun(tx, tenantId, fresh, graph, node, {
+            detail,
+          });
+          return { applied: true, status: adv.status };
+        },
+      );
+      if (!applied.applied) {
+        return {
+          executed: stepsExecuted > 0,
+          reason:
+            applied.reason === "stale_step" ? "stale_step" : "run_terminal",
+          conversationId: run.conversationId,
+          stepsExecuted,
+        };
+      }
+      stepsExecuted += 1;
+      if (applied.status === "waiting" || isTerminalStatus(applied.status!)) {
+        return {
+          executed: true,
+          status: applied.status,
+          conversationId: run.conversationId,
+          outboundMessageId: lastOutboundMessageId,
+          stepsExecuted,
+        };
+      }
+      continue;
+    }
+
+    // Node append_sheet_row (G17): panggilan Sheets API DI LUAR
+    // transaksi langkah (pola http_request). Node ini TIDAK PERNAH
+    // menggagalkan run: Sheets belum terhubung, HTTP error, dan
+    // jaringan mati semuanya menjadi detail langkah `sheet_error`
+    // berkode dan run lanjut ke node berikutnya. Nilai kolom
+    // dirender dengan keluarga templat mesin yang sama seperti
+    // http_request ({name}, {{field:}}, {{payload:}} dari run
+    // webhook).
+    if (node.type === "append_sheet_row") {
+      const c = node.config;
+      const contact = ctxState.contact;
+      const templateExtras = {
+        webhookPayload: runContextOf(run).webhook?.payload,
+      };
+      const spreadsheetId =
+        typeof c.spreadsheetId === "string" ? c.spreadsheetId : "";
+      const sheetName =
+        typeof c.sheetName === "string" && c.sheetName.trim()
+          ? c.sheetName
+          : null;
+      const columns = (
+        Array.isArray(c.columns) ? c.columns : []
+      ) as { header?: unknown; value?: unknown }[];
+      const values = columns.map((col) =>
+        renderFlowHttpTemplate(
+          typeof col.value === "string" ? col.value : "",
+          contact,
+          templateExtras,
+        ),
+      );
+      const startedAtMs = Date.now();
+      const result = !spreadsheetId
+        ? {
+            kind: "error" as const,
+            code: "sheet_config_invalid",
+            message: "append_sheet_row tanpa config.spreadsheetId",
+          }
+        : !deps.google
+          ? {
+              kind: "error" as const,
+              code: "sheets_not_connected",
+              message:
+                "Dependensi Google tidak tersedia di eksekutor langkah ini",
+            }
+          : await appendGoogleSheetRow(db, tenantId, deps.google, {
+              spreadsheetId,
+              sheetName,
+              values,
+            });
+      const detail: Record<string, unknown> =
+        result.kind === "appended"
+          ? {
+              outcome: "appended",
+              spreadsheetId,
+              sheetName,
+              values,
+              updatedRange: result.updatedRange,
+              updatedRows: result.updatedRows,
+              durationMs: Date.now() - startedAtMs,
+            }
+          : {
+              outcome: "sheet_error",
+              spreadsheetId,
+              sheetName,
+              values,
+              code: result.code,
+              error: result.message,
+              durationMs: Date.now() - startedAtMs,
+            };
+      const applied: AdvanceResult = await withTenantDb(
+        db,
+        tenantId,
+        async (tx) => {
+          const [fresh] = await tx
+            .select()
+            .from(flowRuns)
+            .where(and(eq(flowRuns.tenantId, tenantId), eq(flowRuns.id, runId)))
+            .limit(1);
+          if (!fresh || isTerminalStatus(fresh.status)) {
+            return { applied: false, reason: "run_terminal" as const };
+          }
+          if (fresh.nextStepSeq !== run.nextStepSeq) {
+            return { applied: false, reason: "stale_step" as const };
           }
           const adv = await advanceRun(tx, tenantId, fresh, graph, node, {
             detail,

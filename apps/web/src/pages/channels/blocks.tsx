@@ -246,6 +246,9 @@ const GOOGLE_SERVICE_ROWS = [
   { service: "calendar", nameKey: "channels.googleServiceCalendar" },
   { service: "youtube", nameKey: "channels.googleServiceYoutube" },
   { service: "business", nameKey: "channels.googleServiceBusiness" },
+  // G17: layanan Sheets — consent-nya memberi node flow
+  // append_sheet_row akses ke spreadsheet akun tenant.
+  { service: "sheets", nameKey: "channels.googleServiceSheets" },
 ] as const;
 
 /**

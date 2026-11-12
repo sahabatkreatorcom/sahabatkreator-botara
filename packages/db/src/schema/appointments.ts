@@ -252,6 +252,9 @@ export const googleServiceEnum = pgEnum("google_service", [
   // G16 (migrasi 0039): layanan 'ads' — consent OAuth Google Ads
   // (scope adwords) untuk pengiriman konversi dari flow.
   "ads",
+  // G17 (migrasi 0041): layanan 'sheets' — consent Google Sheets
+  // (scope spreadsheets) untuk node flow append_sheet_row.
+  "sheets",
 ]);
 
 /**

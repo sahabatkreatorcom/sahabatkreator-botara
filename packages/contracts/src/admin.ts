@@ -112,6 +112,10 @@ export const PlatformSettingKeySchema = z.enum([
   "google_ads_client_id",
   "google_ads_client_secret",
   "google_ads_developer_token",
+  // G17 (langkah Sheets di flow): klien OAuth per layanan 'sheets'
+  // (pola yang sama: client_id PUBLIK, client_secret RAHASIA).
+  "google_sheets_client_id",
+  "google_sheets_client_secret",
   // Instruksi pemilik 2026-11-12: semua kredensial integrasi diisi lewat
   // Panel Admin, env hanya fallback. `meta_webhook_verify_token` adalah
   // token handshake webhook Meta (nilai yang KITA tentukan) — RAHASIA
@@ -284,6 +288,13 @@ export const PlatformGoogleInfoSchema = z.object({
     // mengaktifkan Google Ads API; redirect URI kanonis
     // /api/oauth/google_ads/callback.
     ads: z.object({
+      clientId: z.string().nullable(),
+      redirectUri: z.string(),
+    }),
+    // G17: layanan 'sheets' (Google Sheets) — proyek Cloud-nya wajib
+    // mengaktifkan Google Sheets API; redirect URI kanonis
+    // /api/oauth/google_sheets/callback.
+    sheets: z.object({
       clientId: z.string().nullable(),
       redirectUri: z.string(),
     }),

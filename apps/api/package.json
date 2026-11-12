@@ -32,6 +32,7 @@
     "verify:flow-simulator": "tsx scripts/verify-flow-simulator.ts",
     "verify:trigger-priority": "tsx scripts/verify-trigger-priority.ts",
     "verify:flow-webhook-trigger": "tsx scripts/verify-flow-webhook-trigger.ts",
+    "verify:google-sheets-flow": "tsx scripts/verify-google-sheets-flow.ts",
     "backfill:reply-snapshots": "tsx scripts/backfill-reply-snapshots.ts",
     "backfill:usage-meta": "tsx scripts/backfill-usage-meta.ts",
     "backfill:kb-embeddings": "tsx scripts/backfill-kb-embeddings.ts",

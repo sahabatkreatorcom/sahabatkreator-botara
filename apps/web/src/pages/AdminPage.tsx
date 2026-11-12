@@ -162,6 +162,10 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   google_ads_client_id: "admin.googleAdsClientIdLabel",
   google_ads_client_secret: "admin.googleAdsClientSecretLabel",
   google_ads_developer_token: "admin.googleAdsDeveloperTokenLabel",
+  // G17: layanan Google Sheets — klien OAuth per layanan (kartu
+  // Google Sheets).
+  google_sheets_client_id: "admin.googleSheetsClientIdLabel",
+  google_sheets_client_secret: "admin.googleSheetsClientSecretLabel",
   post_media_public_base_url: "admin.postMediaPublicBaseUrlLabel",
   youtube_privacy_status: "admin.youtubePrivacyStatusLabel",
   tiktok_privacy_level: "admin.tiktokPrivacyLevelLabel",
@@ -273,7 +277,8 @@ export function AdminPage({ t, locale }: AdminPageProps) {
       id === "google-calendar" ||
       id === "youtube" ||
       id === "google-business" ||
-      id === "google-ads"
+      id === "google-ads" ||
+      id === "google-sheets"
     ) {
       const service =
         id === "google-calendar"
@@ -282,7 +287,9 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             ? "youtube"
             : id === "google-business"
               ? "business"
-              : "ads";
+              : id === "google-ads"
+                ? "ads"
+                : "sheets";
       const effectiveId = googleInfo?.services[service].clientId ?? null;
       if (!effectiveId) return false;
       const [ownId, ownSecret] = adminCardById(id).requiredKeys;
@@ -679,6 +686,28 @@ export function AdminPage({ t, locale }: AdminPageProps) {
               <InfoValue
                 label={t("admin.googleAdsClientIdLabel")}
                 value={googleInfo.services.ads.clientId}
+              />
+            </>
+          ) : null,
+        })}
+
+        {cardShell("google-sheets", {
+          title: t("admin.googleSheetsTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("google"),
+          body: <p>{t("admin.googleSheetsBody")}</p>,
+          info: googleInfo ? (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={googleInfo.services.sheets.redirectUri}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <InfoValue
+                label={t("admin.googleSheetsClientIdLabel")}
+                value={googleInfo.services.sheets.clientId}
               />
             </>
           ) : null,

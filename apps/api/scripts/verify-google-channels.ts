@@ -434,7 +434,9 @@ let stateBusiness = "";
   console.log("[5] callback business → koneksi business + lokasi tersinkron dari koneksi itu: OK");
 }
 
-// ---------- [6] Status tiga layanan untuk blok Channels ----------
+// ---------- [6] Status layanan untuk blok Channels ----------
+// (G17 menambah layanan 'sheets' ke daftar status — barisnya tampil
+// belum terhubung pada skenario ini.)
 {
   const res = await app.request(`/tenants/${TENANT_A}/google/status`);
   assert.equal(res.status, 200);
@@ -451,6 +453,7 @@ let stateBusiness = "";
       ["calendar", true, "kreator@gmail.test"],
       ["youtube", true, "kreator@gmail.test"],
       ["business", true, "kreator@gmail.test"],
+      ["sheets", false, null],
     ],
   );
   // Status janji temu (calendar) tetap membaca koneksi calendar.

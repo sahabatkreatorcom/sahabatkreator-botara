@@ -94,6 +94,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   GET    /oauth/youtube/callback                        callback publik youtube (state bertanda tangan)
  *   GET    /oauth/google_business/callback                callback publik business (state bertanda tangan)
  *   GET    /oauth/google_ads/callback                     callback publik ads (state bertanda tangan; G16)
+ *   GET    /oauth/google_sheets/callback                  callback publik sheets (state bertanda tangan; G17)
  *
  * Pemisahan Google per layanan (2026-11-12): modul ini juga rumah
  * bagi OAuth layanan Google — state bertanda tangan kini memuat
@@ -281,6 +282,7 @@ export function createAppointmentsRoutes(
     app.get("/oauth/youtube/callback", unavailable);
     app.get("/oauth/google_business/callback", unavailable);
     app.get("/oauth/google_ads/callback", unavailable);
+    app.get("/oauth/google_sheets/callback", unavailable);
     return app;
   }
 
@@ -730,7 +732,7 @@ export function createAppointmentsRoutes(
     if ("error" in g) return g.error;
     const rows = await listGoogleServiceConnections(bundle.db, g.tenant.id);
     const services = (
-      ["calendar", "youtube", "business"] as GoogleService[]
+      ["calendar", "youtube", "business", "sheets"] as GoogleService[]
     ).map((service) => {
       const row = rows.find((r) => r.service === service);
       return {
@@ -919,6 +921,10 @@ export function createAppointmentsRoutes(
   // (tidak ada akun channel dari Ads); koneksi cukup disimpan dan
   // dibaca modul ad-conversions untuk pengiriman konversi.
   app.get("/oauth/google_ads/callback", handleGoogleOAuthCallback);
+  // G17: layanan 'sheets' — callback tanpa sinkron turunan juga
+  // (tidak ada akun channel dari Sheets); koneksi dibaca node flow
+  // append_sheet_row saat mengeksekusi langkah.
+  app.get("/oauth/google_sheets/callback", handleGoogleOAuthCallback);
 
   return app;
 }

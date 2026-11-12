@@ -473,7 +473,9 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
             ? "channels.googleBusinessConnectedNotice"
             : googleService === "ads"
               ? "channels.googleAdsConnectedNotice"
-              : "channels.googleCalendarConnectedNotice";
+              : googleService === "sheets"
+                ? "channels.googleSheetsConnectedNotice"
+                : "channels.googleCalendarConnectedNotice";
       setOauthConnectedNotice(t(noticeKey));
       void load();
       if (tenantId) {

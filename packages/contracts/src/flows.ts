@@ -366,6 +366,8 @@ export const FlowNodeTypeSchema = z.enum([
   "book_appointment",
   // G16 — kirim peristiwa konversi ke platform iklan tenant.
   "send_ad_conversion",
+  // G17 — tambah baris ke Google Sheets tenant (layanan 'sheets').
+  "append_sheet_row",
 ]);
 export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
 
@@ -549,6 +551,25 @@ export const FlowNodeConfigSchema = z.union([
       .string()
       .regex(/^[A-Z]{3}$/)
       .optional(),
+  }),
+  // G17 — append_sheet_row: bentuk kasar; keabsahan rinci (id
+  // spreadsheet non-kosong, ≥1 kolom ber-header + templat nilai)
+  // ditegakkan validasi aktivasi di core. Nilai kolom adalah templat
+  // MESIN renderFlowHttpTemplate ({name}, {{field:<key>}},
+  // {{payload:<path>}}) — keluarga variabel yang sama dengan
+  // http_request, bukan bahasa baru.
+  z.object({
+    spreadsheetId: z.string().min(1).max(128),
+    sheetName: z.string().min(1).max(100).optional(),
+    columns: z
+      .array(
+        z.object({
+          header: z.string().min(1).max(128),
+          value: z.string().min(1).max(2000),
+        }),
+      )
+      .min(1)
+      .max(50),
   }),
   // ai_response / handoff / end: config kosong.
   z.object({}),
@@ -996,6 +1017,9 @@ export const FlowSimulateEffectKindSchema = z.enum([
   // G16: node send_ad_conversion — hanya dicatat (tidak ada panggilan
   // API iklan dari simulator), fidelity "recorded".
   "ad_conversion",
+  // G17: node append_sheet_row — hanya dicatat (tidak ada panggilan
+  // Sheets API dari simulator), fidelity "recorded".
+  "sheet_append",
   "park",
 ]);
 export type FlowSimulateEffectKind = z.infer<

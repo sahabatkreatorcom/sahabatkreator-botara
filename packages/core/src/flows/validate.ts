@@ -260,6 +260,53 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
       }
       break;
     }
+    case "append_sheet_row": {
+      // G17: spreadsheetId wajib (id dokumen dari URL Sheets, bukan
+      // judul); columns ≥ 1, tiap kolom header + templat nilai
+      // non-kosong. Koneksi Sheets tenant TIDAK diperiksa di sini —
+      // consent boleh dipasang sesudah flow aktif; ketiadaannya
+      // tercatat jujur sebagai hasil langkah (sheet_error) saat
+      // eksekusi, bukan menggagalkan aktivasi (pola send_ad_conversion).
+      if (!isNonEmptyString(c.spreadsheetId) || String(c.spreadsheetId).length > 128) {
+        err(
+          "SHEET_ID_REQUIRED",
+          "Node append_sheet_row membutuhkan config.spreadsheetId (maks 128 karakter)",
+        );
+      }
+      if (
+        c.sheetName !== undefined &&
+        (!isNonEmptyString(c.sheetName) || String(c.sheetName).length > 100)
+      ) {
+        err(
+          "SHEET_NAME_INVALID",
+          "Node append_sheet_row: config.sheetName harus string 1..100 karakter bila diisi",
+        );
+      }
+      if (!Array.isArray(c.columns) || c.columns.length === 0 || c.columns.length > 50) {
+        err(
+          "SHEET_COLUMNS_REQUIRED",
+          "Node append_sheet_row membutuhkan config.columns 1..50 kolom",
+        );
+      } else {
+        for (const col of c.columns as Record<string, unknown>[]) {
+          if (
+            !col ||
+            typeof col !== "object" ||
+            !isNonEmptyString(col.header) ||
+            String(col.header).length > 128 ||
+            !isNonEmptyString(col.value) ||
+            String(col.value).length > 2000
+          ) {
+            err(
+              "SHEET_COLUMN_INVALID",
+              "Node append_sheet_row: tiap kolom membutuhkan header (maks 128) dan value templat (maks 2000) non-kosong",
+            );
+            break;
+          }
+        }
+      }
+      break;
+    }
     case "set_field": {
       const field = c.field;
       const customKey =

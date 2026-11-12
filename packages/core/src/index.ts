@@ -800,6 +800,7 @@ export {
   YOUTUBE_UPLOAD_SCOPE,
   YOUTUBE_READONLY_SCOPE,
   GOOGLE_BUSINESS_MANAGE_SCOPE,
+  GOOGLE_SHEETS_SCOPE,
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
   type GoogleBases,
   type GoogleDeps,
@@ -812,6 +813,14 @@ export {
   type GoogleSyncAction,
   type GoogleSyncResult,
 } from "./google-calendar";
+export {
+  // Google Sheets (G17): append baris untuk node flow
+  // append_sheet_row — layanan per-layanan 'sheets'.
+  appendGoogleSheetRow,
+  sheetsRangeOf,
+  type AppendSheetRowInput,
+  type AppendSheetRowResult,
+} from "./google-sheets";
 export {
   // YouTube (Gelombang 2): sinkronisasi akun channel dari koneksi
   // Google + gerbang akses publikasi (scope youtube.upload).

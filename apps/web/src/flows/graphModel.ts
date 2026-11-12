@@ -45,6 +45,7 @@ export const FLOW_NODE_LABEL_KEYS: Record<FlowNodeType, TranslationKey> = {
   cart_checkout: "flows.nodeCartCheckout",
   book_appointment: "flows.nodeBookAppointment",
   send_ad_conversion: "flows.nodeSendAdConversion",
+  append_sheet_row: "flows.nodeAppendSheetRow",
 };
 
 /** Tipe yang boleh ditambahkan dari palet (trigger dibuat otomatis & tunggal). */
@@ -72,6 +73,7 @@ export const ADDABLE_NODE_TYPES: FlowNodeType[] = [
   "cart_checkout",
   "book_appointment",
   "send_ad_conversion",
+  "append_sheet_row",
 ];
 
 /**
@@ -152,6 +154,11 @@ export function defaultNodeConfig(
       return { dealStageId: "" };
     case "send_ad_conversion":
       return { platform: "meta", eventName: "Lead" };
+    case "append_sheet_row":
+      return {
+        spreadsheetId: "",
+        columns: [{ header: "Nama", value: "{name}" }],
+      };
     case "set_field":
       return { field: "name", value: "" };
     case "http_request":
@@ -340,6 +347,12 @@ export function summarizeNodeConfig(
       if (!eventName) return t("flows.summaryNotConfigured");
       const platform = c.platform === "google" ? "Google Ads" : "Meta";
       return t("flows.summaryAdConversion", { platform, eventName });
+    }
+    case "append_sheet_row": {
+      const spreadsheetId = asString(c.spreadsheetId);
+      if (!spreadsheetId) return t("flows.summaryNotConfigured");
+      const columnCount = Array.isArray(c.columns) ? c.columns.length : 0;
+      return t("flows.summaryAppendSheetRow", { columns: columnCount });
     }
     case "set_field": {
       const field = asString(c.field);

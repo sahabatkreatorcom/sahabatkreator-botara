@@ -874,6 +874,113 @@ export function NodeConfigPanel({
         </>
       ) : null}
 
+      {type === "append_sheet_row" ? (
+        <>
+          <p className="text-xs text-muted">{t("flows.sheetNote")}</p>
+          <div>
+            <label className={labelClass} htmlFor="cfg-sheet-id">
+              {t("flows.sheetIdLabel")}
+            </label>
+            <input
+              id="cfg-sheet-id"
+              className={inputClass}
+              disabled={readOnly}
+              value={str(config.spreadsheetId)}
+              onChange={(e) => set({ spreadsheetId: e.target.value })}
+            />
+            <p className="mt-1 text-xs text-muted">
+              {t("flows.sheetIdHint")}
+            </p>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-sheet-name">
+              {t("flows.sheetNameLabel")}
+            </label>
+            <input
+              id="cfg-sheet-name"
+              className={inputClass}
+              disabled={readOnly}
+              value={str(config.sheetName)}
+              onChange={(e) =>
+                set({
+                  sheetName: e.target.value ? e.target.value : undefined,
+                })
+              }
+            />
+          </div>
+          <div>
+            <span className={labelClass}>{t("flows.sheetColumnsLabel")}</span>
+            <div className="mt-2 space-y-2">
+              {(Array.isArray(config.columns)
+                ? (config.columns as { header?: unknown; value?: unknown }[])
+                : []
+              ).map((col, idx) => (
+                <div key={idx} className="flex items-start gap-2">
+                  <input
+                    className={inputClass}
+                    disabled={readOnly}
+                    placeholder={t("flows.sheetColumnHeaderPlaceholder")}
+                    value={typeof col.header === "string" ? col.header : ""}
+                    onChange={(e) => {
+                      const cols = [
+                        ...(config.columns as Record<string, unknown>[]),
+                      ];
+                      cols[idx] = { ...cols[idx], header: e.target.value };
+                      set({ columns: cols });
+                    }}
+                  />
+                  <input
+                    className={inputClass}
+                    disabled={readOnly}
+                    placeholder={t("flows.sheetColumnValuePlaceholder")}
+                    value={typeof col.value === "string" ? col.value : ""}
+                    onChange={(e) => {
+                      const cols = [
+                        ...(config.columns as Record<string, unknown>[]),
+                      ];
+                      cols[idx] = { ...cols[idx], value: e.target.value };
+                      set({ columns: cols });
+                    }}
+                  />
+                  {!readOnly ? (
+                    <button
+                      type="button"
+                      className="rounded-lg border border-danger px-2 py-2 text-xs text-danger hover:bg-danger/10"
+                      onClick={() => {
+                        const cols = (
+                          config.columns as Record<string, unknown>[]
+                        ).filter((_, i) => i !== idx);
+                        set({ columns: cols });
+                      }}
+                    >
+                      ×
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+            {!readOnly ? (
+              <button
+                type="button"
+                className="mt-2 rounded-lg border border-line px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface"
+                onClick={() => {
+                  const cols = Array.isArray(config.columns)
+                    ? [...(config.columns as Record<string, unknown>[])]
+                    : [];
+                  cols.push({ header: "", value: "" });
+                  set({ columns: cols });
+                }}
+              >
+                {t("flows.sheetAddColumn")}
+              </button>
+            ) : null}
+            <p className="mt-1 text-xs text-muted">
+              {t("flows.sheetColumnsHint")}
+            </p>
+          </div>
+        </>
+      ) : null}
+
       {type === "set_field" ? (
         <>
           <div>

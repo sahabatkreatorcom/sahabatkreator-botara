@@ -67,6 +67,7 @@ export interface AdminRoutesOptions {
     youtube: string;
     business: string;
     ads: string;
+    sheets: string;
   };
 }
 
@@ -138,6 +139,9 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   google_ads_client_id: 256,
   google_ads_client_secret: 512,
   google_ads_developer_token: 512,
+  // G17: klien OAuth layanan 'sheets' (pola per-layanan yang sama).
+  google_sheets_client_id: 256,
+  google_sheets_client_secret: 512,
   // Token verifikasi webhook Meta: nilai bebas yang ditempel ke
   // dashboard Meta App; panjang mengikuti kunci rahasia lain.
   meta_webhook_verify_token: 512,
@@ -341,6 +345,12 @@ export function createAdminRoutes(
               publicConfig.google_ads_client_id ??
               publicConfig.google_oauth_client_id,
             redirectUri: options.googleOAuthRedirectUris?.ads ?? "",
+          },
+          sheets: {
+            clientId:
+              publicConfig.google_sheets_client_id ??
+              publicConfig.google_oauth_client_id,
+            redirectUri: options.googleOAuthRedirectUris?.sheets ?? "",
           },
         },
       },

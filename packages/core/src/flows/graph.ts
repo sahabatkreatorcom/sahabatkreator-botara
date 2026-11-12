@@ -95,6 +95,7 @@ export const NODE_TYPES = new Set([
   "move_deal_stage",
   // G16 — konversi iklan
   "send_ad_conversion",
+  "append_sheet_row",
 ]);
 
 /**

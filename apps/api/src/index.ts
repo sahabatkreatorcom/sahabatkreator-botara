@@ -665,6 +665,7 @@ routes.route(
       youtube: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("youtube")}`,
       business: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("business")}`,
       ads: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("ads")}`,
+      sheets: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("sheets")}`,
     },
   }),
 );
