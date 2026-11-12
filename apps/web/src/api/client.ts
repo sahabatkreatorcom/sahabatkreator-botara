@@ -7,6 +7,12 @@ import type {
   ApiKeyResponse,
   CreatedApiKeyResponse,
   CreateApiKeyRequest,
+  OutboundWebhookResponse,
+  CreatedOutboundWebhookResponse,
+  CreateOutboundWebhookRequest,
+  OutboundWebhookListResponse,
+  OutboundWebhookDeliveryResponse,
+  OutboundWebhookDeliveryListResponse,
   AgentResponse,
   AgentInstructionTemplateListResponse,
   AgentInstructionTemplateResponse,
@@ -1869,6 +1875,75 @@ export const api = {
       await request<unknown>(`/api/tenants/${tenantId}/api-keys/${apiKeyId}`, {
         method: "DELETE",
       });
+    },
+  },
+  outboundWebhooks: {
+    /** GET /api/tenants/:tenantId/outbound-webhooks → daftar endpoint (tanpa rahasia). */
+    async list(tenantId: string): Promise<OutboundWebhookResponse[]> {
+      const body = await request<OutboundWebhookListResponse>(
+        `/api/tenants/${tenantId}/outbound-webhooks`,
+        { method: "GET" },
+      );
+      return body.endpoints;
+    },
+    /** POST → 201; `signingSecret` utuh hanya di respons ini. */
+    create(
+      tenantId: string,
+      input: CreateOutboundWebhookRequest,
+    ): Promise<CreatedOutboundWebhookResponse> {
+      return request<CreatedOutboundWebhookResponse>(
+        `/api/tenants/${tenantId}/outbound-webhooks`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** POST .../:id/enable → aktifkan lagi (penghitung gagal di-nol-kan). */
+    enable(
+      tenantId: string,
+      endpointId: string,
+    ): Promise<OutboundWebhookResponse> {
+      return request<OutboundWebhookResponse>(
+        `/api/tenants/${tenantId}/outbound-webhooks/${endpointId}/enable`,
+        { method: "POST" },
+      );
+    },
+    /** POST .../:id/disable → nonaktifkan manual. */
+    disable(
+      tenantId: string,
+      endpointId: string,
+    ): Promise<OutboundWebhookResponse> {
+      return request<OutboundWebhookResponse>(
+        `/api/tenants/${tenantId}/outbound-webhooks/${endpointId}/disable`,
+        { method: "POST" },
+      );
+    },
+    /** DELETE .../:id → hapus endpoint + log pengirimannya (204). */
+    async remove(tenantId: string, endpointId: string): Promise<void> {
+      await request<unknown>(
+        `/api/tenants/${tenantId}/outbound-webhooks/${endpointId}`,
+        { method: "DELETE" },
+      );
+    },
+    /** GET .../:id/deliveries → log pengiriman terakhir. */
+    async deliveries(
+      tenantId: string,
+      endpointId: string,
+      limit = 20,
+    ): Promise<OutboundWebhookDeliveryResponse[]> {
+      const body = await request<OutboundWebhookDeliveryListResponse>(
+        `/api/tenants/${tenantId}/outbound-webhooks/${endpointId}/deliveries?limit=${limit}`,
+        { method: "GET" },
+      );
+      return body.deliveries;
+    },
+    /** POST .../:id/test → kirim peristiwa uji `ping` sekarang; hasil = baris pengirimannya. */
+    test(
+      tenantId: string,
+      endpointId: string,
+    ): Promise<OutboundWebhookDeliveryResponse> {
+      return request<OutboundWebhookDeliveryResponse>(
+        `/api/tenants/${tenantId}/outbound-webhooks/${endpointId}/test`,
+        { method: "POST" },
+      );
     },
   },
   admin: {

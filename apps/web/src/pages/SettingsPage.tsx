@@ -7,9 +7,14 @@ import {
 } from "react";
 import {
   API_KEY_SCOPES,
+  OUTBOUND_WEBHOOK_EVENT_TYPES,
   type ApiKeyResponse,
   type ApiKeyScope,
   type CreatedApiKeyResponse,
+  type CreatedOutboundWebhookResponse,
+  type OutboundWebhookDeliveryResponse,
+  type OutboundWebhookEventType,
+  type OutboundWebhookResponse,
   type InvitationResponse,
   type InvitableRole,
   type MemberRole,
@@ -630,6 +635,11 @@ export function SettingsPage({ t, locale }: SettingsPageProps) {
           </ul>
         )}
       </section>
+
+      {/* G11: seksi Webhook keluar — endpoint HTTPS tenant untuk peristiwa real-time */}
+      {tenantId ? (
+        <OutboundWebhooksSection t={t} locale={locale} tenantId={tenantId} canManage={canManage} />
+      ) : null}
 
       {/* Fase 9C: seksi Tim — member, peran, undangan */}
       {tenantId ? (
@@ -1470,6 +1480,609 @@ function RemoveMemberModal({
             className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
           >
             {t("settings.team.cancelButton")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Seksi Webhook keluar (G11) — Settings → Webhook keluar.
+ *
+ * Mengelola endpoint HTTPS tenant untuk peristiwa Botara real-time:
+ * daftar endpoint (URL, peristiwa, status, kesehatan), buat endpoint
+ * (rahasia penanda tangan tampil SATU KALI dengan peringatan salin —
+ * pola modal hasil pembuatan API key), aktif/nonaktif, hapus dengan
+ * konfirmasi, log pengiriman terakhir per endpoint, dan tombol kirim
+ * peristiwa uji. Mutasi hanya owner/admin — server menegakkan (403),
+ * UI memberi catatan.
+ */
+function OutboundWebhooksSection({
+  t,
+  locale,
+  tenantId,
+  canManage,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  canManage: boolean;
+}) {
+  const [endpoints, setEndpoints] = useState<OutboundWebhookResponse[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [created, setCreated] = useState<CreatedOutboundWebhookResponse | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<OutboundWebhookResponse | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [deliveries, setDeliveries] = useState<OutboundWebhookDeliveryResponse[]>([]);
+  const [deliveriesError, setDeliveriesError] = useState<string | null>(null);
+  const [testState, setTestState] = useState<{
+    endpointId: string;
+    kind: "sending" | "done";
+    message: string | null;
+  } | null>(null);
+  const requestSeq = useRef(0);
+
+  const load = useCallback(async () => {
+    const seq = ++requestSeq.current;
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await api.outboundWebhooks.list(tenantId);
+      if (requestSeq.current !== seq) return;
+      setEndpoints(list);
+    } catch (err) {
+      if (requestSeq.current !== seq) return;
+      setError(translateApiError(t, err));
+      setEndpoints([]);
+    } finally {
+      if (requestSeq.current === seq) setLoading(false);
+    }
+  }, [tenantId, t]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const toggleDeliveries = async (endpoint: OutboundWebhookResponse) => {
+    if (expandedId === endpoint.id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(endpoint.id);
+    setDeliveries([]);
+    setDeliveriesError(null);
+    try {
+      const rows = await api.outboundWebhooks.deliveries(tenantId, endpoint.id, 20);
+      setDeliveries(rows);
+    } catch (err) {
+      setDeliveriesError(translateApiError(t, err));
+    }
+  };
+
+  const runTest = async (endpoint: OutboundWebhookResponse) => {
+    setTestState({ endpointId: endpoint.id, kind: "sending", message: null });
+    try {
+      const delivery = await api.outboundWebhooks.test(tenantId, endpoint.id);
+      let message: string;
+      if (delivery.status === "delivered") {
+        message = t("settings.webhooks.testDelivered", {
+          status: delivery.lastStatusCode ?? 200,
+        });
+      } else if (delivery.status === "pending") {
+        message = t("settings.webhooks.testPending");
+      } else {
+        message = t("settings.webhooks.testFailed", {
+          error:
+            delivery.lastError ??
+            (delivery.lastStatusCode
+              ? t("settings.webhooks.deliveryHttp", { status: delivery.lastStatusCode })
+              : t("settings.webhooks.deliveryNetworkError")),
+        });
+      }
+      setTestState({ endpointId: endpoint.id, kind: "done", message });
+      if (expandedId === endpoint.id) {
+        const rows = await api.outboundWebhooks.deliveries(tenantId, endpoint.id, 20);
+        setDeliveries(rows);
+      }
+      void load();
+    } catch (err) {
+      setTestState({
+        endpointId: endpoint.id,
+        kind: "done",
+        message: translateApiError(t, err),
+      });
+    }
+  };
+
+  const setEnabled = async (endpoint: OutboundWebhookResponse, enabled: boolean) => {
+    try {
+      if (enabled) await api.outboundWebhooks.enable(tenantId, endpoint.id);
+      else await api.outboundWebhooks.disable(tenantId, endpoint.id);
+      void load();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    }
+  };
+
+  return (
+    <section className="mt-10">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-ink">{t("settings.webhooks.title")}</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted">{t("settings.webhooks.body")}</p>
+        </div>
+        {canManage ? (
+          <button
+            type="button"
+            onClick={() => setFormOpen(true)}
+            className="shrink-0 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          >
+            {t("settings.webhooks.addButton")}
+          </button>
+        ) : null}
+      </div>
+
+      {!canManage ? (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+          {t("settings.webhooks.adminOnlyNote")}
+        </p>
+      ) : null}
+
+      {error ? (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-red-600">{error}</p>
+      ) : null}
+
+      {loading ? (
+        <p className="mt-4 text-sm text-muted">{t("common.loading")}</p>
+      ) : endpoints.length === 0 && !error ? (
+        <div className="mt-4 rounded-xl bg-surface p-5">
+          <div className="font-semibold text-ink">{t("settings.webhooks.emptyTitle")}</div>
+          <p className="mt-1 text-sm text-muted">{t("settings.webhooks.emptyBody")}</p>
+        </div>
+      ) : (
+        <ul className="mt-4 space-y-3">
+          {endpoints.map((endpoint) => {
+            const active = endpoint.status === "active";
+            const expanded = expandedId === endpoint.id;
+            return (
+              <li key={endpoint.id} className="rounded-xl bg-surface p-4">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-semibold text-ink">{endpoint.name}</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      active ? "bg-accent/15 text-accent" : "bg-elevated text-muted"
+                    }`}
+                  >
+                    {active
+                      ? t("settings.webhooks.statusActive")
+                      : t("settings.webhooks.statusDisabled")}
+                  </span>
+                  {endpoint.consecutiveFailures > 0 ? (
+                    <span className="rounded-full bg-elevated px-2 py-0.5 text-xs font-medium text-red-600">
+                      {t("settings.webhooks.failuresLabel", {
+                        count: endpoint.consecutiveFailures,
+                      })}
+                    </span>
+                  ) : null}
+                </div>
+                <div className="mt-1 break-all font-mono text-xs text-muted">{endpoint.url}</div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {endpoint.events.map((event) => (
+                    <span
+                      key={event}
+                      className="rounded-full bg-elevated px-2 py-0.5 text-xs text-ink"
+                    >
+                      {event}
+                    </span>
+                  ))}
+                </div>
+                {!active && endpoint.disabledReason ? (
+                  <p className="mt-2 text-xs text-muted">
+                    {endpoint.disabledReason === "consecutive_failures"
+                      ? t("settings.webhooks.disabledReasonFailures")
+                      : t("settings.webhooks.disabledReasonManual")}
+                  </p>
+                ) : null}
+                <div className="mt-2 text-xs text-muted">
+                  {t("settings.createdLabel", {
+                    date: formatDateTime(endpoint.createdAt, locale),
+                  })}
+                </div>
+
+                {testState?.endpointId === endpoint.id && testState.message ? (
+                  <p className="mt-2 rounded-lg bg-elevated px-3 py-2 text-sm text-ink">
+                    {testState.message}
+                  </p>
+                ) : null}
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void toggleDeliveries(endpoint)}
+                    className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+                  >
+                    {t("settings.webhooks.deliveriesButton")}
+                  </button>
+                  {canManage ? (
+                    <>
+                      <button
+                        type="button"
+                        disabled={testState?.endpointId === endpoint.id && testState.kind === "sending"}
+                        onClick={() => void runTest(endpoint)}
+                        className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink disabled:opacity-50"
+                      >
+                        {testState?.endpointId === endpoint.id && testState.kind === "sending"
+                          ? t("settings.webhooks.testing")
+                          : t("settings.webhooks.testButton")}
+                      </button>
+                      {active ? (
+                        <button
+                          type="button"
+                          onClick={() => void setEnabled(endpoint, false)}
+                          className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+                        >
+                          {t("settings.webhooks.disableButton")}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => void setEnabled(endpoint, true)}
+                          className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+                        >
+                          {t("settings.webhooks.enableButton")}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setDeleteTarget(endpoint)}
+                        className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-red-600"
+                      >
+                        {t("settings.webhooks.deleteButton")}
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+
+                {expanded ? (
+                  <div className="mt-3 border-t border-elevated pt-3">
+                    <div className="text-sm font-semibold text-ink">
+                      {t("settings.webhooks.deliveriesTitle")}
+                    </div>
+                    {deliveriesError ? (
+                      <p className="mt-2 text-sm text-red-600">{deliveriesError}</p>
+                    ) : deliveries.length === 0 ? (
+                      <p className="mt-2 text-sm text-muted">
+                        {t("settings.webhooks.deliveriesEmpty")}
+                      </p>
+                    ) : (
+                      <ul className="mt-2 space-y-2">
+                        {deliveries.map((delivery) => (
+                          <li key={delivery.id} className="rounded-lg bg-elevated px-3 py-2 text-sm">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-mono text-xs text-ink">{delivery.eventType}</span>
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                  delivery.status === "delivered"
+                                    ? "bg-accent/15 text-accent"
+                                    : delivery.status === "failed"
+                                      ? "bg-red-100 text-red-600"
+                                      : "bg-surface text-muted"
+                                }`}
+                              >
+                                {delivery.status === "delivered"
+                                  ? t("settings.webhooks.statusDelivered")
+                                  : delivery.status === "failed"
+                                    ? t("settings.webhooks.statusFailed")
+                                    : t("settings.webhooks.statusPending")}
+                              </span>
+                              <span className="text-xs text-muted">
+                                {t("settings.webhooks.deliveryAttempt", {
+                                  count: delivery.attempts,
+                                })}
+                                {" · "}
+                                {delivery.lastStatusCode
+                                  ? t("settings.webhooks.deliveryHttp", {
+                                      status: delivery.lastStatusCode,
+                                    })
+                                  : t("settings.webhooks.deliveryNetworkError")}
+                                {" · "}
+                                {formatDateTime(delivery.createdAt, locale)}
+                              </span>
+                            </div>
+                            {delivery.lastError ? (
+                              <div className="mt-1 break-all font-mono text-xs text-red-600">
+                                {delivery.lastError}
+                              </div>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+
+      {formOpen ? (
+        <CreateOutboundWebhookModal
+          t={t}
+          tenantId={tenantId}
+          onClose={() => setFormOpen(false)}
+          onCreated={(createdEndpoint) => {
+            setFormOpen(false);
+            setCreated(createdEndpoint);
+            void load();
+          }}
+        />
+      ) : null}
+
+      {created ? (
+        <CreatedOutboundWebhookSecretModal
+          t={t}
+          created={created}
+          onClose={() => setCreated(null)}
+        />
+      ) : null}
+
+      {deleteTarget ? (
+        <DeleteOutboundWebhookModal
+          t={t}
+          tenantId={tenantId}
+          target={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            setDeleteTarget(null);
+            void load();
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+const OUTBOUND_WEBHOOK_EVENT_LABELS: Record<OutboundWebhookEventType, "settings.webhooks.eventMessageReceived" | "settings.webhooks.eventMessageStatusUpdated"> = {
+  "message.received": "settings.webhooks.eventMessageReceived",
+  "message.status_updated": "settings.webhooks.eventMessageStatusUpdated",
+};
+
+function CreateOutboundWebhookModal({
+  t,
+  tenantId,
+  onClose,
+  onCreated,
+}: {
+  t: Translate;
+  tenantId: string;
+  onClose: () => void;
+  onCreated: (created: CreatedOutboundWebhookResponse) => void;
+}) {
+  const [name, setName] = useState("");
+  const [url, setUrl] = useState("");
+  const [events, setEvents] = useState<OutboundWebhookEventType[]>(["message.received"]);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const toggleEvent = (event: OutboundWebhookEventType) => {
+    setEvents((prev) =>
+      prev.includes(event) ? prev.filter((e) => e !== event) : [...prev, event],
+    );
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!url.trim()) {
+      setError(t("settings.webhooks.urlRequired"));
+      return;
+    }
+    if (events.length === 0) {
+      setError(t("settings.webhooks.eventsRequired"));
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const created = await api.outboundWebhooks.create(tenantId, {
+        name: name.trim() || url.trim(),
+        url: url.trim(),
+        events,
+      });
+      onCreated(created);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <form
+        onSubmit={submit}
+        className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl"
+      >
+        <h2 className="text-lg font-bold text-ink">{t("settings.webhooks.addTitle")}</h2>
+        <label className="mt-4 block text-sm font-medium text-ink">
+          {t("settings.webhooks.nameLabel")}
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder={t("settings.webhooks.namePlaceholder")}
+            className={inputClassName}
+            maxLength={255}
+          />
+        </label>
+        <label className="mt-3 block text-sm font-medium text-ink">
+          {t("settings.webhooks.urlLabel")}
+          <input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder={t("settings.webhooks.urlPlaceholder")}
+            className={inputClassName}
+            maxLength={2048}
+            inputMode="url"
+          />
+        </label>
+        <fieldset className="mt-4">
+          <legend className="text-sm font-medium text-ink">
+            {t("settings.webhooks.eventsLabel")}
+          </legend>
+          <div className="mt-2 space-y-2">
+            {OUTBOUND_WEBHOOK_EVENT_TYPES.map((event) => (
+              <label key={event} className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={events.includes(event)}
+                  onChange={() => toggleEvent(event)}
+                />
+                {t(OUTBOUND_WEBHOOK_EVENT_LABELS[event])}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        {error ? <FieldError message={error} /> : null}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {submitting ? t("settings.webhooks.saving") : t("settings.webhooks.createButton")}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("settings.webhooks.cancelButton")}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function CreatedOutboundWebhookSecretModal({
+  t,
+  created,
+  onClose,
+}: {
+  t: Translate;
+  created: CreatedOutboundWebhookResponse;
+  onClose: () => void;
+}) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(created.signingSecret);
+      setCopied(true);
+    } catch {
+      setCopied(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+        <h2 className="text-lg font-bold text-ink">{t("settings.webhooks.createdTitle")}</h2>
+        <p className="mt-1 text-sm text-muted">{t("settings.webhooks.createdBody")}</p>
+        <div className="mt-3 break-all rounded-lg bg-elevated p-3 font-mono text-sm text-ink">
+          {created.signingSecret}
+        </div>
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm font-medium text-red-600">
+          {t("settings.webhooks.createdWarning")}
+        </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={copy}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white"
+          >
+            {copied ? t("settings.webhooks.copiedLabel") : t("settings.webhooks.copyButton")}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("settings.webhooks.doneButton")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeleteOutboundWebhookModal({
+  t,
+  tenantId,
+  target,
+  onClose,
+  onDeleted,
+}: {
+  t: Translate;
+  tenantId: string;
+  target: OutboundWebhookResponse;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  const handleDelete = async () => {
+    setError(null);
+    setSubmitting(true);
+    try {
+      await api.outboundWebhooks.remove(tenantId, target.id);
+      onDeleted();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+        <h2 className="text-lg font-bold text-ink">{t("settings.webhooks.deleteTitle")}</h2>
+        <p className="mt-1 text-sm text-muted">
+          {t("settings.webhooks.deleteBody", { name: target.name })}
+        </p>
+        {error ? <FieldError message={error} /> : null}
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void handleDelete()}
+            className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {submitting ? t("settings.webhooks.deleting") : t("settings.webhooks.deleteButton")}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("settings.webhooks.cancelButton")}
           </button>
         </div>
       </div>
