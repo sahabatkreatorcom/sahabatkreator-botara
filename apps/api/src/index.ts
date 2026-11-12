@@ -59,6 +59,7 @@ import { createBroadcastsRoutes } from "./modules/broadcasts/routes";
 import { createBroadcastRecurrenceRoutes } from "./modules/broadcast-recurrences/routes";
 import { createOutboundWebhooksRoutes } from "./modules/outbound-webhooks/routes";
 import { createDealsRoutes } from "./modules/deals/routes";
+import { createDiscountCodesRoutes } from "./modules/discount-codes/routes";
 import { createPostsRoutes } from "./modules/posts/routes";
 import { createWhatsAppTemplatesRoutes } from "./modules/whatsapp-templates/routes";
 import { createCommentsRoutes } from "./modules/comments/routes";
@@ -331,6 +332,9 @@ routes.route(
 // Modul deals (G12) — pipeline penjualan & papan Kanban:
 // /tenants/:tenantId/deal-pipelines + /deals + /deal-settings.
 routes.route("/", createDealsRoutes(authBundle));
+// Modul discount-codes (G14) — kode diskon & statistik penukaran:
+// /tenants/:tenantId/discount-codes.
+routes.route("/", createDiscountCodesRoutes(authBundle));
 // Modul posts (Fase 23) — Content Schedule untuk channel Telegram
 // /tenants/:tenantId/posts; penerbitan oleh worker (event outbox
 // post.publish_due → job post.publish). Opsi modul dipakai

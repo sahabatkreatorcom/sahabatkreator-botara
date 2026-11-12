@@ -1449,6 +1449,51 @@ export function NodeConfigPanel({
               onChange={(e) => set({ emptyMessage: e.target.value })}
             />
           </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-checkout-dcode">
+              {t("flows.checkoutDiscountCodeLabel")}
+            </label>
+            <input
+              id="cfg-checkout-dcode"
+              className={inputClass}
+              maxLength={64}
+              disabled={readOnly}
+              placeholder={t("flows.checkoutDiscountCodePlaceholder")}
+              value={str(config.discountCode)}
+              onChange={(e) => set({ discountCode: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-checkout-dfield">
+              {t("flows.checkoutDiscountFieldLabel")}
+            </label>
+            <input
+              id="cfg-checkout-dfield"
+              className={inputClass}
+              maxLength={80}
+              disabled={readOnly}
+              placeholder={t("flows.checkoutDiscountFieldPlaceholder")}
+              value={str(config.discountCodeField)}
+              onChange={(e) => set({ discountCodeField: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-checkout-dinvalid">
+              {t("flows.checkoutDiscountInvalidLabel")}
+            </label>
+            <textarea
+              id="cfg-checkout-dinvalid"
+              className={inputClass}
+              rows={2}
+              maxLength={1000}
+              disabled={readOnly}
+              placeholder={t("flows.checkoutDiscountInvalidPlaceholder")}
+              value={str(config.discountInvalidMessage)}
+              onChange={(e) =>
+                set({ discountInvalidMessage: e.target.value })
+              }
+            />
+          </div>
         </div>
       ) : null}
 

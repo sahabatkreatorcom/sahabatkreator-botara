@@ -6,6 +6,7 @@ import {
   type FormEvent,
 } from "react";
 import type {
+  DiscountCodeResponse,
   OrderResponse,
   PaymentLinkResponse,
   ProductResponse,
@@ -45,6 +46,13 @@ export function ProductsPage({ t, locale }: ProductsPageProps) {
   const [products, setProducts] = useState<ProductResponse[]>([]);
   const [links, setLinks] = useState<PaymentLinkResponse[]>([]);
   const [orders, setOrders] = useState<OrderResponse[]>([]);
+  const [discountCodes, setDiscountCodes] = useState<DiscountCodeResponse[]>(
+    [],
+  );
+  const [discountError, setDiscountError] = useState<string | null>(null);
+  const [discountFormOpen, setDiscountFormOpen] = useState(false);
+  const [discountEditTarget, setDiscountEditTarget] =
+    useState<DiscountCodeResponse | null>(null);
   const [ordersError, setOrdersError] = useState<string | null>(null);
   const [orderDetail, setOrderDetail] = useState<OrderResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -69,7 +77,7 @@ export function ProductsPage({ t, locale }: ProductsPageProps) {
     setLinksError(null);
     setOrdersError(null);
     try {
-      const [productList, linkList, orderList] = await Promise.all([
+      const [productList, linkList, orderList, codeList] = await Promise.all([
         api.products.list(tenantId),
         api.paymentLinks.list(tenantId).catch((err: unknown) => {
           if (requestSeq.current === seq) {
@@ -83,11 +91,18 @@ export function ProductsPage({ t, locale }: ProductsPageProps) {
           }
           return [] as OrderResponse[];
         }),
+        api.discountCodes.list(tenantId).catch((err: unknown) => {
+          if (requestSeq.current === seq) {
+            setDiscountError(translateApiError(t, err));
+          }
+          return [] as DiscountCodeResponse[];
+        }),
       ]);
       if (requestSeq.current !== seq) return;
       setProducts(productList);
       setLinks(linkList);
       setOrders(orderList);
+      setDiscountCodes(codeList);
     } catch (err) {
       if (requestSeq.current !== seq) return;
       setError(translateApiError(t, err));
@@ -266,6 +281,114 @@ export function ProductsPage({ t, locale }: ProductsPageProps) {
         </ul>
       )}
 
+      <div className="mt-8 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-lg font-bold text-ink">
+          {t("products.discountTitle")}
+        </h2>
+        <button
+          type="button"
+          onClick={() => {
+            setDiscountEditTarget(null);
+            setDiscountFormOpen(true);
+          }}
+          className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white"
+        >
+          {t("products.discountAddButton")}
+        </button>
+      </div>
+      <p className="mt-1 text-xs text-muted">{t("products.discountHint")}</p>
+      <FieldError message={discountError} />
+      {discountCodes.length === 0 ? (
+        <p className="mt-3 text-sm text-muted">
+          {t("products.discountEmpty")}
+        </p>
+      ) : (
+        <ul className="mt-3 space-y-2">
+          {discountCodes.map((dc) => (
+            <li
+              key={dc.id}
+              className="rounded-xl border border-line bg-surface p-3"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-mono text-sm font-semibold text-ink">
+                  {dc.code}
+                </span>
+                <span className="text-sm font-semibold text-ink">
+                  {dc.kind === "percent"
+                    ? `${dc.value}%`
+                    : formatIdr(dc.value, locale)}
+                </span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    dc.isActive
+                      ? "bg-accent text-white"
+                      : "bg-elevated text-muted"
+                  }`}
+                >
+                  {dc.isActive
+                    ? t("products.activeChip")
+                    : t("products.inactiveChip")}
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-muted">
+                {t("products.discountUsedLabel", {
+                  used: dc.redemptionCount,
+                  limit: dc.maxRedemptions != null ? `/${dc.maxRedemptions}` : "",
+                })}
+                {" · "}
+                {t("products.discountGivenLabel", {
+                  amount: formatIdr(dc.totalDiscountIdr, locale),
+                })}
+                {dc.releasedCount > 0
+                  ? ` · ${t("products.discountReleasedLabel", {
+                      count: dc.releasedCount,
+                    })}`
+                  : ""}
+                {dc.startsAt
+                  ? ` · ${formatDateTime(dc.startsAt, locale)}`
+                  : ""}
+                {dc.endsAt ? ` → ${formatDateTime(dc.endsAt, locale)}` : ""}
+              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!tenantId) return;
+                    try {
+                      const updated = await api.discountCodes.update(
+                        tenantId,
+                        dc.id,
+                        { isActive: !dc.isActive },
+                      );
+                      setDiscountCodes((prev) =>
+                        prev.map((p) => (p.id === updated.id ? updated : p)),
+                      );
+                    } catch (err) {
+                      setDiscountError(translateApiError(t, err));
+                    }
+                  }}
+                  className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                >
+                  {dc.isActive
+                    ? t("products.inactiveChip")
+                    : t("products.activeChip")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDiscountEditTarget(dc);
+                    setDiscountFormOpen(true);
+                  }}
+                  className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                >
+                  {t("common.edit")}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <h2 className="mt-8 text-lg font-bold text-ink">
         {t("products.linksTitle")}
       </h2>
@@ -353,6 +476,28 @@ export function ProductsPage({ t, locale }: ProductsPageProps) {
           locale={locale}
           order={orderDetail}
           onClose={() => setOrderDetail(null)}
+        />
+      ) : null}
+
+      {discountFormOpen ? (
+        <DiscountCodeFormModal
+          t={t}
+          tenantId={active.id}
+          discountCode={discountEditTarget}
+          onClose={() => {
+            setDiscountFormOpen(false);
+            setDiscountEditTarget(null);
+          }}
+          onSaved={(saved) => {
+            setDiscountFormOpen(false);
+            setDiscountEditTarget(null);
+            setDiscountCodes((prev) => {
+              const exists = prev.some((p) => p.id === saved.id);
+              return exists
+                ? prev.map((p) => (p.id === saved.id ? saved : p))
+                : [saved, ...prev];
+            });
+          }}
         />
       ) : null}
 
@@ -724,6 +869,28 @@ function OrderDetailModal({
             </li>
           ))}
         </ul>
+        {order.discountAmountIdr > 0 ? (
+          <div className="mt-3 space-y-1 border-t border-line pt-3 text-sm">
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted">
+                {t("products.orderSubtotalLabel")}
+              </span>
+              <span className="text-ink">
+                {formatIdr(order.subtotalIdr, locale)}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between">
+              <span className="text-muted">
+                {t("products.orderDiscountLabel", {
+                  code: order.discountCode ?? "",
+                })}
+              </span>
+              <span className="text-ink">
+                −{formatIdr(order.discountAmountIdr, locale)}
+              </span>
+            </div>
+          </div>
+        ) : null}
         <div className="mt-3 flex items-baseline justify-between border-t border-line pt-3">
           <span className="text-sm font-semibold text-ink">
             {t("products.orderTotalLabel")}
@@ -820,6 +987,274 @@ function CreatedLinkModal({
           </a>
         </div>
       </div>
+    </div>
+  );
+}
+
+function toLocalInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function DiscountCodeFormModal({
+  t,
+  tenantId,
+  discountCode,
+  onClose,
+  onSaved,
+}: {
+  t: Translate;
+  tenantId: string;
+  discountCode: DiscountCodeResponse | null;
+  onClose: () => void;
+  onSaved: (saved: DiscountCodeResponse) => void;
+}) {
+  const isEdit = discountCode !== null;
+  const [code, setCode] = useState(discountCode?.code ?? "");
+  const [kind, setKind] = useState<"percent" | "fixed">(
+    discountCode?.kind ?? "percent",
+  );
+  const [value, setValue] = useState(
+    discountCode ? String(discountCode.value) : "",
+  );
+  const [minOrder, setMinOrder] = useState(
+    discountCode && discountCode.minOrderIdr > 0
+      ? String(discountCode.minOrderIdr)
+      : "",
+  );
+  const [maxRedemptions, setMaxRedemptions] = useState(
+    discountCode?.maxRedemptions != null
+      ? String(discountCode.maxRedemptions)
+      : "",
+  );
+  const [maxPerContact, setMaxPerContact] = useState(
+    discountCode?.maxPerContact != null
+      ? String(discountCode.maxPerContact)
+      : "",
+  );
+  const [startsAt, setStartsAt] = useState(
+    toLocalInputValue(discountCode?.startsAt ?? null),
+  );
+  const [endsAt, setEndsAt] = useState(
+    toLocalInputValue(discountCode?.endsAt ?? null),
+  );
+  const [isActive, setIsActive] = useState(discountCode?.isActive ?? true);
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    const valueNum = Number(value);
+    if (
+      !Number.isInteger(valueNum) ||
+      valueNum < 1 ||
+      (kind === "percent" && valueNum > 100)
+    ) {
+      setError(t("products.discountValueInvalid"));
+      return;
+    }
+    const optionalInt = (raw: string): number | null => {
+      const trimmed = raw.trim();
+      if (!trimmed) return null;
+      const n = Number(trimmed);
+      return Number.isInteger(n) && n >= 0 ? n : null;
+    };
+    setSubmitting(true);
+    setError(null);
+    try {
+      const shared = {
+        kind,
+        value: valueNum,
+        minOrderIdr: optionalInt(minOrder) ?? 0,
+        maxRedemptions: optionalInt(maxRedemptions),
+        maxPerContact: optionalInt(maxPerContact),
+        startsAt: startsAt ? new Date(startsAt).toISOString() : null,
+        endsAt: endsAt ? new Date(endsAt).toISOString() : null,
+        isActive,
+      };
+      const saved = isEdit
+        ? await api.discountCodes.update(tenantId, discountCode.id, shared)
+        : await api.discountCodes.create(tenantId, {
+            ...shared,
+            code: code.trim(),
+          });
+      onSaved(saved);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const inputClass =
+    "mt-1 w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink";
+  const labelClass = "block text-sm font-medium text-ink";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <form
+        onSubmit={(e) => void handleSubmit(e)}
+        className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-2xl bg-surface p-5 shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-base font-bold text-ink">
+            {isEdit
+              ? t("products.discountEditTitle")
+              : t("products.discountAddTitle")}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+        <FieldError message={error} />
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className={labelClass} htmlFor="dc-code">
+              {t("products.discountCodeLabel")}
+            </label>
+            <input
+              id="dc-code"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              disabled={isEdit}
+              placeholder={t("products.discountCodePlaceholder")}
+              className={`${inputClass} font-mono uppercase disabled:opacity-60`}
+            />
+            <p className="mt-1 text-xs text-muted">
+              {t("products.discountCodeHint")}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass} htmlFor="dc-kind">
+                {t("products.discountKindLabel")}
+              </label>
+              <select
+                id="dc-kind"
+                value={kind}
+                onChange={(e) => setKind(e.target.value as "percent" | "fixed")}
+                className={inputClass}
+              >
+                <option value="percent">
+                  {t("products.discountKindPercent")}
+                </option>
+                <option value="fixed">{t("products.discountKindFixed")}</option>
+              </select>
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="dc-value">
+                {t("products.discountValueLabel")}
+              </label>
+              <input
+                id="dc-value"
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                inputMode="numeric"
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="dc-min">
+              {t("products.discountMinOrderLabel")}
+            </label>
+            <input
+              id="dc-min"
+              value={minOrder}
+              onChange={(e) => setMinOrder(e.target.value)}
+              inputMode="numeric"
+              className={inputClass}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass} htmlFor="dc-maxtotal">
+                {t("products.discountMaxRedemptionsLabel")}
+              </label>
+              <input
+                id="dc-maxtotal"
+                value={maxRedemptions}
+                onChange={(e) => setMaxRedemptions(e.target.value)}
+                inputMode="numeric"
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="dc-maxcontact">
+                {t("products.discountMaxPerContactLabel")}
+              </label>
+              <input
+                id="dc-maxcontact"
+                value={maxPerContact}
+                onChange={(e) => setMaxPerContact(e.target.value)}
+                inputMode="numeric"
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass} htmlFor="dc-starts">
+                {t("products.discountStartsLabel")}
+              </label>
+              <input
+                id="dc-starts"
+                type="datetime-local"
+                value={startsAt}
+                onChange={(e) => setStartsAt(e.target.value)}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="dc-ends">
+                {t("products.discountEndsLabel")}
+              </label>
+              <input
+                id="dc-ends"
+                type="datetime-local"
+                value={endsAt}
+                onChange={(e) => setEndsAt(e.target.value)}
+                className={inputClass}
+              />
+            </div>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={isActive}
+              onChange={(e) => setIsActive(e.target.checked)}
+            />
+            {t("products.discountActiveLabel")}
+          </label>
+        </div>
+        <div className="mt-5 flex gap-2">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {submitting
+              ? t("products.saving")
+              : isEdit
+                ? t("products.discountSaveButton")
+                : t("products.discountCreateButton")}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("common.cancel")}
+          </button>
+        </div>
+      </form>
     </div>
   );
 }

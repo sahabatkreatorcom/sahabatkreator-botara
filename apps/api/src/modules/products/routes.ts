@@ -78,6 +78,10 @@ export function serializeOrder(
       unitPriceIdr: i.unitPriceIdr,
       lineTotalIdr: i.qty * i.unitPriceIdr,
     })),
+    // G14: subtotal = total final + diskon (keduanya snapshot order).
+    subtotalIdr: order.totalIdr + order.discountAmountIdr,
+    discountAmountIdr: order.discountAmountIdr,
+    discountCode: order.discountCode,
     totalIdr: order.totalIdr,
     paymentLinkId: paymentLink?.id ?? null,
     paymentCode: paymentLink?.code ?? null,

@@ -179,6 +179,10 @@ import type {
   PaymentLinkResponse,
   OrderListResponse,
   OrderResponse,
+  CreateDiscountCodeRequest,
+  DiscountCodeListResponse,
+  DiscountCodeResponse,
+  UpdateDiscountCodeRequest,
   AppointmentAvailabilityResponse,
   AppointmentServiceListResponse,
   AppointmentServiceResponse,
@@ -1697,6 +1701,37 @@ export const api = {
       return request<PaymentLinkResponse>(
         `/api/tenants/${tenantId}/payment-links`,
         { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+  },
+  discountCodes: {
+    /** GET /api/tenants/:tenantId/discount-codes → kode diskon + statistik penukaran (G14). */
+    async list(tenantId: string): Promise<DiscountCodeResponse[]> {
+      const body = await request<DiscountCodeListResponse>(
+        `/api/tenants/${tenantId}/discount-codes`,
+        { method: "GET" },
+      );
+      return body.discountCodes;
+    },
+    /** POST → 201 kode baru (owner/admin). */
+    create(
+      tenantId: string,
+      input: CreateDiscountCodeRequest,
+    ): Promise<DiscountCodeResponse> {
+      return request<DiscountCodeResponse>(
+        `/api/tenants/${tenantId}/discount-codes`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH → kode terbarui (owner/admin); teks kode tidak bisa diubah. */
+    update(
+      tenantId: string,
+      codeId: string,
+      input: UpdateDiscountCodeRequest,
+    ): Promise<DiscountCodeResponse> {
+      return request<DiscountCodeResponse>(
+        `/api/tenants/${tenantId}/discount-codes/${codeId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
       );
     },
   },

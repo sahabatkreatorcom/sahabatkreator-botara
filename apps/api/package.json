@@ -38,7 +38,8 @@
     "verify:contact-timeline": "tsx scripts/verify-contact-timeline.ts",
     "verify:gap-tier2": "tsx scripts/verify-gap-tier2.ts",
     "verify:wacrm-extras": "tsx scripts/verify-wacrm-extras.ts",
-    "verify:deals": "tsx scripts/verify-deals.ts"
+    "verify:deals": "tsx scripts/verify-deals.ts",
+    "verify:discount-codes": "tsx scripts/verify-discount-codes.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",
