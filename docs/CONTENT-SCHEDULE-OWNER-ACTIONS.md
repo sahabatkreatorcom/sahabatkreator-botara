@@ -721,9 +721,46 @@ hanya soal sisi platformnya:
 
 ---
 
+## Gelombang G6 — Pengaman AI Pelengkap (2026-11-12)
+
+Fitur kode selesai & terverifikasi (verify:ai-guards): (1) cap
+balasan AI PER PERCAKAPAN — jendela bergulir 24 jam, bawaan 20
+balasan, diklaim secara atomik sebelum LLM dipanggil; saat cap
+tercapai AI berhenti di percakapan itu, percakapan diserahkan ke
+manusia (agent_enabled mati) dan tercatat di Log Audit sebagai
+`agent.conversation_capped` + `agent.handoff` via
+`conversation_cap`. (2) Ringkasan handoff otomatis — setiap handoff
+(lewat tool agent maupun pemicu cap) menghasilkan ringkasan singkat
+(kebutuhan pelanggan, fakta penting, status terakhir) yang
+menempel sebagai CATATAN internal pada percakapan, dan tokennya
+tercatat terpisah di pemakaian (refType `agent_handoff_summary`).
+
+Yang berada di sisi pemilik:
+
+- **Kualitas ringkasan bergantung provider LLM nyata.** Ringkasan
+  dibuat oleh model yang sama dengan agent (jalur LLM yang ada).
+  Selama provider masih `mock` (atau kunci OpenRouter di Panel
+  Admin belum diisi — lihat butir OpenRouter pada bagian lain
+  daftar ini), ringkasan yang dihasilkan adalah teks generik mock
+  dan BUKAN ringkasan isi percakapan yang sebenarnya. Tidak ada
+  tindakan konfigurasi baru khusus G6: cukup pastikan kunci
+  OpenRouter terisi di Panel Admin (grup AI) agar ringkasan nyata.
+  Bila LLM gagal/timeout saat handoff, handoff tetap terjadi tanpa
+  ringkasan dan tercatat jujur di Log Audit sebagai
+  `agent.handoff_summary` berstatus `unavailable`.
+- **Cap bisa diatur per agent, tidak wajib.** Bawaan 20 balasan per
+  percakapan per 24 jam berlaku untuk semua agent. Untuk mengubah:
+  buka halaman Agen → edit agent → field "Batas balasan AI per
+  percakapan" (kosongkan = bawaan 20; isi 0 = cap nonaktif untuk
+  agent itu). Agent yang menangani percakapan panjang (mis. admin
+  booking multi-langkah) mungkin layak diberi angka lebih besar.
+
+---
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
-Gelombang G5 (pemicu postback/quick reply/welcome).
+Gelombang G5 (pemicu postback/quick reply/welcome) + Gelombang G6
+(pengaman AI pelengkap).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
