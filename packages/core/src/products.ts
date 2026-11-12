@@ -3,6 +3,7 @@ import { and, asc, desc, eq, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import {
   auditLogs,
   contacts,
+  discountRedemptions,
   orderItems,
   orders,
   paymentLinks,
@@ -12,6 +13,7 @@ import {
   type PaymentLink,
   type Product,
 } from "@sahabat-kreator/db";
+import { releaseRedemptionsForOrderTx } from "./discount-codes";
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
 import {
@@ -363,6 +365,10 @@ export async function syncOrderStatusFromLink(
       .where(
         and(eq(orders.id, link.orderId), eq(orders.status, "pending")),
       );
+    // G14: order berakhir TANPA dibayar → penukaran kode diskonnya
+    // dilepas; kuota kode kembali bebas (keputusan G14, lihat
+    // discount-codes.ts). Idempoten: hanya baris 'redeemed' bertransisi.
+    await releaseRedemptionsForOrderTx(tx, link.tenantId, link.orderId);
   }
 }
 
@@ -412,6 +418,18 @@ export async function listPaymentLinks(
           and(
             inArray(orders.id, expiredOrderIds),
             eq(orders.status, "pending"),
+          ),
+        );
+      // G14: jalur expired massal ini melewati syncOrderStatusFromLink,
+      // jadi pelepasan penukaran diskon dilakukan eksplisit di sini.
+      await tx
+        .update(discountRedemptions)
+        .set({ status: "released", releasedAt: new Date() })
+        .where(
+          and(
+            eq(discountRedemptions.tenantId, ctx.tenantId),
+            inArray(discountRedemptions.orderId, expiredOrderIds),
+            eq(discountRedemptions.status, "redeemed"),
           ),
         );
     }

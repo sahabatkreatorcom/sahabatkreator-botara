@@ -30,6 +30,11 @@ import {
   type PaymentDeps,
   type ProviderCheckoutSession,
 } from "./payments";
+import {
+  claimDiscountTx,
+  DiscountClaimLostError,
+} from "./discount-codes";
+import type { DiscountRejectReason } from "@sahabat-kreator/contracts";
 
 /**
  * Service domain Keranjang & Order (Fase 13F, katalog + keranjang
@@ -284,6 +289,17 @@ export async function addToCartTx(
 // Checkout
 // ---------------------------------------------------------------------------
 
+/** Hasil penerapan kode diskon pada sebuah checkout (G14). */
+export type CheckoutDiscountOutcome =
+  | {
+      kind: "applied";
+      code: string;
+      discountAmountIdr: number;
+      subtotalIdr: number;
+    }
+  | { kind: "invalid"; code: string; reason: DiscountRejectReason }
+  | { kind: "none" };
+
 export type CheckoutCartResult =
   | {
       kind: "ok";
@@ -291,6 +307,7 @@ export type CheckoutCartResult =
       items: OrderItem[];
       link: PaymentLink;
       view: CartView;
+      discount: CheckoutDiscountOutcome;
     }
   | { kind: "empty_cart" };
 
@@ -316,23 +333,17 @@ export async function checkoutCartTx(
      * tautan lahir sebagai simulasi persis seperti Fase 13F.
      */
     preparedLink?: PreparedOrderLink | null;
+    /**
+     * G14: teks kode diskon yang diberikan untuk checkout ini (dari
+     * config node flow / field kustom kontak). Klaim atomik terjadi
+     * di dalam transaksi ini; total order & tautan memakai total
+     * SESUDAH diskon hasil klaim.
+     */
+    discountCode?: string | null;
   },
 ): Promise<CheckoutCartResult> {
   const view = await getCartViewTx(tx, tenantId, input.contactId);
   if (!view || view.items.length === 0) return { kind: "empty_cart" };
-  if (
-    input.preparedLink &&
-    input.preparedLink.amountIdr !== view.totalIdr
-  ) {
-    // Total berubah sejak sesi provider disiapkan — membatalkan
-    // seluruh transaksi checkout lebih jujur daripada melahirkan
-    // tautan yang jumlahnya tidak cocok dengan sesi providernya.
-    throw new PaymentProviderError(
-      "PAYMENT_AMOUNT_CHANGED",
-      input.preparedLink.session.provider,
-      "Total keranjang berubah sejak sesi checkout provider disiapkan",
-    );
-  }
   const now = new Date();
   // Klaim keranjang secara ATOMIK sebelum melahirkan order: hanya
   // transisi open → checked_out yang boleh melanjutkan. Tanpa syarat
@@ -356,6 +367,61 @@ export async function checkoutCartTx(
       totalIdr: view.totalIdr,
     })
     .returning();
+  // G14: klaim kode diskon ATOMIK di dalam transaksi yang sama
+  // (baris kode dikunci FOR UPDATE oleh claimDiscountTx). Hasil
+  // klaim — bukan pratinjau — yang menentukan total final.
+  let discount: CheckoutDiscountOutcome = { kind: "none" };
+  let appliedCodeId: string | null = null;
+  let finalTotalIdr = view.totalIdr;
+  if (input.discountCode) {
+    const claim = await claimDiscountTx(tx, tenantId, {
+      code: input.discountCode,
+      contactId: input.contactId,
+      orderId: order.id,
+      subtotalIdr: view.totalIdr,
+    });
+    if (claim.kind === "ok") {
+      discount = {
+        kind: "applied",
+        code: claim.code.code,
+        discountAmountIdr: claim.discountAmountIdr,
+        subtotalIdr: view.totalIdr,
+      };
+      appliedCodeId = claim.code.id;
+      finalTotalIdr = view.totalIdr - claim.discountAmountIdr;
+    } else if (
+      input.preparedLink &&
+      input.preparedLink.amountIdr !== view.totalIdr
+    ) {
+      // Sesi provider disiapkan dengan total SESUDAH diskon
+      // (pratinjau lolos) tetapi klaim atomiknya kalah di sini —
+      // lanjut tanpa diskon akan melahirkan tautan yang jumlahnya
+      // tidak cocok dengan sesinya. Batalkan seluruh checkout.
+      throw new DiscountClaimLostError(claim.reason);
+    } else {
+      // Tanpa sesi provider (simulasi) atau sesi memang disiapkan
+      // pada total penuh: checkout lanjut TANPA diskon dan alasannya
+      // dilaporkan apa adanya lewat hasil + detail run pemanggil.
+      discount = {
+        kind: "invalid",
+        code: input.discountCode,
+        reason: claim.reason,
+      };
+    }
+  }
+  if (
+    input.preparedLink &&
+    input.preparedLink.amountIdr !== finalTotalIdr
+  ) {
+    // Total berubah sejak sesi provider disiapkan — membatalkan
+    // seluruh transaksi checkout lebih jujur daripada melahirkan
+    // tautan yang jumlahnya tidak cocok dengan sesi providernya.
+    throw new PaymentProviderError(
+      "PAYMENT_AMOUNT_CHANGED",
+      input.preparedLink.session.provider,
+      "Total keranjang berubah sejak sesi checkout provider disiapkan",
+    );
+  }
   const items = await tx
     .insert(orderItems)
     .values(
@@ -379,7 +445,7 @@ export async function checkoutCartTx(
       contactId: input.contactId,
       conversationId: input.conversationId ?? null,
       code: prepared?.code ?? generatePaymentCode(),
-      amountIdr: view.totalIdr,
+      amountIdr: finalTotalIdr,
       status: "pending",
       provider: prepared?.session.provider ?? PAYMENT_PROVIDER_SIMULATION,
       providerEnvironment: prepared?.session.environment ?? "sandbox",
@@ -392,7 +458,15 @@ export async function checkoutCartTx(
     .returning();
   const [orderWithLink] = await tx
     .update(orders)
-    .set({ paymentLinkId: link.id, updatedAt: now })
+    .set({
+      paymentLinkId: link.id,
+      totalIdr: finalTotalIdr,
+      discountAmountIdr:
+        discount.kind === "applied" ? discount.discountAmountIdr : 0,
+      discountCode: discount.kind === "applied" ? discount.code : null,
+      discountCodeId: appliedCodeId,
+      updatedAt: now,
+    })
     .where(eq(orders.id, order.id))
     .returning();
   await tx.insert(auditLogs).values({
@@ -404,12 +478,22 @@ export async function checkoutCartTx(
       orderId: order.id,
       paymentLinkId: link.id,
       code: link.code,
-      totalIdr: view.totalIdr,
+      totalIdr: finalTotalIdr,
       itemCount: view.itemCount,
       contactId: input.contactId,
       conversationId: input.conversationId ?? null,
       provider: link.provider,
       environment: link.providerEnvironment,
+      ...(discount.kind === "applied"
+        ? {
+            discountCode: discount.code,
+            discountAmountIdr: discount.discountAmountIdr,
+            subtotalIdr: view.totalIdr,
+          }
+        : {}),
+      ...(discount.kind === "invalid"
+        ? { discountRejected: discount.reason, discountCode: discount.code }
+        : {}),
     },
   });
   return {
@@ -418,6 +502,7 @@ export async function checkoutCartTx(
     items,
     link,
     view,
+    discount,
   };
 }
 
@@ -568,12 +653,29 @@ export function renderCatalogText(
   return parts.join("\n");
 }
 
-/** Ringkasan keranjang: baris item bernomor + total (dari snapshot). */
-export function renderCartSummaryText(view: CartView): string {
+/**
+ * Ringkasan keranjang: baris item bernomor + total (dari snapshot).
+ * Dengan diskon terapan (G14), rincian subtotal + potongan kode
+ * ditampilkan eksplisit agar pelanggan melihat total final yang
+ * sama dengan jumlah tautan bayarnya.
+ */
+export function renderCartSummaryText(
+  view: CartView,
+  discount?: { code: string; discountAmountIdr: number } | null,
+): string {
   const lines = view.items.map(
     (item, i) =>
       `${i + 1}. ${item.productName} x${item.qty} — ${formatIdrId(item.lineTotalIdr)}`,
   );
+  if (discount && discount.discountAmountIdr > 0) {
+    return [
+      "Keranjang kamu:",
+      ...lines,
+      `Subtotal: ${formatIdrId(view.totalIdr)}`,
+      `Diskon (${discount.code}): -${formatIdrId(discount.discountAmountIdr)}`,
+      `Total: ${formatIdrId(view.totalIdr - discount.discountAmountIdr)}`,
+    ].join("\n");
+  }
   return [
     "Keranjang kamu:",
     ...lines,

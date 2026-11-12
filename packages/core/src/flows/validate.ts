@@ -566,6 +566,39 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
           "Node cart_checkout membutuhkan emptyMessage string non-kosong ≤ 1000 karakter bila diisi",
         );
       }
+      // G14: sumber kode diskon opsional — bentuknya saja yang
+      // divalidasi di sini; keberlakuan kode ditegakkan core commerce
+      // saat checkout (kode yang tidak ada menghasilkan penolakan
+      // jujur 'not_found', bukan flow yang gagal diaktifkan).
+      if (
+        c.discountCode !== undefined &&
+        (!isNonEmptyString(c.discountCode) || c.discountCode.length > 64)
+      ) {
+        err(
+          "CHECKOUT_DISCOUNT_CODE_INVALID",
+          "Node cart_checkout membutuhkan discountCode string non-kosong ≤ 64 karakter bila diisi",
+        );
+      }
+      if (
+        c.discountCodeField !== undefined &&
+        (!isNonEmptyString(c.discountCodeField) ||
+          c.discountCodeField.length > 128)
+      ) {
+        err(
+          "CHECKOUT_DISCOUNT_FIELD_INVALID",
+          "Node cart_checkout membutuhkan discountCodeField string non-kosong ≤ 128 karakter bila diisi",
+        );
+      }
+      if (
+        c.discountInvalidMessage !== undefined &&
+        (!isNonEmptyString(c.discountInvalidMessage) ||
+          c.discountInvalidMessage.length > 1000)
+      ) {
+        err(
+          "CHECKOUT_DISCOUNT_MESSAGE_INVALID",
+          "Node cart_checkout membutuhkan discountInvalidMessage string non-kosong ≤ 1000 karakter bila diisi",
+        );
+      }
       break;
     }
     case "book_appointment": {

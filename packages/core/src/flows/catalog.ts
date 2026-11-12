@@ -57,10 +57,31 @@ export function catalogConfigOf(node: FlowGraphNode): CatalogConfig {
 /** Membaca config node cart_checkout (Fase 13F) — DEFENSIF seperti di atas. */
 export function cartCheckoutConfigOf(node: FlowGraphNode): {
   emptyMessage: string | null;
+  /** G14: kode diskon statis untuk checkout node ini (boleh kosong). */
+  discountCode: string | null;
+  /**
+   * G14: nama field kustom kontak yang memuat kode dari pelanggan
+   * (mis. jawaban questionnaire bertarget `custom:<field>`). Bila
+   * field terisi, nilainya MENANG atas kode statis.
+   */
+  discountCodeField: string | null;
+  /** G14: pesan yang dikirim bila kode pelanggan tidak berlaku. */
+  discountInvalidMessage: string | null;
 } {
   return {
     emptyMessage: isNonEmptyString(node.config.emptyMessage)
       ? node.config.emptyMessage
+      : null,
+    discountCode: isNonEmptyString(node.config.discountCode)
+      ? node.config.discountCode
+      : null,
+    discountCodeField: isNonEmptyString(node.config.discountCodeField)
+      ? node.config.discountCodeField
+      : null,
+    discountInvalidMessage: isNonEmptyString(
+      node.config.discountInvalidMessage,
+    )
+      ? node.config.discountInvalidMessage
       : null,
   };
 }

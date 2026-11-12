@@ -49,6 +49,11 @@ import {
 import { renderMessageText } from "../render-text";
 import { enrollContactInSequence } from "../sequence-enroll";
 import { createDealForContact, moveLatestOpenDealStage } from "../deals";
+import {
+  DiscountClaimLostError,
+  previewDiscount,
+  type DiscountPreview,
+} from "../discount-codes";
 import { respondToInboundMessage } from "../agent-runtime";
 import {
   buildPaymentUrl,
@@ -1982,6 +1987,14 @@ export async function executeFlowStep(
       let preparedLink: Awaited<
         ReturnType<typeof prepareOrderCheckoutLink>
       > = null;
+      // G14: kode diskon untuk checkout ini. Sumbernya: field kustom
+      // kontak (kode dari pelanggan, mis. jawaban questionnaire
+      // bertarget custom:<field>) MENANG atas kode statis config.
+      // Pratinjau di sini advisori (untuk menyiapkan sesi provider
+      // dengan total yang benar); klaim yang mengikat diulang secara
+      // atomik oleh checkoutCartTx di dalam transaksi langkah.
+      let discountCodeForCheckout: string | null = null;
+      let discountInvalidReason: string | null = null;
       if (ctxState.conversation && ctxState.contact) {
         const cartView = await getCartView(
           db,
@@ -1989,6 +2002,48 @@ export async function executeFlowStep(
           run.contactId,
         );
         if (cartView && cartView.items.length > 0) {
+          let amountForLink = cartView.totalIdr;
+          let resolvedCode: string | null = checkoutConfig.discountCode;
+          if (checkoutConfig.discountCodeField) {
+            const [freshContact] = await withTenantDb(
+              db,
+              tenantId,
+              (tx) =>
+                tx
+                  .select({ customFields: contacts.customFields })
+                  .from(contacts)
+                  .where(
+                    and(
+                      eq(contacts.tenantId, tenantId),
+                      eq(contacts.id, run.contactId),
+                    ),
+                  )
+                  .limit(1),
+            );
+            const raw = (
+              freshContact?.customFields as Record<string, unknown> | null
+            )?.[checkoutConfig.discountCodeField];
+            if (typeof raw === "string" && raw.trim().length > 0) {
+              resolvedCode = raw;
+            }
+          }
+          if (resolvedCode) {
+            const preview: DiscountPreview = await previewDiscount(
+              db,
+              { tenantId },
+              {
+                code: resolvedCode,
+                contactId: run.contactId,
+                subtotalIdr: cartView.totalIdr,
+              },
+            );
+            if (preview.kind === "ok") {
+              discountCodeForCheckout = resolvedCode;
+              amountForLink = preview.totalIdr;
+            } else {
+              discountInvalidReason = preview.reason;
+            }
+          }
           try {
             preparedLink = await prepareOrderCheckoutLink(
               db,
@@ -1999,7 +2054,7 @@ export async function executeFlowStep(
                   deps.payments?.publicBaseUrl ?? deps.publicBaseUrl,
               },
               {
-                amountIdr: cartView.totalIdr,
+                amountIdr: amountForLink,
                 itemLabel: `Order: ${cartView.items
                   .map((i) => i.productName)
                   .join(", ")}`,
@@ -2068,6 +2123,7 @@ export async function executeFlowStep(
             conversationId: fresh.conversationId,
             actor: { actorType: "system", actorId: `flow:${run.flowId}` },
             preparedLink,
+            discountCode: discountCodeForCheckout,
           });
           if (result.kind === "empty_cart") {
             let outboundMessageId: string | undefined;
@@ -2092,11 +2148,39 @@ export async function executeFlowStep(
               outboundMessageId,
             };
           }
+          // G14: klaim di dalam transaksi bisa melaporkan kode tidak
+          // berlaku (balapan kuota pada jalur simulasi) — alasannya
+          // menggantikan hasil pratinjau untuk pesan + detail run.
+          if (result.discount.kind === "invalid") {
+            discountInvalidReason = result.discount.reason;
+          }
+          if (
+            discountInvalidReason &&
+            checkoutConfig.discountInvalidMessage
+          ) {
+            await queueFlowOutboundText(
+              tx,
+              tenantId,
+              fresh,
+              ctxState.conversation,
+              renderMessageText(checkoutConfig.discountInvalidMessage, {
+                name: ctxState.contact.name,
+              }),
+            );
+          }
           const paymentUrl = buildPaymentUrl(
             deps.publicBaseUrl,
             result.link.code,
           );
-          const checkoutText = `${renderCartSummaryText(result.view)}\nLink pembayaran: ${paymentUrl} (berlaku ${PAYMENT_LINK_TTL_DAYS} hari)`;
+          const checkoutText = `${renderCartSummaryText(
+            result.view,
+            result.discount.kind === "applied"
+              ? {
+                  code: result.discount.code,
+                  discountAmountIdr: result.discount.discountAmountIdr,
+                }
+              : null,
+          )}\nLink pembayaran: ${paymentUrl} (berlaku ${PAYMENT_LINK_TTL_DAYS} hari)`;
           const outboundId = await queueFlowOutboundText(
             tx,
             tenantId,
@@ -2112,6 +2196,16 @@ export async function executeFlowStep(
               code: result.link.code,
               totalIdr: result.order.totalIdr,
               itemCount: result.view.itemCount,
+              ...(result.discount.kind === "applied"
+                ? {
+                    discountCode: result.discount.code,
+                    discountAmountIdr: result.discount.discountAmountIdr,
+                    subtotalIdr: result.discount.subtotalIdr,
+                  }
+                : {}),
+              ...(discountInvalidReason
+                ? { discountRejected: discountInvalidReason }
+                : {}),
             },
             branch: "checked_out",
           });
@@ -2123,6 +2217,34 @@ export async function executeFlowStep(
         },
       );
       } catch (err) {
+        // G14: klaim diskon kalah balapan sesudah sesi provider
+        // disiapkan dengan total diskon → transaksi langkah rollback
+        // (keranjang tetap terbuka, belum ada order/tautan). Run
+        // gagal dengan alasan khusus agar operator bisa membedakan
+        // dari kegagalan provider; pelanggan bisa mencoba lagi.
+        if (err instanceof DiscountClaimLostError) {
+          await withTenantDb(db, tenantId, (tx) =>
+            failRun(
+              tx,
+              tenantId,
+              run,
+              node,
+              "discount_claim_lost",
+              `klaim kode diskon gagal saat checkout: ${err.reason}`,
+              {
+                outcome: "failed",
+                reason: "discount_claim_lost",
+                discountRejected: err.reason,
+              },
+            ),
+          );
+          return {
+            executed: true,
+            status: "failed",
+            conversationId: run.conversationId,
+            stepsExecuted: stepsExecuted + 1,
+          };
+        }
         // Total berubah sejak sesi disiapkan (PAYMENT_AMOUNT_CHANGED)
         // → transaksi langkah sudah rollback; catat kegagalan run
         // secara jujur, jangan telan sebagai sukses.

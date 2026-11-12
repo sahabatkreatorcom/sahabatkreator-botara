@@ -657,9 +657,26 @@ export {
   type CartLineView,
   type CartView,
   type CheckoutCartResult,
+  type CheckoutDiscountOutcome,
   type OrderWithDetails,
   type PreparedOrderLink,
 } from "./commerce";
+export {
+  normalizeDiscountCode,
+  computeDiscountAmountIdr,
+  previewDiscount,
+  claimDiscountTx,
+  releaseRedemptionsForOrderTx,
+  createDiscountCode,
+  listDiscountCodes,
+  getDiscountCode,
+  updateDiscountCode,
+  DiscountClaimLostError,
+  type DiscountPreview,
+  type DiscountClaim,
+  type DiscountCodeWithStats,
+  type CreateDiscountCodeResult,
+} from "./discount-codes";
 export {
   // Fase 14A — gerbang pembayaran sungguhan (Midtrans/Xendit):
   // konfigurasi provider tenant, sesi checkout, uji koneksi, webhook.
