@@ -46,8 +46,9 @@ import { resolveTenantForUser } from "../tenants/guard";
  * → akun channel `pinterest` disimpan (KEDUA token TERENKRIPSI
  * envelope CHANNEL_TOKEN_SECRET). Access token ±30 hari disegarkan
  * worker lifecycle memakai refresh token sebelum kedaluwarsa. Pin
- * diterbitkan adapter ke board PERTAMA akun (keputusan Gelombang 3
- * — connect tidak mengubahnya).
+ * diterbitkan adapter ke board pilihan akun (pemilih board di
+ * modul channels) atau board pertama akun bila belum memilih
+ * (keputusan Gelombang 3 — connect tidak mengubah pilihan itu).
  *
  * Kepercayaan & kustodi mengikuti modul Threads/TikTok persis:
  * state HMAC sekali pakai, penjaga satu akun = satu koneksi lintas

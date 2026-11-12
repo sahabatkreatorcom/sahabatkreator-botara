@@ -1,10 +1,14 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import {
   ChannelAccountListResponseSchema,
   ChannelAccountResponseSchema,
   CreateChannelRequestSchema,
   MetaWebhookInfoResponseSchema,
+  PinterestBoardCreateRequestSchema,
+  PinterestBoardCreateResponseSchema,
+  PinterestBoardSelectRequestSchema,
+  PinterestBoardsResponseSchema,
   TrashChannelRequestSchema,
   type ChannelAccountResponse,
 } from "@sahabat-kreator/contracts";
@@ -34,6 +38,7 @@ import {
   markChannelAccountTrashed,
   restoreChannelAccount,
   setChannelAccountStatus,
+  setPinterestBoardChoice,
   storeProfilePhoto,
   TIKTOK_AVATAR_R2_KEY_PREFIX,
   updateMetaChannelAccountCredentials,
@@ -55,7 +60,10 @@ import {
 } from "@sahabat-kreator/channel-messenger";
 import { TikTokClient } from "@sahabat-kreator/channel-tiktok";
 import { LinkedInClient } from "@sahabat-kreator/channel-linkedin";
-import { PinterestClient } from "@sahabat-kreator/channel-pinterest";
+import {
+  PinterestApiError,
+  PinterestClient,
+} from "@sahabat-kreator/channel-pinterest";
 import { BlueskyClient } from "@sahabat-kreator/channel-bluesky";
 import {
   WhatsAppCloudClient,
@@ -585,6 +593,9 @@ export interface ChannelsModuleOptions {
  *   POST   /tenants/:tenantId/channels/:channelId/restore pulihkan dari Sampah
  *   GET    /tenants/:tenantId/channels/:channelId/export  unduh ekspor JSON
  *   GET    /tenants/:tenantId/channels/meta-webhook-info  info wiring webhook Meta (Fase 7A, owner/admin)
+ *   GET    /tenants/:tenantId/channels/:channelId/pinterest-boards   daftar board akun Pinterest + pilihan tujuan (owner/admin)
+ *   PUT    /tenants/:tenantId/channels/:channelId/pinterest-board    simpan pilihan board Pinterest (owner/admin)
+ *   POST   /tenants/:tenantId/channels/:channelId/pinterest-boards   buat board Pinterest baru + jadikan pilihan (owner/admin)
  * Hapus permanen BERPENJAGA (Fase 6I): membuang = disconnect penuh (bila
  * masih terhubung) + `trashed_at`; masa tenggang 30 hari di Sampah bisa
  * dipulihkan/diekspor, sesudahnya worker meng-purge permanen. Purge
@@ -628,6 +639,9 @@ export function createChannelsRoutes(
     app.post(`${base}/:channelId/restore`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:channelId/export`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/meta-webhook-info`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/:channelId/pinterest-boards`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.put(`${base}/:channelId/pinterest-board`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:channelId/pinterest-boards`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
   }
 
@@ -842,6 +856,250 @@ export function createChannelsRoutes(
       appSecretConfigured,
     });
     return c.json(body);
+  });
+
+  // ---------------------------------------------------------------------
+  // Pemilih board Pinterest — board tujuan Pin PER AKUN (owner/admin).
+  //
+  // Pin wajib masuk sebuah board; pemilik memilih board tujuan dari
+  // daftar board akun itu sendiri, atau membuat board baru dari
+  // pemilih yang sama. Pilihan disimpan di kolom akun oleh core
+  // (`setPinterestBoardChoice`) dan dibaca penerbit saat publikasi;
+  // kosong = board pertama akun. Token tersimpan akun dipakai
+  // server untuk memanggil API v5 dan TIDAK PERNAH masuk respons.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Penjaga bersama endpoint board Pinterest: membership +
+   * owner/admin, akun harus akun Pinterest tenant ini yang sedang
+   * 'connected', dan token tersimpan harus bisa dibuka. Kegagalan
+   * selalu jawaban berkode yang jujur (akun provider lain tampak
+   * sama seperti akun tidak ada).
+   */
+  const guardPinterestBoardAccount = async (
+    c: Context<{ Variables: AppVariables }>,
+  ) => {
+    const appUser = c.get("appUser");
+    const tenant = await resolveTenantForUser(
+      bundle,
+      c.req.param("tenantId") ?? "",
+      appUser.id,
+    );
+    if (!tenant) {
+      return {
+        error: apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found"),
+      } as const;
+    }
+    if (tenant.role !== "owner" && tenant.role !== "admin") {
+      return {
+        error: apiError(
+          c,
+          403,
+          "FORBIDDEN",
+          "Only workspace owners and admins can manage Pinterest boards",
+        ),
+      } as const;
+    }
+    const channelId = c.req.param("channelId");
+    if (!channelId || !z.string().uuid().safeParse(channelId).success) {
+      return {
+        error: apiError(c, 404, "NOT_FOUND", "Channel not found"),
+      } as const;
+    }
+    const account = await getChannelAccount(
+      bundle.db,
+      { tenantId: tenant.id },
+      channelId,
+    );
+    if (!account || account.provider !== "pinterest") {
+      return {
+        error: apiError(c, 404, "NOT_FOUND", "Channel not found"),
+      } as const;
+    }
+    if (account.status !== "connected" || !account.accessTokenEncrypted) {
+      return {
+        error: apiError(
+          c,
+          422,
+          "CHANNEL_NOT_CONNECTED",
+          "Pinterest account is not connected",
+        ),
+      } as const;
+    }
+    if (!opts.channelTokenSecret) {
+      return {
+        error: apiError(
+          c,
+          503,
+          "INTERNAL_ERROR",
+          "Channel token secret is not configured",
+        ),
+      } as const;
+    }
+    const accessToken = decryptChannelSecret(
+      opts.channelTokenSecret,
+      account.accessTokenEncrypted,
+    );
+    if (!accessToken) {
+      return {
+        error: apiError(
+          c,
+          422,
+          "CHANNEL_NOT_CONNECTED",
+          "Pinterest account credentials cannot be used",
+        ),
+      } as const;
+    }
+    return { tenant, account, accessToken } as const;
+  };
+
+  /** Kegagalan memanggil API v5 untuk urusan board → 502 berkode. */
+  function pinterestBoardsUnavailable(
+    c: Context<{ Variables: AppVariables }>,
+    err: unknown,
+  ) {
+    const detail =
+      err instanceof PinterestApiError
+        ? `${err.status}: ${err.description}`
+        : "non-api error";
+    console.error(`[channels] urusan board Pinterest gagal (${detail})`);
+    return apiError(
+      c,
+      502,
+      "PINTEREST_BOARDS_UNAVAILABLE",
+      "Could not reach Pinterest boards",
+    );
+  }
+
+  app.get(`${base}/:channelId/pinterest-boards`, async (c) => {
+    const g = await guardPinterestBoardAccount(c);
+    if ("error" in g) return g.error;
+    try {
+      const boards = await new PinterestClient({
+        baseUrl: opts.pinterestApiBase,
+      }).listBoards(g.accessToken);
+      return c.json(
+        PinterestBoardsResponseSchema.parse({
+          boards,
+          selectedBoardId: g.account.pinterestBoardId,
+          selectedBoardName: g.account.pinterestBoardName,
+        }),
+      );
+    } catch (err) {
+      return pinterestBoardsUnavailable(c, err);
+    }
+  });
+
+  app.put(`${base}/:channelId/pinterest-board`, async (c) => {
+    const g = await guardPinterestBoardAccount(c);
+    if ("error" in g) return g.error;
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = PinterestBoardSelectRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid Pinterest board selection");
+    }
+    const client = new PinterestClient({ baseUrl: opts.pinterestApiBase });
+    const actor = { tenantId: g.tenant.id, userId: c.get("appUser").id };
+
+    // Membersihkan pilihan tidak bergantung pada provider: pilihan
+    // dibersihkan dulu, daftar board dilampirkan bila terbaca.
+    if (parsed.data.boardId === null) {
+      await setPinterestBoardChoice(bundle.db, actor, g.account.id, null);
+      let boards: Array<{ id: string; name: string | null }> = [];
+      try {
+        boards = await client.listBoards(g.accessToken);
+      } catch {
+        boards = [];
+      }
+      return c.json(
+        PinterestBoardsResponseSchema.parse({
+          boards,
+          selectedBoardId: null,
+          selectedBoardName: null,
+        }),
+      );
+    }
+
+    try {
+      const boards = await client.listBoards(g.accessToken);
+      const target = boards.find((b) => b.id === parsed.data.boardId);
+      if (!target) {
+        return apiError(
+          c,
+          422,
+          "PINTEREST_BOARD_NOT_FOUND",
+          "The selected board does not belong to this Pinterest account",
+        );
+      }
+      await setPinterestBoardChoice(bundle.db, actor, g.account.id, {
+        boardId: target.id,
+        boardName: target.name,
+      });
+      return c.json(
+        PinterestBoardsResponseSchema.parse({
+          boards,
+          selectedBoardId: target.id,
+          selectedBoardName: target.name,
+        }),
+      );
+    } catch (err) {
+      return pinterestBoardsUnavailable(c, err);
+    }
+  });
+
+  app.post(`${base}/:channelId/pinterest-boards`, async (c) => {
+    const g = await guardPinterestBoardAccount(c);
+    if ("error" in g) return g.error;
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = PinterestBoardCreateRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid Pinterest board payload");
+    }
+    const client = new PinterestClient({ baseUrl: opts.pinterestApiBase });
+    try {
+      const created = await client.createBoard(g.accessToken, {
+        name: parsed.data.name,
+        description: parsed.data.description,
+        privacy: parsed.data.privacy,
+      });
+      // Alur pemilih: board yang baru dibuat langsung menjadi
+      // pilihan akun (pemilik membuatnya untuk dipakai).
+      await setPinterestBoardChoice(
+        bundle.db,
+        { tenantId: g.tenant.id, userId: c.get("appUser").id },
+        g.account.id,
+        { boardId: created.id, boardName: created.name },
+      );
+      // Daftar terbaru dilampirkan agar UI menyegar sekali; bila
+      // pembacaan daftar gagal sesudah pembuatan berhasil, jawab
+      // tetap sukses dengan board baru itu saja di daftar.
+      let boards: Array<{ id: string; name: string | null }> = [created];
+      try {
+        boards = await client.listBoards(g.accessToken);
+      } catch {
+        boards = [created];
+      }
+      return c.json(
+        PinterestBoardCreateResponseSchema.parse({
+          boards,
+          selectedBoardId: created.id,
+          selectedBoardName: created.name,
+          createdBoard: created,
+        }),
+      );
+    } catch (err) {
+      return pinterestBoardsUnavailable(c, err);
+    }
   });
 
   /**

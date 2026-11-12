@@ -2,6 +2,7 @@ import type { Database } from "@sahabat-kreator/db";
 import {
   claimPostForPublish,
   decryptChannelSecret,
+  getPinterestBoardChoice,
   getPostForPublish,
   markPostFailed,
   markPostPublished,
@@ -31,10 +32,14 @@ import {
  * muat payload, dekripsi kredensial akun, kirim, dan tandai hasil.
  * Perbedaan Pinterest ada pada bentuk konten dan media:
  *
- * - Satu post = satu Pin pada board PERTAMA akun (keputusan board
- *   terdokumentasi di paket channel-pinterest; akun tanpa board
- *   gagal aman `pinterest_board_missing`). Judul Pin dari `title`
- *   post, deskripsi dari caption, tautan tujuan dari URL pertama di
+ * - Satu post = satu Pin pada board tujuan akun: pilihan pemilik
+ *   dari pemilih board Channels bila tersimpan dan masih ada di
+ *   Pinterest (keputusan board terdokumentasi di paket
+ *   channel-pinterest); pilihan yang sudah hilang di Pinterest
+ *   jatuh ke board pertama DENGAN catatan log; tanpa pilihan →
+ *   board pertama; akun tanpa board gagal aman
+ *   `pinterest_board_missing`. Judul Pin dari `title` post,
+ *   deskripsi dari caption, tautan tujuan dari URL pertama di
  *   caption — semua dirangkai pembangun murni di paket channel.
  * - Media gambar JPEG/PNG dikirim sebagai `image_base64` dari biner
  *   object store privat (pola biner repo — tanpa URL publik). Format
@@ -125,8 +130,25 @@ export async function publishPinterestPost(
   const client = new PinterestClient({ baseUrl: opts.pinterestApiBase });
 
   try {
-    const boardId = await client.resolveDefaultBoardId(accessToken);
-    if (!boardId) return fail("pinterest_board_missing");
+    // Board tujuan: pilihan tersimpan akun (pemilih board) dibaca
+    // dari kolom akun; resolver klien memvalidasinya ke daftar
+    // board hidup akun sebelum Pin dibuat.
+    const choice = await getPinterestBoardChoice(
+      db,
+      ctx,
+      payload.channelAccountId,
+    );
+    const resolution = await client.resolvePinBoard(
+      accessToken,
+      choice?.boardId ?? null,
+    );
+    if (!resolution.boardId) return fail("pinterest_board_missing");
+    if (resolution.preferredMissing) {
+      console.log(
+        `[post] ${input.postId}: board pilihan ${choice?.boardId} tidak ditemukan lagi di Pinterest — jatuh ke board pertama ${resolution.boardId}`,
+      );
+    }
+    const boardId = resolution.boardId;
     const pinPayload = buildPinterestPinPayload({
       boardId,
       title: payload.title,
