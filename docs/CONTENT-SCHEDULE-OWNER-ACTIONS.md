@@ -877,6 +877,36 @@ agar tidak kaget:
   integrasi tersendiri yang besar. Kode diskon berlaku untuk
   katalog internal saja.
 
+## Gelombang G15 — Jam Kerja Tim + SLA Manusia (Tier 3 butir 15)
+
+SLA waktu tanggap manusia kini terukur dengan jam yang jujur:
+target per workspace diatur di Pengaturan → SLA waktu tanggap,
+jadwal kerja per anggota di Pengaturan → Tim (tombol "Jadwal
+kerja"), penanda sisa/terlewat tampil di Inbox, dan ringkasannya
+di Analitik. TIDAK ada kredensial, izin platform, atau tindakan
+pemilik yang dibutuhkan gelombang ini — hanya catatan perilaku
+agar tidak kaget:
+
+- **SLA mati sampai pemilik mengaturnya.** Target kosong =
+  pengukuran nonaktif; tidak ada angka bawaan yang dikarang.
+  Aktifkan dengan mengisi target (menit jam kerja) + jadwal
+  bawaan workspace di Pengaturan.
+- **Yang diukur:** jendela menunggu dibuka pesan pelanggan saat
+  percakapan menjadi tanggung jawab manusia (sesudah handoff, AI
+  nonaktif, atau ditugaskan) dan hanya ditutup balasan manusia
+  sungguhan — balasan AI, pesan sistem, dan catatan internal
+  tidak pernah menutupnya. Menit hanya terbakar selama jam kerja
+  penanggung jawab (jadwal pribadi anggota → jadwal bawaan
+  workspace).
+- **Tanpa jadwal = tidak terukur, bukan patuh.** Bila penanggung
+  jawab tidak punya jadwal pribadi dan workspace tidak punya
+  jadwal bawaan, jendela ditandai "tanpa jadwal" dan tidak pernah
+  dihitung lolos maupun terlewat.
+- **Rentang lintas tengah malam belum didukung** (mis. shift
+  22:00–06:00): jam mulai wajib sebelum jam selesai di hari yang
+  sama. Editor web mengelola satu rentang per hari; API menerima
+  sampai 4 rentang per hari (mis. jeda makan siang).
+
 ---
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
@@ -886,6 +916,8 @@ Gelombang G5 (pemicu postback/quick reply/welcome) + Gelombang G6
 (pengaman AI pelengkap) + Gelombang G7 (comment-to-DM Threads) +
 Gelombang G13 (pelengkap Wacrm — tanpa tindakan pemilik baru, hanya
 catatan perilaku) + Gelombang G14 (kode diskon — tanpa tindakan
-pemilik baru, hanya catatan perilaku).
+pemilik baru, hanya catatan perilaku) + Gelombang G15 (jam kerja
+tim + SLA manusia — tanpa tindakan pemilik baru, hanya catatan
+perilaku).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
