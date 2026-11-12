@@ -44,6 +44,16 @@ export const tenants = pgTable("tenants", {
   slug: varchar("slug", { length: 128 }).notNull().unique(),
   defaultLocale: varchar("default_locale", { length: 10 }).notNull().default("en"),
   timezone: varchar("timezone", { length: 64 }).notNull().default("Asia/Jakarta"),
+  /**
+   * Mata uang bawaan AKUN (G12, pola wacrm 021 `accounts.default_currency`):
+   * dipakai sebagai mata uang deal baru (UI papan + aksi otomasi
+   * create_deal); tiap deal menyimpan mata uangnya sendiri sesudah
+   * dibuat. Bawaan 'IDR' — produk ini Indonesia-first; format ditegakkan
+   * CHECK di migrasi 0035 (^[A-Z]{3}$).
+   */
+  defaultCurrency: varchar("default_currency", { length: 3 })
+    .notNull()
+    .default("IDR"),
   status: tenantStatusEnum("status").notNull().default("active"),
   /** Alasan penangguhan yang diketik admin — dibaca pemilik saat mengajukan banding. */
   statusReason: text("status_reason"),

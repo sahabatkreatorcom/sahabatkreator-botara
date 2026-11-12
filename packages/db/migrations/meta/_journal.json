@@ -246,6 +246,13 @@
       "when": 1794477824046,
       "tag": "0034_outbound_webhooks",
       "breakpoints": true
+    },
+    {
+      "idx": 35,
+      "version": "7",
+      "when": 1794477824047,
+      "tag": "0035_deals",
+      "breakpoints": true
     }
   ]
 }

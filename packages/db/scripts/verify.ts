@@ -293,7 +293,11 @@ const policies = await db.query<{ count: string }>(
 // menambah `outbound_webhook_endpoints` (tenant_isolation) dan
 // `outbound_webhook_deliveries` (tenant_isolation +
 // system_outbound_webhook_scan untuk penyapu percobaan ulang) → 99.
-assert.equal(Number(policies.rows[0].count), 99);
+//
+// 2026-11-12: migrasi 0035 (Gelombang G12 — deals/pipeline Kanban)
+// menambah `deal_pipelines`, `deal_stages`, `deals`, dan
+// `deal_stage_events`, masing-masing dengan tenant_isolation → 103.
+assert.equal(Number(policies.rows[0].count), 103);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2458,8 +2462,12 @@ function oneHotVector(index: number): string {
   // menambah outbound_webhook_endpoints (tenant_isolation) dan
   // outbound_webhook_deliveries (tenant_isolation + policy pindai
   // sistem) → tabel 72, policy 99.
-  assert.equal(counts.rows[0].tables, "72");
-  assert.equal(counts.rows[0].policies, "99");
+  // 2026-11-12: migrasi 0035 (Gelombang G12 — deals/pipeline Kanban)
+  // menambah deal_pipelines, deal_stages, deals, dan
+  // deal_stage_events (masing-masing tenant_isolation) →
+  // tabel 76, policy 103.
+  assert.equal(counts.rows[0].tables, "76");
+  assert.equal(counts.rows[0].policies, "103");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
