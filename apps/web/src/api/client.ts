@@ -136,6 +136,8 @@ import type {
   GoogleCalendarConnectionResponse,
   GoogleCalendarListResponse,
   GoogleConnectStartResponse,
+  GoogleService,
+  GoogleServiceConnectionsResponse,
   UpdateAppointmentAvailabilityRequest,
   UpdateAppointmentServiceRequest,
   UpdateAppointmentSettingsRequest,
@@ -1449,6 +1451,31 @@ export const api = {
     googleConnect(tenantId: string): Promise<GoogleConnectStartResponse> {
       return request<GoogleConnectStartResponse>(
         `/api/tenants/${tenantId}/appointments/google/connect`,
+        { method: "POST" },
+      );
+    },
+    /**
+     * GET /tenants/:tenantId/google/status → keadaan tiga koneksi
+     * Google per layanan (Channels; pemisahan Google 2026-11-12).
+     */
+    googleServicesStatus(
+      tenantId: string,
+    ): Promise<GoogleServiceConnectionsResponse> {
+      return request<GoogleServiceConnectionsResponse>(
+        `/api/tenants/${tenantId}/google/status`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * POST /tenants/:tenantId/google/:service/connect → { url }
+     * dialog consent sempit layanan itu (owner/admin).
+     */
+    googleServiceConnect(
+      tenantId: string,
+      service: GoogleService,
+    ): Promise<GoogleConnectStartResponse> {
+      return request<GoogleConnectStartResponse>(
+        `/api/tenants/${tenantId}/google/${service}/connect`,
         { method: "POST" },
       );
     },

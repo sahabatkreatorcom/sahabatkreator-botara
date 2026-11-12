@@ -8,6 +8,8 @@
 import type { CSSProperties } from "react";
 import type {
   ChannelAccountResponse,
+  GoogleService,
+  GoogleServiceConnection,
   MetaOAuthProvider,
   MetaWebhookInfoResponse,
   ThreadsOAuthInfoResponse,
@@ -210,53 +212,80 @@ export function ProviderOAuthStepBlock({
   );
 }
 
+/** Tiga layanan Google yang masing-masing punya koneksi sendiri. */
+const GOOGLE_SERVICE_ROWS = [
+  { service: "calendar", nameKey: "channels.googleServiceCalendar" },
+  { service: "youtube", nameKey: "channels.googleServiceYoutube" },
+  { service: "business", nameKey: "channels.googleServiceBusiness" },
+] as const;
+
 /**
- * Blok Google di modal Channels (gelombang Semua OAuth): BUKAN OAuth
- * baru — jembatan UI ke alur OAuth Google yang sudah ada (dipakai
- * Kalender). Sekali consent meminta scope lengkap (kalender +
- * youtube.upload/readonly + business.manage) dan callback-nya
- * menyinkronkan kanal YouTube + lokasi Google Business menjadi akun
- * channel; blok ini menampilkan status koneksi tenant + tombol
- * hubungkan yang memakai jalur yang sama seperti halaman Kalender.
+ * Blok Google di modal Channels — sejak pemisahan Google
+ * (2026-11-12) ada TIGA koneksi mandiri, satu per layanan: Calendar
+ * (janji temu), YouTube (kanal), Google Business (lokasi). Tiap
+ * baris menampilkan status + email akun layanan ITU dan tombol
+ * Hubungkan sendiri yang membuka dialog consent SEMPIT layanan itu
+ * lewat backend (satu callback untuk ketiganya); sinkron turunan
+ * (kanal/lokasi) terjadi di callback OAuth API. Menggantikan blok
+ * consent gabungan gelombang Semua OAuth agar billing/kuota/
+ * persetujuan API terpisah per layanan.
  */
 export function GoogleChannelsStepBlock({
   t,
-  status,
-  starting,
+  services,
+  startingService,
   startError,
   onConnect,
 }: {
   t: Translate;
-  status: { connected: boolean; accountEmail: string | null } | null;
-  starting: boolean;
+  services: GoogleServiceConnection[] | null;
+  startingService: GoogleService | null;
   startError: string | null;
-  onConnect: () => void;
+  onConnect: (service: GoogleService) => void;
 }) {
+  const byService = new Map((services ?? []).map((row) => [row.service, row]));
   return (
     <div className="mt-4">
       <p className="text-sm text-muted">{t("channels.googleConnectBody")}</p>
-      <div className="mt-3 rounded-lg border border-line bg-elevated/40 p-3 text-sm">
-        {status?.connected ? (
-          <span className="text-ink">
-            {t("channels.googleConnectedAs", {
-              email: status.accountEmail ?? "—",
-            })}
-          </span>
-        ) : (
-          <span className="text-muted">{t("channels.googleNotConnected")}</span>
-        )}
+      <div className="mt-3 space-y-2">
+        {GOOGLE_SERVICE_ROWS.map(({ service, nameKey }) => {
+          const status = byService.get(service);
+          const starting = startingService === service;
+          return (
+            <div
+              key={service}
+              className="flex items-center justify-between gap-3 rounded-lg border border-line bg-elevated/40 p-3"
+            >
+              <div className="min-w-0 text-sm">
+                <p className="font-medium text-ink">{t(nameKey)}</p>
+                {status?.connected ? (
+                  <span className="text-ink">
+                    {t("channels.googleConnectedAs", {
+                      email: status.accountEmail ?? "—",
+                    })}
+                  </span>
+                ) : (
+                  <span className="text-muted">
+                    {t("channels.googleNotConnected")}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={startingService !== null}
+                onClick={() => onConnect(service)}
+                className="shrink-0 rounded-md bg-accent px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {starting
+                  ? t("channels.googleConnecting")
+                  : status?.connected
+                    ? t("channels.googleReconnectButton")
+                    : t("channels.googleConnectButton")}
+              </button>
+            </div>
+          );
+        })}
       </div>
-      <button
-        id="google-connect-button"
-        type="button"
-        disabled={starting}
-        onClick={onConnect}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-accent px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
-      >
-        {starting
-          ? t("channels.googleConnecting")
-          : t("channels.googleConnectButton")}
-      </button>
       {startError ? (
         <div className="mt-2">
           <FieldError message={startError} />

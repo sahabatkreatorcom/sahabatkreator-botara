@@ -417,6 +417,18 @@ routes.route(
         await getProviderSecret(authBundle.db, "meta_app_secret", platformOptions),
       );
     },
+    // Dependensi Google untuk backfill foto/handle YouTube (akun
+    // youtube tidak menyimpan token; sumbernya koneksi layanan
+    // youtube tenant) — basis yang sama seperti modul appointments.
+    google: {
+      platform: platformOptions,
+      tokenSecret: env.CHANNEL_TOKEN_SECRET,
+      bases: {
+        apiBase: env.GOOGLE_API_BASE,
+        tokenBase: env.GOOGLE_TOKEN_BASE,
+        authBase: env.GOOGLE_AUTH_BASE,
+      },
+    },
   }),
 );
 // Modul meta publik (Fase 7A) — webhook TUNGGAL Meta /meta/webhook untuk

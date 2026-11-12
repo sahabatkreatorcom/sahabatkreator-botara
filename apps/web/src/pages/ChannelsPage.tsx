@@ -15,7 +15,8 @@ import {
 } from "react";
 import type {
   ChannelAccountResponse,
-  GoogleCalendarConnectionResponse,
+  GoogleService,
+  GoogleServiceConnection,
   LinkedInOAuthInfoResponse,
   MetaOAuthAsset,
   MetaOAuthInfoResponse,
@@ -191,11 +192,13 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
   const [blueskyAppPassword, setBlueskyAppPassword] = useState("");
   const [blueskyConnecting, setBlueskyConnecting] = useState(false);
   const [blueskyError, setBlueskyError] = useState<string | null>(null);
-  // Google di Channels: status koneksi Google tenant (alur yang sama
-  // seperti halaman Kalender) + status membuka dialog Google.
-  const [googleStatus, setGoogleStatus] =
-    useState<GoogleCalendarConnectionResponse | null>(null);
-  const [googleStarting, setGoogleStarting] = useState(false);
+  // Google di Channels (pemisahan per layanan): keadaan tiga koneksi
+  // Google tenant + layanan yang dialognya sedang dibuka.
+  const [googleServices, setGoogleServices] = useState<
+    GoogleServiceConnection[] | null
+  >(null);
+  const [googleStartingService, setGoogleStartingService] =
+    useState<GoogleService | null>(null);
   const [googleStartError, setGoogleStartError] = useState<string | null>(
     null,
   );
@@ -326,14 +329,14 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       .catch(() => {
         if (!cancelled) setPinterestOAuthInfo(null);
       });
-    // Status koneksi Google tenant (untuk blok Google di Channels).
+    // Keadaan tiga koneksi Google per layanan (blok Google Channels).
     api.appointments
-      .googleStatus(tenantId)
+      .googleServicesStatus(tenantId)
       .then((status) => {
-        if (!cancelled) setGoogleStatus(status);
+        if (!cancelled) setGoogleServices(status.services);
       })
       .catch(() => {
-        if (!cancelled) setGoogleStatus(null);
+        if (!cancelled) setGoogleServices(null);
       });
     return () => {
       cancelled = true;
@@ -379,12 +382,29 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       error: params.get(`${p.key}_oauth_error`),
     }));
     const hasWave = waveResults.some((w) => w.result || w.error);
-    if (!sessionId && !errorCode && !threadsResult && !threadsError && !hasWave)
+    // Kepulangan Google per layanan (pemisahan Google): callback
+    // mengarahkan ke ?google_oauth=connected&google_service=<layanan>
+    // atau ?google_oauth_error=<kode>&google_service=<layanan>.
+    const googleResult = params.get("google_oauth");
+    const googleError = params.get("google_oauth_error");
+    const googleService = params.get("google_service");
+    if (
+      !sessionId &&
+      !errorCode &&
+      !threadsResult &&
+      !threadsError &&
+      !hasWave &&
+      !googleResult &&
+      !googleError
+    )
       return;
     params.delete("meta_oauth");
     params.delete("meta_oauth_error");
     params.delete("threads_oauth");
     params.delete("threads_oauth_error");
+    params.delete("google_oauth");
+    params.delete("google_oauth_error");
+    params.delete("google_service");
     for (const w of waveResults) {
       params.delete(`${w.key}_oauth`);
       params.delete(`${w.key}_oauth_error`);
@@ -433,6 +453,30 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       } else if (w.result === "connected") {
         setOauthConnectedNotice(t(w.noticeKey));
         void load();
+      }
+    }
+    if (googleError) {
+      setOauthBannerError(
+        translateApiError(t, new ApiClientError(0, googleError, "")),
+      );
+    }
+    if (googleResult === "connected") {
+      // Banner sukses menyebut layanannya; daftar akun + keadaan
+      // tiga koneksi dimuat ulang agar kartu hasil sinkron
+      // (kanal YouTube / lokasi Business) langsung muncul.
+      const noticeKey =
+        googleService === "youtube"
+          ? "channels.googleYoutubeConnectedNotice"
+          : googleService === "business"
+            ? "channels.googleBusinessConnectedNotice"
+            : "channels.googleCalendarConnectedNotice";
+      setOauthConnectedNotice(t(noticeKey));
+      void load();
+      if (tenantId) {
+        api.appointments
+          .googleServicesStatus(tenantId)
+          .then((status) => setGoogleServices(status.services))
+          .catch(() => undefined);
       }
     }
     // Sengaja hanya sekali saat mount; `t` dari render pertama cukup.
@@ -738,12 +782,16 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
    * SUDAH ada (sama seperti halaman Kalender) — sekali consent
    * menyinkronkan kanal YouTube + lokasi Google Business.
    */
-  const handleGoogleConnect = async () => {
-    if (!tenantId || googleStarting) return;
-    setGoogleStarting(true);
+  /** Buka dialog consent SATU layanan Google (calendar/youtube/business). */
+  const handleGoogleConnect = async (service: GoogleService) => {
+    if (!tenantId || googleStartingService) return;
+    setGoogleStartingService(service);
     setGoogleStartError(null);
     try {
-      const started = await api.appointments.googleConnect(tenantId);
+      const started = await api.appointments.googleServiceConnect(
+        tenantId,
+        service,
+      );
       window.location.href = started.url;
     } catch (err) {
       setGoogleStartError(
@@ -751,7 +799,7 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
           ? translateApiError(t, err)
           : t("errors.generic"),
       );
-      setGoogleStarting(false);
+      setGoogleStartingService(null);
     }
   };
 
@@ -1813,10 +1861,10 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                 {connectStep === "google" ? (
                   <GoogleChannelsStepBlock
                     t={t}
-                    status={googleStatus}
-                    starting={googleStarting}
+                    services={googleServices}
+                    startingService={googleStartingService}
                     startError={googleStartError}
-                    onConnect={() => void handleGoogleConnect()}
+                    onConnect={(service) => void handleGoogleConnect(service)}
                   />
                 ) : null}
 

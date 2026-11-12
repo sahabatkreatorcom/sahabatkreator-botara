@@ -9,6 +9,7 @@ import {
   type ChannelAccountResponse,
 } from "@sahabat-kreator/contracts";
 import {
+  backfillYouTubeChannelProfile,
   channelConfirmationName,
   channelPurgeAt,
   createMetaChannelAccount,
@@ -39,6 +40,7 @@ import {
   updateTelegramChannelAccountCredentials,
   updateWhatsAppChannelAccountCredentials,
   type ChannelHealthInfo,
+  type GoogleDeps,
   type MetaProvider,
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
@@ -431,6 +433,52 @@ function scheduleOAuthPhotoBackfill(
 }
 
 /**
+ * Backfill malas foto + handle YouTube (pemisahan Google, 2026-11-12)
+ * — anggota keluarga backfill di atas yang TIDAK bisa memakai pola
+ * generik OAuth: akun youtube tidak menyimpan token sendiri
+ * (`access_token_encrypted` NULL by design), jadi kredensialnya
+ * adalah koneksi layanan YOUTUBE tenant (Google). Akun yang
+ * terhubung sebelum sinkron mengambil thumbnail/@handle (dan akun
+ * hasil penyemaian migrasi 0023) belum punya foto tersimpan; saat
+ * daftar channel dibaca, akun youtube 'connected' tanpa foto memicu
+ * `backfillYouTubeChannelProfile` core secara fire-and-forget —
+ * foto + handle muncul di pembacaan berikutnya, TANPA reconnect.
+ * Penjaga per proses sama: dedup in-flight + cache negatif 15
+ * menit; kegagalan diam.
+ */
+const youtubePhotoBackfillInFlight = new Set<string>();
+const youtubePhotoBackfillNegative = new Map<string, number>();
+
+function scheduleYouTubePhotoBackfill(
+  bundle: AuthBundle,
+  opts: ChannelsModuleOptions,
+  row: ChannelAccount,
+): void {
+  if (row.provider !== "youtube" || row.status !== "connected") return;
+  if (!opts.google?.tokenSecret) return;
+  if (youtubePhotoBackfillInFlight.has(row.id)) return;
+  const lastNegative = youtubePhotoBackfillNegative.get(row.id);
+  if (
+    lastNegative !== undefined &&
+    Date.now() - lastNegative < BOT_PHOTO_BACKFILL_NEGATIVE_TTL_MS
+  ) {
+    return;
+  }
+  youtubePhotoBackfillInFlight.add(row.id);
+  void backfillYouTubeChannelProfile(bundle.db, row.tenantId, row.id, opts.google)
+    .then((stored) => {
+      if (stored) youtubePhotoBackfillNegative.delete(row.id);
+      else youtubePhotoBackfillNegative.set(row.id, Date.now());
+    })
+    .catch(() => {
+      youtubePhotoBackfillNegative.set(row.id, Date.now());
+    })
+    .finally(() => {
+      youtubePhotoBackfillInFlight.delete(row.id);
+    });
+}
+
+/**
  * Mencabut webhook Telegram sebuah akun HANYA bila akun ini memang
  * pemilik webhook saat ini (getWebhookInfo menunjuk ke URL akun ini) —
  * akun duplikat warisan yang bukan pemilik tidak boleh mencabut webhook
@@ -516,6 +564,14 @@ export interface ChannelsModuleOptions {
    * webhook tidak menuduh "belum diset" saat pemilik sudah mengisi panel.
    */
   metaAppSecretConfigured?: boolean | (() => Promise<boolean>);
+  /**
+   * Dependensi Google (opsi platform + kunci token + base URL) untuk
+   * backfill foto/handle YouTube dari koneksi layanan youtube tenant
+   * — akun youtube tidak menyimpan tokennya sendiri. Tanpa ini
+   * backfill YouTube tidak berjalan (kartu tetap placeholder sampai
+   * reconnect, sama seperti provider lain tanpa kredensial).
+   */
+  google?: GoogleDeps;
 }
 
 /**
@@ -596,6 +652,7 @@ export function createChannelsRoutes(
       scheduleBotPhotoBackfill(bundle, opts, row);
       scheduleMetaPhotoBackfill(bundle, opts, row);
       scheduleOAuthPhotoBackfill(bundle, opts, row);
+      scheduleYouTubePhotoBackfill(bundle, opts, row);
     }
     // Fase 7B.3: kesehatan operasional per akun — SATU peta agregat
     // untuk seluruh daftar (bukan kueri per kartu).
