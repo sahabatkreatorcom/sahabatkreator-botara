@@ -109,6 +109,12 @@ export interface WhatsAppMessageTemplate {
   language: string;
   category: string;
   status: string;
+  /**
+   * Alasan penolakan Meta (`rejected_reason`), mis. "INVALID_FORMAT".
+   * Null bila Meta tidak melaporkan alasan — termasuk nilai "NONE"
+   * yang Meta kirim untuk template yang tidak ditolak.
+   */
+  rejectedReason: string | null;
   components: WhatsAppTemplateComponent[];
 }
 
@@ -123,6 +129,16 @@ export interface WhatsAppTemplateCreateResult {
 export interface WhatsAppTemplateCreateInput {
   name: string;
   language: string;
+  category: "UTILITY" | "MARKETING" | "AUTHENTICATION";
+  components: WhatsAppTemplateComponent[];
+}
+
+/**
+ * Payload ubah template (Graph `POST /{message_template_id}`). Nama &
+ * bahasa template TIDAK bisa diubah di Meta — yang bisa hanya kategori
+ * dan komponen; template yang diubah masuk tinjauan ulang.
+ */
+export interface WhatsAppTemplateEditInput {
   category: "UTILITY" | "MARKETING" | "AUTHENTICATION";
   components: WhatsAppTemplateComponent[];
 }
@@ -214,7 +230,7 @@ export class WhatsAppCloudClient extends GraphHttpClient {
     const body = await this.getJson<{
       data?: Array<Record<string, unknown>>;
     }>(
-      `${encodeURIComponent(wabaId)}/message_templates?fields=id,name,language,category,status,components&limit=200`,
+      `${encodeURIComponent(wabaId)}/message_templates?fields=id,name,language,category,status,rejected_reason,components&limit=200`,
     );
     const out: WhatsAppMessageTemplate[] = [];
     for (const row of body.data ?? []) {
@@ -226,6 +242,12 @@ export class WhatsAppCloudClient extends GraphHttpClient {
         language: row.language,
         category: typeof row.category === "string" ? row.category : "UTILITY",
         status: typeof row.status === "string" ? row.status : "PENDING",
+        rejectedReason:
+          typeof row.rejected_reason === "string" &&
+          row.rejected_reason.trim() &&
+          row.rejected_reason.trim().toUpperCase() !== "NONE"
+            ? row.rejected_reason.trim()
+            : null,
         components: Array.isArray(row.components)
           ? (row.components as WhatsAppTemplateComponent[])
           : [],
@@ -261,6 +283,26 @@ export class WhatsAppCloudClient extends GraphHttpClient {
       status: typeof body.status === "string" ? body.status : "PENDING",
       category: typeof body.category === "string" ? body.category : input.category,
     };
+  }
+
+  /**
+   * Ubah template yang sudah ada di Meta (`POST /{message_template_id}`)
+   * — jalur resmi memperbaiki template REJECTED lalu mengirimnya ulang
+   * ke tinjauan tanpa menghapus nama (DELETE berbasis nama membuang
+   * SEMUA bahasa). Meta menjawab `{ success: true }`; kegagalan bentuk
+   * melempar WhatsAppGraphError seperti pembuatan.
+   */
+  async editMessageTemplate(
+    templateId: string,
+    input: WhatsAppTemplateEditInput,
+  ): Promise<void> {
+    await this.postJson<{ success?: boolean }>(
+      `${encodeURIComponent(templateId)}`,
+      {
+        category: input.category,
+        components: input.components,
+      },
+    );
   }
 
   /**
