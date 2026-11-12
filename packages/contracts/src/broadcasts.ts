@@ -380,3 +380,273 @@ export const BroadcastAbResultsResponseSchema = z.object({
 export type BroadcastAbResultsResponse = z.infer<
   typeof BroadcastAbResultsResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Gelombang G9 — Broadcast Berulang (lapisan penjadwal di atas Fase 7C)
+// ---------------------------------------------------------------------------
+
+/**
+ * Frekuensi pengulangan. Pola lengkapnya: frequency + interval
+ * (setiap N) + penentu hari:
+ * - daily   : setiap `interval` hari pada jam dinding yang sama.
+ * - weekly  : setiap `interval` minggu pada hari-hari `daysOfWeek`
+ *   (0=Minggu..6=Sabtu; kosong = hari yang sama dengan `startsAt`).
+ * - monthly : setiap `interval` bulan pada `dayOfMonth` (1..31 —
+ *   tanggal melampaui akhir bulan dijepit ke hari terakhir bulan
+ *   itu) atau pada hari terakhir bulan bila `lastDayOfMonth`.
+ * Semua perhitungan dalam `timezone` aturan (IANA); `startsAt`
+ * adalah jangkar: slot pertama DAN jam dinding semua slot.
+ */
+export const BroadcastRecurrenceFrequencySchema = z.enum([
+  "daily",
+  "weekly",
+  "monthly",
+]);
+export type BroadcastRecurrenceFrequency = z.infer<
+  typeof BroadcastRecurrenceFrequencySchema
+>;
+
+/**
+ * Status aturan berulang. active = penyapu memproses slot jatuh
+ * tempo; paused = slot dicatat skipped `rule_paused` (tidak lahir,
+ * tidak hilang diam-diam); completed = kondisi berhenti tercapai
+ * (terminal); cancelled = dihentikan pemilik (terminal).
+ */
+export const BroadcastRecurrenceStatusSchema = z.enum([
+  "active",
+  "paused",
+  "completed",
+  "cancelled",
+]);
+export type BroadcastRecurrenceStatus = z.infer<
+  typeof BroadcastRecurrenceStatusSchema
+>;
+
+/**
+ * Status satu baris ledger kejadian. claimed = sedang
+ * dimaterialisasi (transien; klaim basi diambil alih menjadi
+ * missed `claim_stale`); created = broadcast anak lahir;
+ * skipped = tidak lahir karena gerbang/aturan (lihat reason);
+ * missed = slot basi tidak ditembakkan (slot_expired/claim_stale).
+ */
+export const BroadcastRecurrenceOccurrenceStatusSchema = z.enum([
+  "claimed",
+  "created",
+  "skipped",
+  "missed",
+]);
+export type BroadcastRecurrenceOccurrenceStatus = z.infer<
+  typeof BroadcastRecurrenceOccurrenceStatusSchema
+>;
+
+/** Alasan ledger untuk kejadian skipped/missed (created/claimed: null). */
+export const BroadcastRecurrenceOccurrenceReasonSchema = z.enum([
+  // Aturan sedang dijeda saat slot jatuh tempo.
+  "rule_paused",
+  // Slot pertama kali terlihat penyapu sudah melewati ambang
+  // keterlambatan (1 jam) — broadcast basi tidak ditembakkan.
+  "slot_expired",
+  // Klaim materialisasi tidak pernah selesai (proses mati di tengah).
+  "claim_stale",
+  // Gerbang pembuatan/penjadwalan broadcast anak (kode core yang sama).
+  "channel_not_found",
+  "channel_disconnected",
+  "channel_unsupported",
+  "template_required",
+  "template_not_approved",
+  "segment_not_found",
+  "message_required",
+  "ab_incomplete",
+]);
+export type BroadcastRecurrenceOccurrenceReason = z.infer<
+  typeof BroadcastRecurrenceOccurrenceReasonSchema
+>;
+
+/** Pola pengulangan (dipakai buat/edit/pratinjau). */
+export const BroadcastRecurrencePatternSchema = z.object({
+  frequency: BroadcastRecurrenceFrequencySchema,
+  /** Setiap N hari/minggu/bulan (1..365). */
+  interval: z.number().int().min(1).max(365).optional(),
+  /** Hanya weekly: hari aktif 0=Minggu..6=Sabtu, tanpa duplikat. */
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  /** Hanya monthly: tanggal 1..31 (dijepit ke akhir bulan pendek). */
+  dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
+  /** Hanya monthly: slot di hari terakhir bulan (mengalahkan dayOfMonth). */
+  lastDayOfMonth: z.boolean().optional(),
+  /** Zona waktu IANA; kosong = zona waktu tenant. */
+  timezone: z.string().min(1).max(64).optional(),
+  /** Jangkar: slot pertama + jam dinding semua slot (ISO 8601). */
+  startsAt: z.string().datetime(),
+  /** Slot terakhir yang masih boleh lahir, inklusif (ISO 8601). */
+  endsAt: z.string().datetime().nullable().optional(),
+  /** Batas jumlah broadcast anak yang dibuat (1..10000). */
+  maxOccurrences: z.number().int().min(1).max(10000).nullable().optional(),
+});
+export type BroadcastRecurrencePattern = z.infer<
+  typeof BroadcastRecurrencePatternSchema
+>;
+
+/**
+ * Definisi broadcast untuk aturan berulang — SALAH SATU dari:
+ * (a) `sourceBroadcastId`: definisi DISALIN dari broadcast itu
+ *     (bidang definisi lain yang ikut dikirim menimpa salinannya), atau
+ * (b) definisi inline lengkap (bidang yang sama seperti buat
+ *     broadcast). Aturan menyimpan snapshot: perubahan pada broadcast
+ *     sumber sesudahnya tidak mengubah aturan.
+ */
+export const BroadcastRecurrenceDefinitionSchema = z.object({
+  sourceBroadcastId: z.string().uuid().optional(),
+  name: z.string().min(1).max(255).optional(),
+  channelAccountId: z.string().uuid().optional(),
+  messageText: z.string().min(1).max(4096).optional(),
+  whatsappTemplateId: z.string().uuid().nullable().optional(),
+  templateVariableSources: z
+    .array(z.string().min(1).max(64))
+    .max(25)
+    .optional(),
+  audienceFilter: BroadcastAudienceFilterSchema.optional(),
+  requireOptIn: z.boolean().optional(),
+  abSplitPercentB: z.number().int().min(1).max(99).nullable().optional(),
+  variantBMessageText: z.string().min(1).max(4096).nullable().optional(),
+  variantBWhatsappTemplateId: z.string().uuid().nullable().optional(),
+  variantBTemplateVariableSources: z
+    .array(z.string().min(1).max(64))
+    .max(25)
+    .optional(),
+});
+export type BroadcastRecurrenceDefinition = z.infer<
+  typeof BroadcastRecurrenceDefinitionSchema
+>;
+
+export const CreateBroadcastRecurrenceRequestSchema =
+  BroadcastRecurrenceDefinitionSchema.merge(
+    BroadcastRecurrencePatternSchema,
+  );
+export type CreateBroadcastRecurrenceRequest = z.infer<
+  typeof CreateBroadcastRecurrenceRequestSchema
+>;
+
+/**
+ * Edit aturan (hanya active/paused). Mengubah pola/jangkar
+ * menghitung ulang slot berikutnya dari pola baru; mengubah definisi
+ * memengaruhi broadcast anak BERIKUTNYA (yang sudah lahir tidak
+ * berubah). Bidang pola bersifat parsial terhadap pola tersimpan.
+ */
+export const UpdateBroadcastRecurrenceRequestSchema =
+  BroadcastRecurrenceDefinitionSchema.partial().merge(
+    BroadcastRecurrencePatternSchema.partial(),
+  );
+export type UpdateBroadcastRecurrenceRequest = z.infer<
+  typeof UpdateBroadcastRecurrenceRequestSchema
+>;
+
+/** Pratinjau slot berikutnya untuk pola yang BELUM disimpan. */
+export const BroadcastRecurrencePreviewRequestSchema =
+  BroadcastRecurrencePatternSchema.extend({
+    /** Berapa slot ke depan yang dihitung (bawaan server 5). */
+    count: z.number().int().min(1).max(24).optional(),
+    /**
+     * Hitung slot sesudah instan ini (ISO 8601); kosong = sesudah
+     * sekarang. Slot pertama yang memenuhi dimulai dari startsAt.
+     */
+    from: z.string().datetime().optional(),
+  });
+export type BroadcastRecurrencePreviewRequest = z.infer<
+  typeof BroadcastRecurrencePreviewRequestSchema
+>;
+
+export const BroadcastRecurrencePreviewResponseSchema = z.object({
+  /** Instan slot (ISO 8601, UTC) menaik; bisa lebih pendek dari count bila pola berakhir (endsAt/maxOccurrences tidak dihitung di sini — murni pola + endsAt). */
+  slots: z.array(z.string().datetime()),
+  /** Zona waktu efektif yang dipakai perhitungan. */
+  timezone: z.string(),
+});
+export type BroadcastRecurrencePreviewResponse = z.infer<
+  typeof BroadcastRecurrencePreviewResponseSchema
+>;
+
+export const BroadcastRecurrenceResponseSchema = z.object({
+  id: z.string().uuid(),
+  sourceBroadcastId: z.string().uuid().nullable(),
+  channelAccountId: z.string().uuid(),
+  provider: ChannelProviderSchema,
+  channelDisplayName: z.string().nullable(),
+  name: z.string(),
+  messageText: z.string(),
+  whatsappTemplateId: z.string().uuid().nullable(),
+  templateVariableSources: z.array(z.string()),
+  audienceFilter: BroadcastAudienceFilterSchema,
+  requireOptIn: z.boolean(),
+  abSplitPercentB: z.number().int().nullable(),
+  variantBMessageText: z.string().nullable(),
+  variantBWhatsappTemplateId: z.string().uuid().nullable(),
+  variantBTemplateVariableSources: z.array(z.string()),
+  frequency: BroadcastRecurrenceFrequencySchema,
+  interval: z.number().int(),
+  daysOfWeek: z.array(z.number().int()),
+  dayOfMonth: z.number().int().nullable(),
+  lastDayOfMonth: z.boolean(),
+  timezone: z.string(),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime().nullable(),
+  maxOccurrences: z.number().int().nullable(),
+  occurrencesCreated: z.number().int().nonnegative(),
+  status: BroadcastRecurrenceStatusSchema,
+  /** Slot berikutnya yang belum diproses; null pada aturan terminal. */
+  nextRunAt: z.string().datetime().nullable(),
+  createdByUserId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type BroadcastRecurrenceResponse = z.infer<
+  typeof BroadcastRecurrenceResponseSchema
+>;
+
+export const BroadcastRecurrenceListResponseSchema = z.object({
+  rules: z.array(BroadcastRecurrenceResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type BroadcastRecurrenceListResponse = z.infer<
+  typeof BroadcastRecurrenceListResponseSchema
+>;
+
+export const BroadcastRecurrenceListQuerySchema = z.object({
+  status: BroadcastRecurrenceStatusSchema.optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type BroadcastRecurrenceListQuery = z.infer<
+  typeof BroadcastRecurrenceListQuerySchema
+>;
+
+export const BroadcastRecurrenceOccurrenceResponseSchema = z.object({
+  id: z.string().uuid(),
+  ruleId: z.string().uuid(),
+  /** Instan slot (ISO 8601, UTC). */
+  slotAt: z.string().datetime(),
+  status: BroadcastRecurrenceOccurrenceStatusSchema,
+  reason: BroadcastRecurrenceOccurrenceReasonSchema.nullable(),
+  /** Broadcast anak yang lahir dari slot ini (hanya status created). */
+  broadcastId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type BroadcastRecurrenceOccurrenceResponse = z.infer<
+  typeof BroadcastRecurrenceOccurrenceResponseSchema
+>;
+
+export const BroadcastRecurrenceOccurrenceListResponseSchema = z.object({
+  occurrences: z.array(BroadcastRecurrenceOccurrenceResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type BroadcastRecurrenceOccurrenceListResponse = z.infer<
+  typeof BroadcastRecurrenceOccurrenceListResponseSchema
+>;
+
+export const BroadcastRecurrenceOccurrenceListQuerySchema = z.object({
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type BroadcastRecurrenceOccurrenceListQuery = z.infer<
+  typeof BroadcastRecurrenceOccurrenceListQuerySchema
+>;
