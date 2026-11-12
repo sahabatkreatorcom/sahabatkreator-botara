@@ -65,7 +65,23 @@ import type {
   CreateBroadcastRecurrenceRequest,
   CreateBroadcastRequest,
   CreatePostGroupRequest,
+  CreatePostQueueItemRequest,
+  CreatePostQueueSlotRequest,
+  CreatePostRecurrenceRuleRequest,
   CreatePostRequest,
+  MovePostQueueItemRequest,
+  PostQueueFiringListResponse,
+  PostQueueItemListResponse,
+  PostQueueItemResponse,
+  PostQueueSlotListResponse,
+  PostQueueSlotResponse,
+  PostRecurrenceOccurrenceListResponse,
+  PostRecurrencePreviewRequest,
+  PostRecurrencePreviewResponse,
+  PostRecurrenceRuleListResponse,
+  PostRecurrenceRuleResponse,
+  UpdatePostQueueItemRequest,
+  UpdatePostQueueSlotRequest,
   PostApprovalHistoryResponse,
   PostApprovalSettings,
   PostApprovalStatus,
@@ -3037,6 +3053,225 @@ export const api = {
       const qs = params.toString();
       return request<BroadcastRecurrenceOccurrenceListResponse>(
         `/api/tenants/${tenantId}/broadcast-recurrences/${ruleId}/occurrences${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+  },
+  postRecurrences: {
+    /** GET /api/tenants/:tenantId/post-recurrences → daftar aturan postingan berulang (S2). */
+    list(
+      tenantId: string,
+      query: { status?: string; cursor?: string; limit?: number } = {},
+    ): Promise<PostRecurrenceRuleListResponse> {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<PostRecurrenceRuleListResponse>(
+        `/api/tenants/${tenantId}/post-recurrences${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-recurrences → 201 aturan baru (owner/admin). */
+    create(
+      tenantId: string,
+      input: CreatePostRecurrenceRuleRequest,
+    ): Promise<PostRecurrenceRuleResponse> {
+      return request<PostRecurrenceRuleResponse>(
+        `/api/tenants/${tenantId}/post-recurrences`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-recurrences/preview → slot berikutnya pola yang belum disimpan. */
+    preview(
+      tenantId: string,
+      input: PostRecurrencePreviewRequest,
+    ): Promise<PostRecurrencePreviewResponse> {
+      return request<PostRecurrencePreviewResponse>(
+        `/api/tenants/${tenantId}/post-recurrences/preview`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-recurrences/:id/pause → jeda aturan (owner/admin). */
+    pause(
+      tenantId: string,
+      ruleId: string,
+    ): Promise<PostRecurrenceRuleResponse> {
+      return request<PostRecurrenceRuleResponse>(
+        `/api/tenants/${tenantId}/post-recurrences/${ruleId}/pause`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-recurrences/:id/resume → lanjutkan aturan (owner/admin). */
+    resume(
+      tenantId: string,
+      ruleId: string,
+    ): Promise<PostRecurrenceRuleResponse> {
+      return request<PostRecurrenceRuleResponse>(
+        `/api/tenants/${tenantId}/post-recurrences/${ruleId}/resume`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-recurrences/:id/cancel → batalkan aturan (owner/admin). */
+    cancel(
+      tenantId: string,
+      ruleId: string,
+    ): Promise<PostRecurrenceRuleResponse> {
+      return request<PostRecurrenceRuleResponse>(
+        `/api/tenants/${tenantId}/post-recurrences/${ruleId}/cancel`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/post-recurrences/:id/occurrences → ledger kejadian per slot. */
+    listOccurrences(
+      tenantId: string,
+      ruleId: string,
+      query: { cursor?: string; limit?: number } = {},
+    ): Promise<PostRecurrenceOccurrenceListResponse> {
+      const params = new URLSearchParams();
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<PostRecurrenceOccurrenceListResponse>(
+        `/api/tenants/${tenantId}/post-recurrences/${ruleId}/occurrences${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+  },
+  postQueue: {
+    /** GET /api/tenants/:tenantId/post-queue/items → antrean (queued = urutan tarik; pulled = riwayat). */
+    listItems(
+      tenantId: string,
+      query: { status?: string; cursor?: string; limit?: number } = {},
+    ): Promise<PostQueueItemListResponse> {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<PostQueueItemListResponse>(
+        `/api/tenants/${tenantId}/post-queue/items${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-queue/items → 201 item di ekor antrean (owner/admin). */
+    addItem(
+      tenantId: string,
+      input: CreatePostQueueItemRequest,
+    ): Promise<PostQueueItemResponse> {
+      return request<PostQueueItemResponse>(
+        `/api/tenants/${tenantId}/post-queue/items`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH /api/tenants/:tenantId/post-queue/items/:id → edit item queued (owner/admin). */
+    updateItem(
+      tenantId: string,
+      itemId: string,
+      input: UpdatePostQueueItemRequest,
+    ): Promise<PostQueueItemResponse> {
+      return request<PostQueueItemResponse>(
+        `/api/tenants/${tenantId}/post-queue/items/${itemId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE /api/tenants/:tenantId/post-queue/items/:id → hapus item queued (owner/admin). */
+    removeItem(tenantId: string, itemId: string): Promise<{ ok: boolean }> {
+      return request<{ ok: boolean }>(
+        `/api/tenants/${tenantId}/post-queue/items/${itemId}`,
+        { method: "DELETE" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-queue/items/:id/move → geser satu langkah (owner/admin). */
+    moveItem(
+      tenantId: string,
+      itemId: string,
+      input: MovePostQueueItemRequest,
+    ): Promise<PostQueueItemResponse> {
+      return request<PostQueueItemResponse>(
+        `/api/tenants/${tenantId}/post-queue/items/${itemId}/move`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/post-queue/slots → daftar slot rutin. */
+    listSlots(
+      tenantId: string,
+      query: { status?: string; cursor?: string; limit?: number } = {},
+    ): Promise<PostQueueSlotListResponse> {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<PostQueueSlotListResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-queue/slots → 201 slot baru (owner/admin). */
+    createSlot(
+      tenantId: string,
+      input: CreatePostQueueSlotRequest,
+    ): Promise<PostQueueSlotResponse> {
+      return request<PostQueueSlotResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH /api/tenants/:tenantId/post-queue/slots/:id → edit slot (owner/admin). */
+    updateSlot(
+      tenantId: string,
+      slotId: string,
+      input: UpdatePostQueueSlotRequest,
+    ): Promise<PostQueueSlotResponse> {
+      return request<PostQueueSlotResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots/${slotId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-queue/slots/:id/pause → jeda slot (owner/admin). */
+    pauseSlot(
+      tenantId: string,
+      slotId: string,
+    ): Promise<PostQueueSlotResponse> {
+      return request<PostQueueSlotResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots/${slotId}/pause`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-queue/slots/:id/resume → lanjutkan slot (owner/admin). */
+    resumeSlot(
+      tenantId: string,
+      slotId: string,
+    ): Promise<PostQueueSlotResponse> {
+      return request<PostQueueSlotResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots/${slotId}/resume`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/post-queue/slots/:id/cancel → batalkan slot (owner/admin). */
+    cancelSlot(
+      tenantId: string,
+      slotId: string,
+    ): Promise<PostQueueSlotResponse> {
+      return request<PostQueueSlotResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots/${slotId}/cancel`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/post-queue/slots/:id/firings → ledger tembakan slot. */
+    listFirings(
+      tenantId: string,
+      slotId: string,
+      query: { cursor?: string; limit?: number } = {},
+    ): Promise<PostQueueFiringListResponse> {
+      const params = new URLSearchParams();
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<PostQueueFiringListResponse>(
+        `/api/tenants/${tenantId}/post-queue/slots/${slotId}/firings${qs ? `?${qs}` : ""}`,
         { method: "GET" },
       );
     },

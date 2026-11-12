@@ -24,6 +24,8 @@ import {
   localDateTimeValue,
   type ComposerFormState,
 } from "./postsComposer";
+import { PostRecurrenceSection } from "./posts/PostRecurrenceSection";
+import { PostQueueSection } from "./posts/PostQueueSection";
 
 /**
  * Halaman Jadwal Konten (Fase 23, diperluas Gelombang 0).
@@ -969,6 +971,22 @@ export function PostsPage({ t, locale }: PostsPageProps) {
             />
           )}
       </section>
+
+      <PostRecurrenceSection
+        t={t}
+        locale={locale}
+        tenantId={tenantId}
+        canManage={canManage}
+        approvalRequired={approvalRequired}
+      />
+      <PostQueueSection
+        t={t}
+        locale={locale}
+        tenantId={tenantId}
+        canManage={canManage}
+        approvalRequired={approvalRequired}
+        targets={targets}
+      />
     </div>
   );
 }
