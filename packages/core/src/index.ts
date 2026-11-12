@@ -952,6 +952,14 @@ export {
   type PlatformPublicConfigKey,
 } from "./platform-settings";
 export {
+  R2ObjectStoreError,
+  createR2ObjectStore,
+  resolveR2ObjectStore,
+  type R2ObjectData,
+  type R2ObjectStore,
+  type R2ObjectStoreConfig,
+} from "./r2-storage";
+export {
   CONSOLE_WINDOW_HOURS,
   getPlatformOverview,
   listPlatformTenants,
