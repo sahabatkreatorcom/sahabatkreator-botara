@@ -990,6 +990,22 @@ export {
   type DeleteNoteResult,
 } from "./conversation-notes";
 export {
+  listContactNotes,
+  createContactNote,
+  deleteContactNote,
+  type ContactNoteWithAuthor,
+  type CreateContactNoteResult,
+  type DeleteContactNoteResult,
+} from "./contact-notes";
+export {
+  getContactTimeline,
+  CONTACT_TIMELINE_DEFAULT_LIMIT,
+  type ContactTimeline,
+  type ContactTimelineEvent,
+  type ContactTimelineEventKind,
+  type ContactTimelineDetail,
+} from "./contact-timeline";
+export {
   listTeamMembers,
   listInvitations,
   createInvitation,
