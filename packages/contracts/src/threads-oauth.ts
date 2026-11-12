@@ -50,6 +50,8 @@ export type ThreadsOAuthStartResponse = z.infer<
 export const ThreadsOAuthInfoResponseSchema = z.object({
   /** Redirect URI yang harus didaftarkan persis di aplikasi Threads. */
   oauthRedirectUri: z.string(),
+  /** URL webhook yang didaftarkan di pengaturan webhook aplikasi Threads: `{publicBaseUrl}/api/webhooks/threads`. */
+  webhookUrl: z.string(),
   /** App ID aplikasi Threads platform (identifier publik); null bila belum diatur. */
   appId: z.string().nullable(),
   appIdConfigured: z.boolean(),

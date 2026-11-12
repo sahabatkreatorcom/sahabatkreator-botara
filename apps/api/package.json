@@ -16,6 +16,7 @@
     "verify:tiktok-oauth": "tsx scripts/verify-tiktok-oauth.ts",
     "verify:tiktok-avatar-r2": "tsx scripts/verify-tiktok-avatar-r2.ts",
     "verify:tiktok-webhook": "tsx scripts/verify-tiktok-webhook.ts",
+    "verify:threads-webhook": "tsx scripts/verify-threads-webhook.ts",
     "verify:linkedin-oauth": "tsx scripts/verify-linkedin-oauth.ts",
     "verify:pinterest-oauth": "tsx scripts/verify-pinterest-oauth.ts",
     "verify:pinterest-boards": "tsx scripts/verify-pinterest-boards.ts",

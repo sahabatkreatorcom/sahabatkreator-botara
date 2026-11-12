@@ -127,6 +127,12 @@ export function ThreadsOAuthStepBlock({
           <div className="mt-0.5 break-all font-mono text-xs text-ink">
             {info.oauthRedirectUri}
           </div>
+          <div className="mt-2 text-xs text-muted">
+            {t("channels.threadsWebhookUrlLabel")}
+          </div>
+          <div className="mt-0.5 break-all font-mono text-xs text-ink">
+            {info.webhookUrl}
+          </div>
         </div>
       ) : null}
       <button

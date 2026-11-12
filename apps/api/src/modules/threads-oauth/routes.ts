@@ -212,6 +212,7 @@ export function createThreadsOAuthRoutes(
     const config = await resolveThreadsConfig();
     const body = ThreadsOAuthInfoResponseSchema.parse({
       oauthRedirectUri: redirectUri,
+      webhookUrl: `${webBase}/api/webhooks/threads`,
       appId: config.appId,
       appIdConfigured: Boolean(config.appId),
       appSecretConfigured: Boolean(config.appSecret),

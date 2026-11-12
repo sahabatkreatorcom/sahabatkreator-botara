@@ -46,6 +46,7 @@ import { createMetaOAuthRoutes } from "./modules/meta-oauth/routes";
 import { createThreadsOAuthRoutes } from "./modules/threads-oauth/routes";
 import { createTikTokOAuthRoutes } from "./modules/tiktok-oauth/routes";
 import { createTikTokWebhookRoutes } from "./modules/tiktok-webhook/routes";
+import { createThreadsWebhookRoutes } from "./modules/threads-webhook/routes";
 import { createLinkedInOAuthRoutes } from "./modules/linkedin-oauth/routes";
 import { createPinterestOAuthRoutes } from "./modules/pinterest-oauth/routes";
 import { createBlueskyConnectRoutes } from "./modules/bluesky-connect/routes";
@@ -640,6 +641,17 @@ routes.route(
 // client secret (resolver panel); consumer pencabutan otorisasi
 // (akun ditandai disconnected) + pencatatan event resmi lainnya.
 routes.route("/", createTikTokWebhookRoutes(authBundle, { platform: platformOptions }));
+// Webhook Threads tingkat platform: GET|POST /webhooks/threads
+// (publik /api/webhooks/threads) — handshake threads_webhook_verify_
+// token + POST bertanda tangan threads_app_secret (kredensial aplikasi
+// Threads sendiri, resolver panel); consumer = pencatatan log.
+routes.route(
+  "/",
+  createThreadsWebhookRoutes(authBundle, {
+    platform: platformOptions,
+    verifyToken: env.THREADS_WEBHOOK_VERIFY_TOKEN,
+  }),
+);
 // Modul LinkedIn OAuth Connect (gelombang Semua OAuth) —
 // "Hubungkan dengan LinkedIn" untuk profil pribadi: start ber-state
 // sekali pakai + callback tunggal publik /oauth/linkedin/callback +
