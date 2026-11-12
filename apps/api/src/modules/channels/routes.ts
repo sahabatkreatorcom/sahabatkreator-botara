@@ -330,10 +330,13 @@ async function resolveOAuthProfilePictureUrl(
       return profile.profilePictureUrl;
     }
     case "tiktok": {
-      const info = await new TikTokClient({
+      // Profil berjenjang yang sama dengan connect: user info
+      // Login Kit lebih dulu, lalu creator_info (scope video.publish)
+      // sebagai cadangan avatar bila scope profil belum disetujui.
+      const resolution = await new TikTokClient({
         baseUrl: opts.tiktokApiBase,
-      }).getTikTokUserInfo(credential);
-      return info.avatarUrl;
+      }).getTikTokProfile(credential);
+      return resolution.profile?.avatarUrl ?? null;
     }
     case "linkedin": {
       const info = await new LinkedInClient({

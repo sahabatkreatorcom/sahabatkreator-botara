@@ -40,10 +40,12 @@ import { resolveTenantForUser } from "../tenants/guard";
  * `https://www.tiktok.com/v2/auth/authorize/` (client_key = Client
  * Key aplikasi platform, scope `user.info.basic` + `video.publish`)
  * → callback menukar code di `POST /v2/oauth/token/` → access token
- * (±24 jam) + refresh token (±365 hari) + open_id → user info
- * (`GET /v2/user/info/`) untuk username/nama tampil → akun channel
- * `tiktok` disimpan (KEDUA token TERENKRIPSI envelope
- * CHANNEL_TOKEN_SECRET; external_id = open_id). Sesudah itu
+ * (±24 jam) + refresh token (±365 hari) + open_id → profil berjenjang
+ * (user info `GET /v2/user/info/` lebih dulu; bila gagal, info
+ * kreator posting dari `creator_info/query/`) untuk username/nama
+ * tampil/avatar → akun channel `tiktok` disimpan (KEDUA token
+ * TERENKRIPSI envelope CHANNEL_TOKEN_SECRET; external_id = open_id).
+ * Sesudah itu
  * sasaran TikTok muncul otomatis di /posts lewat materialisasi
  * listPostTargets — akun dari connect ini berbentuk persis akun
  * Gelombang 4.
@@ -64,13 +66,16 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   Satu penanda peringatan khusus: bila user info ditolak provider
  *   KHUSUSNYA karena scope (`scope_not_authorized` — izin
  *   `user.info.basic`/Login Kit belum disetujui untuk aplikasi
- *   TikTok di portal developer), akun TETAP terhubung fail-soft
+ *   TikTok di portal developer) DAN cadangan creator_info juga
+ *   tidak menghasilkan nama tampil, akun TETAP terhubung fail-soft
  *   tetapi kepulangannya `?tiktok_oauth=connected_profile_incomplete`
  *   agar Channels menampilkan banner peringatan yang jujur (nama &
  *   foto profil tidak terbaca + cara memperbaikinya), bukan sukses
- *   polos yang menyembunyikan akun tanpa nama. Menghubungkan ulang
- *   sesudah scope disetujui mengisi profil yang kosong itu (lihat
- *   cabang akun-sudah-terhubung di callback).
+ *   polos yang menyembunyikan akun tanpa nama. Bila creator_info
+ *   berhasil, akun tampil normal dan tidak ada banner — sumber
+ *   profil dicatat di log server tanpa token. Menghubungkan ulang
+ *   mengisi profil yang kosong dari resolusi berjenjang terbaru
+ *   (lihat cabang akun-sudah-terhubung di callback).
  * - Access token yang berumur ±24 jam BUKAN masalah operator lagi:
  *   worker lifecycle menyegarkannya dari refresh token via grant
  *   `refresh_token` sebelum kedaluwarsa (lihat worker
@@ -286,14 +291,17 @@ export function createTikTokOAuthRoutes(
     }
     if (!opts.channelTokenSecret) return fail("TIKTOK_OAUTH_NOT_CONFIGURED");
 
-    // Tukar code → token + open_id → user info (username/nama).
+    // Tukar code → token + open_id → profil (username/nama/avatar).
     // Hanya label tahap + kode/pesan resmi provider yang dicatat;
-    // code, token, dan secret TIDAK PERNAH dicatat. User info yang
-    // gagal TIDAK menggagalkan connect bila token response sudah
-    // membawa open_id (identitas akun) — profil menyusul kosong.
-    // Kegagalan KHUSUS scope (`scope_not_authorized`) dicatat
-    // terpisah: akun tetap terhubung, tetapi kepulangan membawa
-    // penanda peringatan profil-belum-lengkap (lihat header modul).
+    // code, token, dan secret TIDAK PERNAH dicatat. Profil dibaca
+    // berjenjang oleh TikTokClient: user info Login Kit lebih dulu,
+    // lalu creator_info posting (`video.publish`) sebagai cadangan.
+    // Kedua sumber gagal TIDAK menggagalkan connect bila token
+    // response sudah membawa open_id (identitas akun) — profil
+    // menyusul kosong. Kegagalan user info KHUSUS scope
+    // (`scope_not_authorized`) dicatat terpisah: bila profil hasil
+    // akhirnya tetap tanpa nama, kepulangan membawa penanda
+    // peringatan profil-belum-lengkap (lihat header modul).
     let openId: string;
     let accessToken: string;
     let refreshToken: string | null;
@@ -317,20 +325,28 @@ export function createTikTokOAuthRoutes(
       accessToken = tokens.accessToken;
       refreshToken = tokens.refreshToken;
       expiresInSeconds = tokens.expiresInSeconds;
-      try {
-        const info = await client.getTikTokUserInfo(tokens.accessToken);
-        username = info.username;
-        displayName = info.displayName;
-        avatarUrl = info.avatarUrl;
-      } catch (infoErr) {
-        profileScopeDenied =
-          infoErr instanceof TikTokApiError &&
-          infoErr.providerCode === "scope_not_authorized";
-        const detail =
-          infoErr instanceof TikTokApiError
-            ? `${infoErr.providerCode || infoErr.status}: ${infoErr.description}`
-            : "non-api error";
-        console.error(`[tiktok-oauth] user info gagal (${detail}) — lanjut tanpa profil`);
+      const resolution = await client.getTikTokProfile(tokens.accessToken);
+      if (resolution.profile) {
+        username = resolution.profile.username;
+        displayName = resolution.profile.displayName;
+        avatarUrl = resolution.profile.avatarUrl;
+      }
+      profileScopeDenied =
+        resolution.userInfoError?.providerCode === "scope_not_authorized";
+      if (resolution.userInfoError) {
+        const detail = `${resolution.userInfoError.providerCode || resolution.userInfoError.status}: ${resolution.userInfoError.description}`;
+        if (resolution.profile?.source === "creator_info") {
+          console.error(
+            `[tiktok-oauth] user info gagal (${detail}) — profil dilengkapi dari creator_info`,
+          );
+        } else {
+          const fallbackDetail = resolution.creatorInfoError
+            ? `; creator_info juga gagal (${resolution.creatorInfoError.providerCode || resolution.creatorInfoError.status}: ${resolution.creatorInfoError.description})`
+            : "; creator_info tidak memberi profil yang dapat dipakai";
+          console.error(
+            `[tiktok-oauth] user info gagal (${detail})${fallbackDetail} — lanjut tanpa profil`,
+          );
+        }
       }
     } catch (err) {
       const detail =
@@ -372,13 +388,14 @@ export function createTikTokOAuthRoutes(
       // worker lifecycle, bukan oleh login ulang.
       //
       // SATU pengecualian yang disengaja: PROFIL yang masih kosong
-      // dilengkapi dari user info kali ini. Inilah jalur perbaikan
-      // akun yang dulu terhubung saat scope profil belum diberikan
-      // (nama kosong + avatar placeholder): sesudah pemilik
-      // mengaktifkan scope `user.info.basic` di portal TikTok,
-      // menghubungkan ulang akun yang sama mengisi nama tampil
-      // (patch core hanya mengisi yang kosong) + mengambil avatar,
-      // tanpa baris baru dan tanpa menyentuh kredensial tersimpan.
+      // dilengkapi dari resolusi profil berjenjang kali ini. Inilah
+      // jalur perbaikan akun yang dulu terhubung saat user info
+      // gagal (nama kosong + avatar placeholder): menghubungkan
+      // ulang akun yang sama mengisi nama tampil (patch core hanya
+      // mengisi yang kosong) + mengambil avatar — dari user info
+      // bila scope-nya sudah disetujui, atau dari creator_info
+      // posting yang tidak bergantung pada scope tersebut — tanpa
+      // baris baru dan tanpa menyentuh kredensial tersimpan.
       let resultingDisplayName: string | null | undefined;
       if (displayName !== null || username !== null) {
         const row = await updateTikTokChannelAccountCredentials(
@@ -402,8 +419,8 @@ export function createTikTokOAuthRoutes(
         );
       }
       if (resultingDisplayName === undefined) {
-        // User info kali ini tidak membawa profil sama sekali
-        // (kasus scope ditolak): putuskan penanda peringatan dari
+        // Resolusi profil kali ini tidak membawa profil sama sekali
+        // (kedua sumber gagal): putuskan penanda peringatan dari
         // nama yang TERSIMPAN — akun yang namanya sudah terisi dari
         // connect sebelumnya tetap sukses polos.
         const stored = await getChannelAccount(
@@ -478,10 +495,11 @@ export function createTikTokOAuthRoutes(
       { channelAccountId: rowId, provider: "tiktok", method: "oauth" },
     );
 
-    // Foto profil: `avatar_url` dari user info diunduh & disimpan
-    // mengikuti mekanisme avatar platform lain (profile_photos) —
-    // fail-soft dengan batas lunak; kegagalan tidak menggagalkan
-    // connect dan backfill daftar channel mencoba lagi nanti.
+    // Foto profil: URL avatar dari sumber profil yang berhasil
+    // (user info atau creator_info) diunduh & disimpan mengikuti
+    // mekanisme avatar platform lain (profile_photos) — fail-soft
+    // dengan batas lunak; kegagalan tidak menggagalkan connect dan
+    // backfill daftar channel mencoba lagi nanti.
     await awaitPhotoSoftDeadline(
       fetchAndStoreProfilePhotoFromUrl(bundle.db, {
         tenantId: state.tenantId,

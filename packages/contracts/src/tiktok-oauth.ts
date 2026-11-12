@@ -14,14 +14,24 @@ import { z } from "zod";
 // Threads): login TikTok selalu menghasilkan TEPAT SATU akun —
 // kreator yang memberi izin — jadi tidak ada pemilih aset: callback
 // menukar code di token endpoint Login Kit
-// (`POST /v2/oauth/token/`, grant authorization_code) → user info
-// (`GET /v2/user/info/`) untuk open_id + username, lalu langsung
+// (`POST /v2/oauth/token/`, grant authorization_code) → open_id dari
+// respons token + profil berjenjang dua sumber, lalu langsung
 // membuat / menghidupkan channel_accounts provider `tiktok` dan
 // me-redirect browser kembali ke /channels dengan penanda hasil:
 //   ?tiktok_oauth=connected           berhasil
+//   ?tiktok_oauth=connected_profile_incomplete
+//                                     berhasil, tetapi profil akhir
+//                                     tetap kosong (banner peringatan)
 //   ?tiktok_oauth_error=<KODE>        gagal (kode = errors.* di i18n)
 // Scopes dialog: user.info.basic + video.publish (profil + penerbitan
-// content schedule).
+// content schedule). Profil TikTok berjenjang: (1) user info
+// (`GET /v2/user/info/`, scope user.info.basic) sebagai sumber utama;
+// (2) creator_info Content Posting (`POST
+// /v2/post/publish/creator_info/query/`, scope video.publish) sebagai
+// cadangan username/nickname/avatar bila sumber utama ditolak —
+// persetujuan produk Login Kit dapat tertinggal dari scope inti
+// penerbitan. Penanda profil-belum-lengkap hanya dipakai bila kedua
+// sumber tidak menghasilkan nama tampil.
 //
 // Access token TikTok hanya berumur ±24 jam; connect menyimpan
 // refresh token (±365 hari) terenkripsi (migrasi 0022) dan worker

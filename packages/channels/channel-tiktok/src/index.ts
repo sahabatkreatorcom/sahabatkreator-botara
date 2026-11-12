@@ -213,12 +213,43 @@ export interface TikTokUserInfo {
 
 export interface TikTokCreatorInfo {
   creatorUsername: string | null;
+  /** Nama tampil kreator dari endpoint posting (`creator_nickname`). */
+  creatorNickname: string | null;
+  /** URL avatar kreator dari endpoint posting (`creator_avatar_url`). */
+  creatorAvatarUrl: string | null;
   /** Level privasi yang diizinkan untuk akun ini SAAT INI. */
   privacyLevelOptions: string[];
   commentDisabled: boolean;
   duetDisabled: boolean;
   stitchDisabled: boolean;
   maxVideoPostDurationSec: number | null;
+}
+
+/** Sumber profil TikTok: endpoint profil resmi lebih dulu, info kreator posting sebagai cadangan. */
+export type TikTokProfileSource = "user_info" | "creator_info";
+
+/**
+ * Profil tampilan TikTok yang sudah dinormalisasi dari salah satu
+ * sumber resmi. `creator_info` memakai scope inti penerbitan
+ * (`video.publish`), sedangkan `user_info` memerlukan persetujuan
+ * produk/scope Login Kit `user.info.basic` secara terpisah.
+ */
+export interface TikTokProfile {
+  username: string | null;
+  displayName: string | null;
+  avatarUrl: string | null;
+  source: TikTokProfileSource;
+}
+
+/**
+ * Hasil resolusi profil berjenjang. Error dipertahankan per sumber
+ * agar pemanggil dapat membedakan penolakan scope Login Kit dari
+ * kegagalan biasa tanpa menebak dari profil kosong.
+ */
+export interface TikTokProfileResolution {
+  profile: TikTokProfile | null;
+  userInfoError: TikTokApiError | null;
+  creatorInfoError: TikTokApiError | null;
 }
 
 export type TikTokPublishStatusName =
@@ -463,6 +494,71 @@ export class TikTokClient {
     };
   }
 
+  /**
+   * Resolusi profil tampilan berjenjang (DUA sumber resmi):
+   * 1. `GET /v2/user/info/` — sumber utama, tetapi bergantung pada
+   *    scope/produk Login Kit `user.info.basic` yang persetujuannya
+   *    terpisah dari scope penerbitan;
+   * 2. `POST /v2/post/publish/creator_info/query/` — cadangan dengan
+   *    scope inti `video.publish`; endpoint yang sama mengembalikan
+   *    username, nickname, dan avatar kreator.
+   *
+   * Metode ini tidak melempar untuk kegagalan API kedua sumber:
+   * hasil membawa profil (bila salah satu sumber memberi field yang
+   * dapat dipakai) serta error masing-masing agar jalur connect
+   * dapat tetap fail-soft dan memutuskan banner scope secara jujur.
+   */
+  async getTikTokProfile(
+    accessToken: string,
+  ): Promise<TikTokProfileResolution> {
+    let userInfoError: TikTokApiError | null = null;
+    try {
+      const info = await this.getTikTokUserInfo(accessToken);
+      return {
+        profile: {
+          username: info.username,
+          displayName: info.displayName,
+          avatarUrl: info.avatarUrl,
+          source: "user_info",
+        },
+        userInfoError: null,
+        creatorInfoError: null,
+      };
+    } catch (err) {
+      userInfoError =
+        err instanceof TikTokApiError
+          ? err
+          : new TikTokApiError(0, "", "non_api_error");
+    }
+
+    try {
+      const creator = await this.queryCreatorInfo(accessToken);
+      const profile: TikTokProfile = {
+        username: creator.creatorUsername,
+        displayName: creator.creatorNickname,
+        avatarUrl: creator.creatorAvatarUrl,
+        source: "creator_info",
+      };
+      return {
+        profile:
+          profile.username || profile.displayName || profile.avatarUrl
+            ? profile
+            : null,
+        userInfoError,
+        creatorInfoError: null,
+      };
+    } catch (err) {
+      return {
+        profile: null,
+        userInfoError,
+        creatorInfoError:
+          err instanceof TikTokApiError
+            ? err
+            : new TikTokApiError(0, "", "non_api_error"),
+      };
+    }
+  }
+
   /** Info kreator — WAJIB dipanggil sebelum init (aturan platform). */
   async queryCreatorInfo(accessToken: string): Promise<TikTokCreatorInfo> {
     const data = await this.request(
@@ -477,6 +573,8 @@ export class TikTokClient {
       : [];
     return {
       creatorUsername: asString(data.creator_username),
+      creatorNickname: asString(data.creator_nickname),
+      creatorAvatarUrl: asString(data.creator_avatar_url),
       privacyLevelOptions: options,
       commentDisabled: data.comment_disabled === true,
       duetDisabled: data.duet_disabled === true,
