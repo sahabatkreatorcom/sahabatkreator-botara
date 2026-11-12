@@ -52,7 +52,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  * Modul Meta OAuth Connect (Fase 7D) — "Lanjutkan dengan Facebook".
  *
  *   POST /tenants/:tenantId/meta-oauth/start                 buat state + URL dialog
- *   GET  /meta/oauth/callback                                callback TUNGGAL platform (publik)
+ *   GET  /oauth/meta/callback                                callback TUNGGAL platform (publik)
  *   GET  /tenants/:tenantId/meta-oauth/sessions/:sessionId    aset hasil login (tanpa token)
  *   POST /tenants/:tenantId/meta-oauth/sessions/:sessionId/complete  hubungkan aset terpilih
  *   GET  /tenants/:tenantId/channels/meta-oauth-info         ketersediaan OAuth per provider
@@ -376,7 +376,7 @@ export function createMetaOAuthRoutes(
     app.get("/tenants/:tenantId/channels/meta-oauth-info", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
-    app.get("/meta/oauth/callback", (c) =>
+    app.get("/oauth/meta/callback", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -388,7 +388,7 @@ export function createMetaOAuthRoutes(
   });
 
   const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
-  const redirectUri = `${webBase}/api/meta/oauth/callback`;
+  const redirectUri = `${webBase}/api/oauth/meta/callback`;
 
   /** Konfigurasi OAuth efektif (panel → env) + ketersediaan per provider. */
   async function resolveOAuthConfig() {
@@ -569,7 +569,7 @@ export function createMetaOAuthRoutes(
   // Callback TUNGGAL (publik; identitas dari state bertanda tangan).
   // Semua kegagalan → redirect error berkode TANPA membuat state apa pun.
   // -------------------------------------------------------------------------
-  app.get("/meta/oauth/callback", async (c) => {
+  app.get("/oauth/meta/callback", async (c) => {
     const fail = (code: string) =>
       c.redirect(`${webBase}/channels?meta_oauth_error=${code}`, 302);
 

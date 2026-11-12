@@ -565,7 +565,7 @@ routes.route(
     // Identitas R2 tidak dioper lagi: modul admin me-resolve-nya per
     // request lewat `resolveR2Identity` (panel → env → bawaan kode).
     // Fase 7D: redirect URI OAuth tunggal ditampilkan read-only di panel.
-    metaOAuthRedirectUri: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}/api/meta/oauth/callback`,
+    metaOAuthRedirectUri: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}/api/oauth/meta/callback`,
     // Fase 11B: base URL API Resend untuk probe uji koneksi panel.
     resendApiBase: env.RESEND_API_BASE,
     // Redirect URI OAuth Google KANONIS per layanan ditampilkan
@@ -579,7 +579,7 @@ routes.route(
   }),
 );
 // Modul Meta OAuth Connect (Fase 7D) — "Lanjutkan dengan Facebook":
-// start ber-sesi + callback tunggal publik /meta/oauth/callback + sesi
+// start ber-sesi + callback tunggal publik /oauth/meta/callback + sesi
 // aset + info ketersediaan. State HMAC sekali pakai & sesi terenkripsi
 // disimpan di Redis platform (fallback in-memory tanpa REDIS_URL).
 routes.route(
