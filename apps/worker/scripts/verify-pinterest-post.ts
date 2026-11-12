@@ -1,15 +1,22 @@
 /**
  * Verifikasi penerbitan Pinterest melawan fake Pinterest API v5.
  *
- * Pinterest menerbitkan satu Pin per post ke board pertama akun:
- * adapter membaca daftar board, memutuskan sumber media (JPEG/PNG
- * sebagai `image_base64` dari biner privat; format lain sebagai
+ * Pinterest menerbitkan satu Pin per post ke board tujuan akun:
+ * pilihan pemilik dari pemilih board Channels bila tersimpan
+ * (resolvePinBoard — pilihan yang sudah hilang di Pinterest jatuh
+ * ke board pertama dengan penanda preferredMissing), selain itu
+ * board pertama akun. Adapter membaca daftar board (berpaginasi
+ * bookmark), memutuskan sumber media (JPEG/PNG sebagai
+ * `image_base64` dari biner privat; format lain sebagai
  * `image_url` publik), lalu membuat Pin. Harness ini membuktikan
  * bagian yang menjadi tanggung jawab klien di paket
  * channel-pinterest: pemetaan payload (judul dari title post,
- * deskripsi dari caption, tautan dari URL pertama caption), resolusi
- * board bawaan, bentuk kedua media_source, dan pemetaan error —
- * tanpa jaringan atau kredensial nyata, dan tanpa token bocor.
+ * deskripsi dari caption, tautan dari URL pertama caption),
+ * resolusi board (bawaan + pilihan + paginasi), pembuatan board
+ * (POST /v5/boards), bentuk kedua media_source, dan pemetaan
+ * error — tanpa jaringan atau kredensial nyata, dan tanpa token
+ * bocor. Bukti endpoint pemilih + penyimpanan pilihan ada di
+ * verify:pinterest-boards (apps/api).
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:pinterest-post
  */
@@ -154,6 +161,111 @@ async function main(): Promise<void> {
     check(
       "board: akun tanpa board → null (adapter memetakan pinterest_board_missing)",
       boardId === null,
+    );
+  }
+
+  // --- Pemilih board: paginasi + resolusi pilihan -------------------------
+  const twoPageBoards = (call: Captured) =>
+    call.url.includes("bookmark=")
+      ? jsonResponse({ items: [{ id: "board-3", name: "Promo" }] })
+      : jsonResponse({
+          items: [
+            { id: "board-1", name: "Produk" },
+            { id: "board-2", name: "Inspirasi" },
+          ],
+          bookmark: "hal-2",
+        });
+  {
+    const captured: Captured[] = [];
+    const client = new PinterestClient({
+      baseUrl: "https://pinterest.fake",
+      fetchImpl: fakeFetch(captured, twoPageBoards),
+    });
+    const boards = await client.listBoards(ACCESS_TOKEN);
+    check(
+      "board: daftar mengikuti paginasi bookmark sampai habis",
+      boards.map((b) => b.id).join(",") === "board-1,board-2,board-3" &&
+        captured.length === 2 &&
+        captured[1]!.url.includes("bookmark=hal-2"),
+    );
+  }
+  {
+    const client = new PinterestClient({
+      baseUrl: "https://pinterest.fake",
+      fetchImpl: fakeFetch([], twoPageBoards),
+    });
+    const chosen = await client.resolvePinBoard(ACCESS_TOKEN, "board-3");
+    check(
+      "board: pilihan tersimpan yang masih ada menang (walau di halaman 2)",
+      chosen.boardId === "board-3" &&
+        chosen.source === "chosen" &&
+        chosen.preferredMissing === false,
+    );
+    const missing = await client.resolvePinBoard(ACCESS_TOKEN, "board-hilang");
+    check(
+      "board: pilihan sudah dihapus → board pertama + preferredMissing (pemanggil mencatat)",
+      missing.boardId === "board-1" &&
+        missing.source === "first" &&
+        missing.preferredMissing === true,
+    );
+    const none = await client.resolvePinBoard(ACCESS_TOKEN, null);
+    check(
+      "board: tanpa pilihan → board pertama, preferredMissing false",
+      none.boardId === "board-1" &&
+        none.source === "first" &&
+        none.preferredMissing === false,
+    );
+  }
+  {
+    const client = new PinterestClient({
+      baseUrl: "https://pinterest.fake",
+      fetchImpl: fakeFetch([], () => jsonResponse({ items: [] })),
+    });
+    const res = await client.resolvePinBoard(ACCESS_TOKEN, "board-9");
+    check(
+      "board: akun tanpa board + ada pilihan → boardId null, preferredMissing true",
+      res.boardId === null && res.source === "missing" && res.preferredMissing,
+    );
+  }
+
+  // --- Buat board (POST /v5/boards) -----------------------------------------
+  {
+    const captured: Captured[] = [];
+    const client = new PinterestClient({
+      baseUrl: "https://pinterest.fake",
+      fetchImpl: fakeFetch(captured, () =>
+        jsonResponse({ id: "board-baru", name: "Katalog Baru" }, 201),
+      ),
+    });
+    const created = await client.createBoard(ACCESS_TOKEN, {
+      name: "Katalog Baru",
+      description: "Produk terbaru",
+      privacy: "PROTECTED",
+    });
+    check(
+      "buat board: POST /v5/boards membawa name + description + privacy; hasil terbaca",
+      created.id === "board-baru" &&
+        created.name === "Katalog Baru" &&
+        captured[0]!.method === "POST" &&
+        captured[0]!.url === "https://pinterest.fake/v5/boards" &&
+        captured[0]!.json?.name === "Katalog Baru" &&
+        captured[0]!.json?.description === "Produk terbaru" &&
+        captured[0]!.json?.privacy === "PROTECTED",
+    );
+  }
+  {
+    const captured: Captured[] = [];
+    const client = new PinterestClient({
+      baseUrl: "https://pinterest.fake",
+      fetchImpl: fakeFetch(captured, () =>
+        jsonResponse({ id: "board-polos", name: "Polos" }, 201),
+      ),
+    });
+    await client.createBoard(ACCESS_TOKEN, { name: "Polos", description: "  " });
+    check(
+      "buat board: description kosong diabaikan; privacy bawaan PUBLIC",
+      captured[0]!.json?.description === undefined &&
+        captured[0]!.json?.privacy === "PUBLIC",
     );
   }
 
