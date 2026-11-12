@@ -101,11 +101,15 @@ export type CreateSequenceAutomationRequest = z.infer<
 >;
 
 /**
- * Aturan komentar (Fase 10B): pemicu keyword yang sama, tetapi diterapkan
- * pada TEKS KOMENTAR publik di SATU akun Instagram/Messenger
- * (channelAccountId). Aksi dapat dikombinasikan (minimal satu aktif):
+ * Aturan komentar (Fase 10B; G7 menambah Threads): pemicu keyword yang
+ * sama, tetapi diterapkan pada TEKS KOMENTAR publik di SATU akun
+ * Instagram/Messenger/Threads (channelAccountId). Aksi dapat
+ * dikombinasikan (minimal satu aktif):
  * - sendDm: DM privat ke penulis komentar (private reply); teksnya
- *   `dmText` — wajib terisi bila sendDm true.
+ *   `dmText` — wajib terisi bila sendDm true. TIDAK berlaku untuk
+ *   Threads: API Threads tidak menyediakan DM, jadi pada akun Threads
+ *   aksi ini selalu dicatat evaluator sebagai skipped
+ *   (`threads_dm_not_supported`) dan UI menonaktifkannya.
  * - publicReplyText: balasan publik pada komentar; null/kosong = mati.
  * - hideComment: sembunyikan komentar (mode moderasi murni =
  *   sendDm false + publicReplyText kosong + hideComment true).

@@ -17,6 +17,8 @@ import { META_GRAPH_API_VERSION } from "@sahabat-kreator/config";
 import {
   MetaGraphClient,
   MetaGraphError,
+  ThreadsGraphClient,
+  ThreadsGraphError,
 } from "@sahabat-kreator/channel-messenger";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
@@ -25,6 +27,8 @@ import { resolveTenantForUser } from "../tenants/guard";
 export interface CommentsModuleOptions {
   channelTokenSecret?: string;
   metaApiBase?: string;
+  /** G7 — base URL API Threads untuk moderasi balasan (manage_reply). */
+  threadsApiBase?: string;
 }
 
 export function serializeComment(row: CommentListItem): CommentResponse {
@@ -61,11 +65,13 @@ export type CommentModerationOutcome =
 /**
  * Moderasi manual satu komentar (dipakai route dashboard DAN API
  * publik v1 — aturan sinkronisasi kontrak Fase 10B): Graph dipanggil
- * DULU dengan token akun pemilik komentar; status lokal + audit hanya
- * berubah bila Graph menerima. 'failed' menampung semua penolakan
- * (provider bukan Meta, token tak tersedia/gagal dekripsi, Graph
- * menolak) — pemanggil menerjemahkannya ke 422
- * META_COMMENT_ACTION_FAILED tanpa membocorkan rincian internal.
+ * DULU dengan token akun pemilik komentar (Meta Graph untuk
+ * IG/Messenger; `manage_reply` Threads untuk provider 'threads',
+ * G7); status lokal + audit hanya berubah bila Graph menerima.
+ * 'failed' menampung semua penolakan (provider tak didukung, token
+ * tak tersedia/gagal dekripsi, Graph menolak) — pemanggil
+ * menerjemahkannya ke 422 META_COMMENT_ACTION_FAILED tanpa
+ * membocorkan rincian internal.
  */
 export async function performCommentModeration(
   bundle: AuthBundle,
@@ -84,7 +90,11 @@ export async function performCommentModeration(
     input.commentId,
   );
   if (!comment) return { kind: "not_found" };
-  if (comment.provider !== "instagram" && comment.provider !== "messenger") {
+  if (
+    comment.provider !== "instagram" &&
+    comment.provider !== "messenger" &&
+    comment.provider !== "threads"
+  ) {
     return { kind: "failed" };
   }
   const account = await getChannelAccount(
@@ -100,19 +110,33 @@ export async function performCommentModeration(
     account.accessTokenEncrypted,
   );
   if (!token) return { kind: "failed" };
-  const client = new MetaGraphClient({
-    baseUrl: opts.metaApiBase,
-    apiVersion: META_GRAPH_API_VERSION,
-    accessToken: token,
-  });
   try {
-    await client.setCommentHidden({
-      provider: comment.provider,
-      commentId: comment.providerCommentId,
-      hidden: input.hidden,
-    });
+    if (comment.provider === "threads") {
+      // G7: moderasi balasan Threads lewat manage_reply (cakupan
+      // threads_manage_replies); menyembunyikan balasan turut
+      // menyembunyikan sub-pohon balasannya (perilaku platform).
+      const client = new ThreadsGraphClient({
+        baseUrl: opts.threadsApiBase,
+        accessToken: token,
+      });
+      await client.manageThreadsReply({
+        replyId: comment.providerCommentId,
+        hide: input.hidden,
+      });
+    } else {
+      const client = new MetaGraphClient({
+        baseUrl: opts.metaApiBase,
+        apiVersion: META_GRAPH_API_VERSION,
+        accessToken: token,
+      });
+      await client.setCommentHidden({
+        provider: comment.provider,
+        commentId: comment.providerCommentId,
+        hidden: input.hidden,
+      });
+    }
   } catch (err) {
-    if (err instanceof MetaGraphError) {
+    if (err instanceof MetaGraphError || err instanceof ThreadsGraphError) {
       console.error(
         `[comments] moderasi ${comment.id} gagal: graph ${err.graphCode ?? "?"} ${err.description}`,
       );
@@ -140,12 +164,13 @@ export async function performCommentModeration(
 }
 
 /**
- * Modul comments (Fase 10B) — komentar publik Instagram/Messenger yang
- * tercatat dari webhook Meta:
+ * Modul comments (Fase 10B; G7 menambah Threads) — komentar publik
+ * Instagram/Messenger dari webhook Meta + balasan Threads dari
+ * webhook Threads:
  *   GET  /tenants/:tenantId/comments?channelAccountId=&automationId=&limit=
  *        daftar terbaru (semua member workspace) + jejak aksi aturan.
- *   POST /tenants/:tenantId/comments/:id/hide   sembunyikan di Meta
- *   POST /tenants/:tenantId/comments/:id/unhide tampilkan lagi di Meta
+ *   POST /tenants/:tenantId/comments/:id/hide   sembunyikan di platform
+ *   POST /tenants/:tenantId/comments/:id/unhide tampilkan lagi
  * Moderasi manual memanggil Graph DULU dengan token akun pemilik
  * komentar; status lokal hanya berubah bila Graph menerima — kegagalan
  * Graph menjawab 422 META_COMMENT_ACTION_FAILED dan status lokal tetap.

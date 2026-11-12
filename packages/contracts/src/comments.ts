@@ -1,10 +1,13 @@
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
-// Comments (Fase 10B) — komentar publik Instagram/Messenger yang tercatat
-// dari webhook Meta, beserta jejak aksi aturan comment-to-DM/moderasi.
-// Daftar bersifat baca-saja dari sisi API; satu-satunya tulis adalah
-// moderasi manual sembunyikan/tampilkan (POST .../hide | .../unhide).
+// Comments (Fase 10B; G7 menambah Threads) — komentar publik
+// Instagram/Messenger + balasan Threads yang tercatat dari webhook,
+// beserta jejak aksi aturan comment-to-DM/moderasi. Daftar bersifat
+// baca-saja dari sisi API; satu-satunya tulis adalah moderasi manual
+// sembunyikan/tampilkan (POST .../hide | .../unhide). Jejak DM untuk
+// Threads selalu `skipped` dengan reason `threads_dm_not_supported`
+// (API Threads tidak punya DM).
 // ---------------------------------------------------------------------------
 
 export const CommentModerationStatusSchema = z.enum(["visible", "hidden"]);
@@ -44,7 +47,7 @@ export const CommentResponseSchema = z.object({
   channelAccountId: z.string().uuid(),
   /** Nama tampilan akun pemilik komentar (untuk label daftar). */
   channelDisplayName: z.string(),
-  provider: z.enum(["instagram", "messenger"]),
+  provider: z.enum(["instagram", "messenger", "threads"]),
   providerCommentId: z.string(),
   mediaId: z.string().nullable(),
   postId: z.string().nullable(),

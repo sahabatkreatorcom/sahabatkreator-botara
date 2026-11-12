@@ -3,10 +3,15 @@ import { Hono } from "hono";
 import {
   getProviderSecret,
   recordIntegrationLog,
+  recordThreadsComment,
+  resolveThreadsAccountByExternalId,
   type PlatformSettingsOptions,
   type RecordIntegrationLogInput,
 } from "@sahabat-kreator/core";
-import { verifyMetaWebhookSignature } from "@sahabat-kreator/channel-messenger";
+import {
+  parseThreadsReplyEvents,
+  verifyMetaWebhookSignature,
+} from "@sahabat-kreator/channel-messenger";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 
@@ -32,11 +37,24 @@ import { apiError, type AppVariables } from "../../http";
  * Threads mendefinisikan topik webhook mentions / replies / publish /
  * delete — pemberitahuan aktivitas konten. TIDAK ada event resmi
  * pencabutan otorisasi/kedaluwarsa token akun di webhook Threads
- * (berbeda dari TikTok), jadi modul ini TIDAK mengubah state akun:
- * setiap pengiriman yang lolos verifikasi dicatat ke log integrasi
- * (provider 'threads', payload utuh kecuali body raksasa yang
- * ditandai terpotong) dan dijawab 200. Kesegaran token Threads tetap
- * diurus worker lifecycle refresh yang sudah ada.
+ * (berbeda dari TikTok), jadi modul ini TIDAK mengubah state akun dari
+ * topik-topik itu; kesegaran token Threads tetap diurus worker
+ * lifecycle refresh yang sudah ada.
+ *
+ * G7 — field `replies` adalah pengecualian yang DIPROSES: setiap
+ * balasan atas postingan akun Threads yang terhubung dinormalisasi
+ * (`parseThreadsReplyEvents`) dan disimpan ke tabel `comments` yang
+ * sama dengan komentar Meta (`recordThreadsComment`, dedup core),
+ * lalu dievaluasi evaluator comment-to-DM bersama lewat outbox
+ * `comment.received` → job worker. Pemetaan akun memakai
+ * `root_post.owner_id` (Threads user ID pemilik postingan); balasan
+ * yang payload-nya tidak membawa pemilik (cakupan
+ * `threads_read_replies` belum diberikan → field disembunyikan
+ * platform) dicatat `unresolved_account` dengan penjelasan, bukan
+ * dibuang diam-diam. Topik selain replies (mentions/publish/delete)
+ * tetap dicatat saja ke log integrasi (provider 'threads', payload
+ * utuh kecuali body raksasa yang ditandai terpotong) dan dijawab 200,
+ * persis perilaku sebelumnya.
  */
 
 export interface ThreadsWebhookModuleOptions {
@@ -189,17 +207,96 @@ export function createThreadsWebhookRoutes(
       });
       return c.json({ ok: true });
     }
-    const objectKind =
-      typeof parsed.object === "string" ? parsed.object : "(unknown)";
-    await logIntegration({
-      signatureValid: true,
-      outcome: "recorded",
-      summary: `Threads webhook event recorded (object=${objectKind})`,
-      payload:
-        rawBody.length > LOG_PAYLOAD_MAX_CHARS
-          ? { truncated: true, object: objectKind }
-          : parsed,
-    });
+    const logPayload =
+      rawBody.length > LOG_PAYLOAD_MAX_CHARS
+        ? { truncated: true }
+        : parsed;
+    // G7: balasan (field 'replies') di-ingest ke tabel comments;
+    // peristiwa lain hanya dicatat seperti sebelumnya.
+    const replyEvents = parseThreadsReplyEvents(parsed);
+    if (replyEvents.length === 0) {
+      const objectKind =
+        typeof parsed.object === "string" ? parsed.object : "(unknown)";
+      await logIntegration({
+        signatureValid: true,
+        outcome: "recorded",
+        summary: `Threads webhook event recorded (object=${objectKind})`,
+        payload:
+          rawBody.length > LOG_PAYLOAD_MAX_CHARS
+            ? { truncated: true, object: objectKind }
+            : parsed,
+      });
+      return c.json({ ok: true });
+    }
+    for (const event of replyEvents) {
+      if (!event.ownerExternalId) {
+        await logIntegration({
+          signatureValid: true,
+          outcome: "unresolved_account",
+          errorCode: "threads_reply_owner_missing",
+          summary:
+            `reply ${event.providerCommentId} carries no root_post.owner_id ` +
+            "(threads_read_replies scope missing?) — not recorded",
+          payload: logPayload,
+        });
+        continue;
+      }
+      const account = await resolveThreadsAccountByExternalId(
+        bundle.db,
+        event.ownerExternalId,
+      );
+      if (!account) {
+        await logIntegration({
+          signatureValid: true,
+          outcome: "unresolved_account",
+          summary: `reply for unknown threads account ${event.ownerExternalId}`,
+          payload: logPayload,
+        });
+        continue;
+      }
+      if (account.status !== "connected") {
+        await logIntegration({
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: "ignored_disconnected",
+          summary: `reply for ${account.status} account`,
+          payload: logPayload,
+        });
+        continue;
+      }
+      try {
+        const recorded = await recordThreadsComment(bundle.db, account, {
+          providerCommentId: event.providerCommentId,
+          mediaId: event.mediaId,
+          parentId: event.parentId,
+          authorUsername: event.authorUsername,
+          text: event.text,
+          providerCreatedAt: event.providerCreatedAt,
+        });
+        await logIntegration({
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: recorded.status === "recorded" ? "recorded" : "duplicate",
+          summary: `reply ${event.providerCommentId} from @${event.authorUsername}`,
+          payload: logPayload,
+        });
+      } catch {
+        // Error per event dicatat jujur lalu event berikutnya tetap
+        // diproses; webhook tetap menjawab 200 agar platform tidak
+        // menonaktifkan langganan karena satu baris gagal.
+        await logIntegration({
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: "error",
+          errorCode: "processing_error",
+          summary: `failed to record reply ${event.providerCommentId}`,
+          payload: logPayload,
+        });
+      }
+    }
     return c.json({ ok: true });
   });
 

@@ -328,13 +328,16 @@ routes.route(
     metaApiBase: env.META_API_BASE,
   }),
 );
-// Modul comments (Fase 10B) — komentar IG/Messenger tercatat
-// /tenants/:tenantId/comments + moderasi manual (Graph Meta).
+// Modul comments (Fase 10B; G7 menambah Threads) — komentar
+// IG/Messenger + balasan Threads tercatat
+// /tenants/:tenantId/comments + moderasi manual (Graph Meta /
+// manage_reply Threads).
 routes.route(
   "/",
   createCommentsRoutes(authBundle, {
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
     metaApiBase: env.META_API_BASE,
+    threadsApiBase: env.THREADS_API_BASE,
   }),
 );
 // Modul flows (Fase 8A) — definisi flow graf /tenants/:tenantId/flows +
@@ -568,6 +571,7 @@ routes.route(
     {
       channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
       metaApiBase: env.META_API_BASE,
+      threadsApiBase: env.THREADS_API_BASE,
     },
     {
       platform: platformOptions,

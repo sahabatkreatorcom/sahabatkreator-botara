@@ -224,10 +224,14 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
     if (!parsed.success) {
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid automation payload");
     }
-    // Fase 10B: aturan komentar terikat ke satu akun IG/Messenger milik
-    // tenant ini. Akun tak ditemukan di tenant, provider di luar
-    // instagram/messenger, atau akun sedang terputus → 422
-    // COMMENT_CHANNEL_UNSUPPORTED (aturan tak pernah lahir mengambang).
+    // Fase 10B (+G7): aturan komentar terikat ke satu akun
+    // IG/Messenger/Threads milik tenant ini. Akun tak ditemukan di
+    // tenant, provider di luar instagram/messenger/threads, atau akun
+    // sedang terputus → 422 COMMENT_CHANNEL_UNSUPPORTED (aturan tak
+    // pernah lahir mengambang). Catatan Threads: aturan boleh membawa
+    // sendDm, tetapi API Threads tidak punya DM — evaluator mencatat
+    // aksi itu skipped (threads_dm_not_supported); UI menonaktifkannya
+    // sejak awal dan menjelaskannya ke pemilik.
     if ("channelAccountId" in parsed.data) {
       const account = await getChannelAccount(
         bundle.db,
@@ -237,14 +241,15 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
       if (
         !account ||
         (account.provider !== "instagram" &&
-          account.provider !== "messenger") ||
+          account.provider !== "messenger" &&
+          account.provider !== "threads") ||
         account.status !== "connected"
       ) {
         return apiError(
           c,
           422,
           "COMMENT_CHANNEL_UNSUPPORTED",
-          "Comment rules require a connected Instagram or Messenger account",
+          "Comment rules require a connected Instagram, Messenger, or Threads account",
         );
       }
     }
