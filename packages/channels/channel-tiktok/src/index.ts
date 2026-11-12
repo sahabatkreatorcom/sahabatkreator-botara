@@ -692,6 +692,13 @@ export class TikTokClient {
     privacyLevel: TikTokPrivacyLevel;
     data: Uint8Array;
     contentType: string;
+    /** Pilihan kreator per postingan — lihat `buildTikTokVideoPostInfo`. */
+    allowComment?: boolean | undefined;
+    allowDuet?: boolean | undefined;
+    allowStitch?: boolean | undefined;
+    brandOrganic?: boolean | undefined;
+    brandContent?: boolean | undefined;
+    isAigc?: boolean | undefined;
     chunkSize?: number | undefined;
     pollIntervalMs?: number | undefined;
     maxPolls?: number | undefined;
@@ -724,6 +731,12 @@ export class TikTokClient {
           title: input.title,
           privacyLevel,
           creatorInfo,
+          allowComment: input.allowComment,
+          allowDuet: input.allowDuet,
+          allowStitch: input.allowStitch,
+          brandOrganic: input.brandOrganic,
+          brandContent: input.brandContent,
+          isAigc: input.isAigc,
         }),
         sourceInfo: {
           source: "FILE_UPLOAD",
@@ -799,6 +812,11 @@ export class TikTokClient {
     privacyLevel: TikTokPrivacyLevel;
     photoUrls: string[];
     autoAddMusic?: boolean | undefined;
+    /** Pilihan kreator per postingan — lihat `buildTikTokPhotoPostInfo`. */
+    allowComment?: boolean | undefined;
+    brandOrganic?: boolean | undefined;
+    brandContent?: boolean | undefined;
+    isAigc?: boolean | undefined;
     photoCoverIndex?: number | undefined;
     pollIntervalMs?: number | undefined;
     maxPolls?: number | undefined;
@@ -842,6 +860,10 @@ export class TikTokClient {
         privacyLevel,
         creatorInfo,
         autoAddMusic,
+        allowComment: input.allowComment,
+        brandOrganic: input.brandOrganic,
+        brandContent: input.brandContent,
+        isAigc: input.isAigc,
       }),
       sourceInfo: {
         source: "PULL_FROM_URL",
@@ -924,6 +946,12 @@ export interface TikTokVideoPostInfo {
   disable_duet: boolean;
   disable_comment: boolean;
   disable_stitch: boolean;
+  /** Pengungkapan komersial: konten bermerek (label "Paid partnership"). Wajib dikirim eksplisit menurut tabel field referensi API. */
+  brand_content_toggle: boolean;
+  /** Pengungkapan komersial: brand sendiri (label "Promotional content"). */
+  brand_organic_toggle: boolean;
+  /** Label "dibuat AI" atas pernyataan kreator (`is_aigc`). */
+  is_aigc: boolean;
 }
 
 export interface TikTokVideoSourceInfo {
@@ -939,6 +967,12 @@ export interface TikTokPhotoPostInfo {
   privacy_level: TikTokPrivacyLevel;
   disable_comment: boolean;
   auto_add_music: boolean;
+  /** Pengungkapan komersial: konten bermerek (label "Paid partnership"). */
+  brand_content_toggle: boolean;
+  /** Pengungkapan komersial: brand sendiri (label "Promotional content"). */
+  brand_organic_toggle: boolean;
+  /** Label "dibuat AI" atas pernyataan kreator (`is_aigc`). */
+  is_aigc: boolean;
 }
 
 export interface TikTokPhotoSourceInfo {
@@ -957,23 +991,38 @@ export interface TikTokPhotoSourceInfo {
  * (unit UTF-16), persis hitungan batas TikTok, dan merupakan
  * pertahanan terakhir di samping capability core (caption maks
  * 2200). Foto tidak mengenal duet/stitch — satu-satunya
- * `disable_*` di post_info foto adalah `disable_comment`, yang
- * meniru pengaturan kreator seperti jalur video.
+ * `disable_*` di post_info foto adalah `disable_comment`.
  * `auto_add_music` diteruskan apa adanya dari keputusan
  * pemanggil (adapter: selalu true, permintaan pemilik).
+ *
+ * Pilihan kreator per postingan (gelombang Pilihan Privasi & AI —
+ * Content Sharing Guidelines: toggle interaksi TIDAK tercentang
+ * secara bawaan, pengungkapan komersial mati secara bawaan):
+ * `disable_comment` aktif bila kreator mematikan komentar di
+ * pengaturan TikTok-nya ATAU pengguna tidak mengizinkan komentar
+ * pada postingan ini; `brand_*_toggle` dan `is_aigc` adalah
+ * pernyataan pengguna apa adanya (bawaan false = tidak dinyatakan).
  */
 export function buildTikTokPhotoPostInfo(input: {
   caption: string;
   privacyLevel: TikTokPrivacyLevel;
   creatorInfo: TikTokCreatorInfo;
   autoAddMusic: boolean;
+  allowComment?: boolean | undefined;
+  brandOrganic?: boolean | undefined;
+  brandContent?: boolean | undefined;
+  isAigc?: boolean | undefined;
 }): TikTokPhotoPostInfo {
   return {
     title: input.caption.slice(0, TIKTOK_PHOTO_TITLE_MAX),
     description: input.caption.slice(0, TIKTOK_PHOTO_DESCRIPTION_MAX),
     privacy_level: input.privacyLevel,
-    disable_comment: input.creatorInfo.commentDisabled,
+    disable_comment:
+      input.creatorInfo.commentDisabled || !(input.allowComment ?? false),
     auto_add_music: input.autoAddMusic,
+    brand_content_toggle: input.brandContent ?? false,
+    brand_organic_toggle: input.brandOrganic ?? false,
+    is_aigc: input.isAigc ?? false,
   };
 }
 
@@ -996,24 +1045,45 @@ export function resolveTikTokPrivacyLevel(
 /**
  * Rakit `post_info` init video (murni). Judul postingan TikTok
  * adalah caption post (dipotong 2200 sebagai pertahanan terakhir;
- * batas yang mengikat ditegakkan capability di core). Interaksi
- * yang DIMATIKAN kreator di pengaturan TikTok-nya harus dinyatakan
- * `disable_*` pada post_info — API menolak post yang mencoba
- * mengaktifkan interaksi yang dimatikan kreator — jadi nilai
- * disable di sini meniru persis keadaan kreator, bukan pilihan
- * tenant.
+ * batas yang mengikat ditegakkan capability di core).
+ *
+ * Interaksi = pertemuan DUA keadaan (gelombang Pilihan Privasi &
+ * AI): yang dimatikan kreator di pengaturan TikTok-nya WAJIB tetap
+ * `disable_*` (API menolak post yang mencoba mengaktifkan
+ * interaksi yang dimatikan kreator), DAN Content Sharing
+ * Guidelines mewajibkan toggle interaksi pada antarmuka posting
+ * TIDAK tercentang secara bawaan — jadi interaksi hanya aktif
+ * bila kreator mengizinkannya di pengaturan DAN pengguna secara
+ * eksplisit mengizinkannya pada postingan ini:
+ * `disable_x = creatorDisabled_x || !allowX` (allow bawaan false).
+ *
+ * `brand_content_toggle` dikirim EKSPLISIT selalu (tabel field
+ * referensi API menandainya wajib diisi); `brand_organic_toggle`
+ * dan `is_aigc` diteruskan dari pernyataan pengguna apa adanya.
  */
 export function buildTikTokVideoPostInfo(input: {
   title: string;
   privacyLevel: TikTokPrivacyLevel;
   creatorInfo: TikTokCreatorInfo;
+  allowComment?: boolean | undefined;
+  allowDuet?: boolean | undefined;
+  allowStitch?: boolean | undefined;
+  brandOrganic?: boolean | undefined;
+  brandContent?: boolean | undefined;
+  isAigc?: boolean | undefined;
 }): TikTokVideoPostInfo {
   return {
     title: input.title.slice(0, TIKTOK_TITLE_MAX),
     privacy_level: input.privacyLevel,
-    disable_duet: input.creatorInfo.duetDisabled,
-    disable_comment: input.creatorInfo.commentDisabled,
-    disable_stitch: input.creatorInfo.stitchDisabled,
+    disable_duet:
+      input.creatorInfo.duetDisabled || !(input.allowDuet ?? false),
+    disable_comment:
+      input.creatorInfo.commentDisabled || !(input.allowComment ?? false),
+    disable_stitch:
+      input.creatorInfo.stitchDisabled || !(input.allowStitch ?? false),
+    brand_content_toggle: input.brandContent ?? false,
+    brand_organic_toggle: input.brandOrganic ?? false,
+    is_aigc: input.isAigc ?? false,
   };
 }
 

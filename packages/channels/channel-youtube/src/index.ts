@@ -101,7 +101,19 @@ export interface YouTubeVideoMetadata {
   };
   status: {
     privacyStatus: YouTubePrivacyStatus;
-    selfDeclaredMadeForKids: false;
+    /**
+     * Pengungkapan konten yang diubah/dihasilkan AI secara realistis
+     * (`status.containsSyntheticMedia`, Data API — kebijakan
+     * pengungkapan GenAI YouTube mewajibkannya per video).
+     */
+    containsSyntheticMedia: boolean;
+    /**
+     * Penetapan audiens per video. OPSIONAL di tipe ini dengan
+     * sengaja (tri-state): tidak ada di objek = tidak dikirim ke
+     * API = penetapan level kanal yang berlaku; ada = pernyataan
+     * pengguna untuk video ini.
+     */
+    selfDeclaredMadeForKids?: boolean;
   };
 }
 
@@ -114,11 +126,25 @@ export interface YouTubeVideoMetadata {
  * - Batas ditegakkan di core saat penjadwalan (POST_TITLE_TOO_LONG /
  *   POST_CAPTION_TOO_LONG); pemotongan di sini adalah pertahanan
  *   terakhir agar provider tidak menolak di jam tayang.
+ * - Tiga field `status` adalah KEPUTUSAN PENGGUNA per video dari
+ *   opsi postingan (gelombang Pilihan Privasi & AI): privasi
+ *   (adapter menyelesaikan bawaan panel sebelum memanggil fungsi
+ *   ini), `containsSyntheticMedia` dari pernyataan AI pengguna
+ *   (WAJIB diteruskan apa adanya — mengarang nilai di sini berarti
+ *   membuat pernyataan isi palsu atas nama kreator), dan
+ *   `selfDeclaredMadeForKids` dari penetapan audiens pengguna.
+ *   Tri-state madeForKids: input `undefined` → field TIDAK
+ *   dimasukkan ke status (API membiarkan penetapan level kanal
+ *   berlaku); ini mengubah perilaku lama yang selalu mengirim
+ *   `false` — perubahan yang disengaja gelombang ini, karena
+ *   `false` eksplisit akan menimpa penetapan kanal yang sah.
  */
 export function buildYouTubeVideoMetadata(input: {
   title: string;
   caption: string;
   privacyStatus: YouTubePrivacyStatus;
+  containsSyntheticMedia: boolean;
+  madeForKids?: boolean | undefined;
   categoryId?: string;
 }): YouTubeVideoMetadata {
   const firstCaptionLine = input.caption
@@ -138,7 +164,10 @@ export function buildYouTubeVideoMetadata(input: {
     },
     status: {
       privacyStatus: input.privacyStatus,
-      selfDeclaredMadeForKids: false,
+      containsSyntheticMedia: input.containsSyntheticMedia,
+      ...(input.madeForKids !== undefined
+        ? { selfDeclaredMadeForKids: input.madeForKids }
+        : {}),
     },
   };
 }
