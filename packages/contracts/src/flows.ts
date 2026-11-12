@@ -728,3 +728,164 @@ export const FlowVersionRestoreResponseSchema = z.object({
 export type FlowVersionRestoreResponse = z.infer<
   typeof FlowVersionRestoreResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// G4 — Simulator flow (panel uji kering di Flow Builder)
+// ---------------------------------------------------------------------------
+
+/**
+ * SIMULATOR FLOW — penelusuran graf TANPA efek samping (konsep "efek
+ * sebagai data" dari riset zernflow `lib/flow-engine/simulator.ts`).
+ *
+ * POST /tenants/:tenantId/flows/:id/simulate menjalankan interpreter
+ * kering di core (`simulateFlowRun`) atas graf DRAF yang dikirim
+ * pemanggil (`graph`), graf tersimpan flow (tanpa `graph`/`version`),
+ * atau SNAPSHOT versi tersimpan (`version`) — dengan kontak mock +
+ * teks pemicu dari permintaan. Server TIDAK menulis apa pun: tidak
+ * ada run/langkah/pesan/outbox/audit yang lahir, tidak ada job yang
+ * diantrekan, node `ai_response` TIDAK memanggil LLM, dan node
+ * `http_request` TIDAK ditembak. Yang dikembalikan adalah JEJAK
+ * langkah (bentuk selaras baris langkah run sungguhan) + daftar EFEK
+ * sebagai data (niat yang akan terjadi pada run sungguhan).
+ *
+ * Kesetiaan per node (ditegakkan interpreter + ditandai `fidelity`
+ * pada setiap efek):
+ * - "faithful" — disimulasikan setia dari data yang ada: pesan
+ *   ter-render ({name} + spintax; pilihan acak dari benih
+ *   deterministik per simulasi), kondisi, tag/stage/field pada
+ *   kontak mock, delay (dicatat, tidak ditunggu), ab_split
+ *   (deterministik: hash lengket mode eksperimen persis eksekutor,
+ *   undian berbenih, atau pilihan paksa `splitChoices`).
+ * - "recorded" — TIDAK bisa disimulasikan setia, hanya dicatat
+ *   sebagai efek: http_request (tidak ada jaringan), ai_response
+ *   (tidak ada LLM), enroll_sequence & goto_flow (keadaan DB/eksternal
+ *   di luar graf; goto menyelesaikan run asal seperti aslinya tetapi
+ *   flow tujuan tidak ditelusuri), tautan pembayaran & checkout
+ *   (membuat order/tautan adalah tulisan), penawaran slot janji
+ *   (mesin slot + kalender di luar interpreter).
+ * Node parkir (wait_reply/questionnaire/show_catalog/
+ * book_appointment) MENGHENTIKAN simulasi dengan status `parked` +
+ * alasan; khusus wait_reply, `replyText` pada permintaan melanjutkan
+ * simulasi lewat cabang "replied" (balasan untuk node parkir lain
+ * adalah mesin jawaban penuh di jalur evaluasi — di luar cakupan
+ * panel uji).
+ */
+
+/** Kontak mock untuk satu simulasi. `id` hanya kunci determinisme (penugasan eksperimen A/B); bawaan server "sim-contact". */
+export const FlowSimulateContactSchema = z.object({
+  id: z.string().min(1).max(128).optional(),
+  name: z.string().max(255).optional(),
+  phone: z.string().max(64).nullable().optional(),
+  email: z.string().max(255).nullable().optional(),
+  tags: z.array(z.string().min(1).max(64)).max(50).optional(),
+  stage: z.string().min(1).max(64).nullable().optional(),
+  customFields: z.record(z.string(), z.unknown()).optional(),
+  /** Jumlah item keranjang mock — menentukan cabang cart_checkout (0/kosong → "empty_cart"). */
+  cartItemCount: z.number().int().min(0).max(100_000).optional(),
+});
+export type FlowSimulateContact = z.infer<typeof FlowSimulateContactSchema>;
+
+/**
+ * Permintaan simulasi. `graph` dan `version` saling eksklusif (400
+ * bila keduanya diisi): graph = graf draf dari kanvas builder;
+ * version = nomor snapshot tersimpan; keduanya absen = graf
+ * tersimpan flow.
+ */
+export const FlowSimulateRequestSchema = z.object({
+  graph: FlowGraphSchema.optional(),
+  version: z.number().int().positive().optional(),
+  triggerText: z.string().max(4096).optional(),
+  contact: FlowSimulateContactSchema.optional(),
+  replyText: z.string().max(4096).optional(),
+  splitChoices: z
+    .record(z.string().min(1).max(128), z.enum(["a", "b"]))
+    .optional(),
+});
+export type FlowSimulateRequest = z.infer<typeof FlowSimulateRequestSchema>;
+
+/** Satu langkah jejak simulasi — bentuk selaras FlowRunStepResponse, tanpa id/runId (tidak ada baris DB). */
+export const FlowSimulateStepSchema = z.object({
+  seq: z.number().int().positive(),
+  nodeId: z.string(),
+  nodeType: z.string(),
+  detail: z.record(z.string(), z.unknown()),
+});
+export type FlowSimulateStep = z.infer<typeof FlowSimulateStepSchema>;
+
+export const FlowSimulateEffectKindSchema = z.enum([
+  "send_message",
+  "delay",
+  "add_tag",
+  "remove_tag",
+  "set_stage",
+  "set_field",
+  "enroll_sequence",
+  "goto_flow",
+  "handoff",
+  "ai_response",
+  "http_request",
+  "payment_link",
+  "catalog_message",
+  "checkout",
+  "appointment_offer",
+  "park",
+]);
+export type FlowSimulateEffectKind = z.infer<
+  typeof FlowSimulateEffectKindSchema
+>;
+
+/**
+ * Satu efek simulasi: niat yang akan terjadi pada run sungguhan.
+ * `fidelity: "recorded"` berarti efeknya hanya dicatat — tidak
+ * disimulasikan setia dan tidak dieksekusi (lihat kepala bagian).
+ */
+export const FlowSimulateEffectSchema = z.object({
+  kind: FlowSimulateEffectKindSchema,
+  nodeId: z.string(),
+  fidelity: z.enum(["faithful", "recorded"]),
+  data: z.record(z.string(), z.unknown()),
+});
+export type FlowSimulateEffect = z.infer<typeof FlowSimulateEffectSchema>;
+
+export const FlowSimulateStatusSchema = z.enum([
+  "completed",
+  "parked",
+  "failed",
+  "trigger_not_matched",
+]);
+export type FlowSimulateStatus = z.infer<typeof FlowSimulateStatusSchema>;
+
+/** Keadaan akhir kontak mock sesudah simulasi (tag/stage/field yang berubah selama penelusuran). */
+export const FlowSimulateContactStateSchema = z.object({
+  name: z.string(),
+  phone: z.string().nullable(),
+  email: z.string().nullable(),
+  tags: z.array(z.string()),
+  stage: z.string().nullable(),
+  customFields: z.record(z.string(), z.unknown()),
+});
+export type FlowSimulateContactState = z.infer<
+  typeof FlowSimulateContactStateSchema
+>;
+
+export const FlowSimulateResponseSchema = z.object({
+  /** Sumber graf yang disimulasikan: draf kiriman, graf tersimpan, atau snapshot versi. */
+  source: z.object({
+    kind: z.enum(["draft", "stored", "version"]),
+    version: z.number().int().positive().nullable(),
+  }),
+  triggerMatched: z.boolean(),
+  status: FlowSimulateStatusSchema,
+  /** Node tempat simulasi parkir (status "parked"); null selain itu. */
+  parkedNodeId: z.string().nullable(),
+  /** Alasan parkir: waiting_for_reply | waiting_for_questionnaire_answer | waiting_for_catalog_choice | waiting_for_slot_choice. */
+  parkReason: z.string().nullable(),
+  /** Kode kegagalan (status "failed"), selaras error_code run: step_cap_exceeded, node_missing, goto_depth_exceeded, dst. */
+  failReason: z.string().nullable(),
+  steps: z.array(FlowSimulateStepSchema),
+  effects: z.array(FlowSimulateEffectSchema),
+  contact: FlowSimulateContactStateSchema,
+  /** Hasil validator graf yang ada atas graf yang disimulasikan (error tidak memblokir simulasi; keduanya dikembalikan). */
+  issues: z.array(FlowGraphIssueSchema),
+});
+export type FlowSimulateResponse = z.infer<typeof FlowSimulateResponseSchema>;
