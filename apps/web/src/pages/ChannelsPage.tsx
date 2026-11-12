@@ -47,6 +47,7 @@ import {
   GoogleChannelsStepBlock,
   MetaOAuthStepBlock,
   MetaWebhookInfoBlock,
+  PinterestBoardPickerBlock,
   ProviderOAuthStepBlock,
   StatusPill,
   ThreadsOAuthStepBlock,
@@ -1196,6 +1197,14 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                       )}
                     </button>
                   </div>
+                ) : null}
+
+                {channel.provider === "pinterest" && channel.status === "connected" ? (
+                  <PinterestBoardPickerBlock
+                    t={t}
+                    tenantId={tenantId}
+                    channelId={channel.id}
+                  />
                 ) : null}
 
                 {channel.provider === "webchat" && channel.status === "connected" ? (

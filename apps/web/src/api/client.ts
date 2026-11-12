@@ -118,6 +118,9 @@ import type {
   LinkedInOAuthStartResponse,
   PinterestOAuthInfoResponse,
   PinterestOAuthStartResponse,
+  PinterestBoardCreateRequest,
+  PinterestBoardCreateResponse,
+  PinterestBoardsResponse,
   BlueskyConnectRequest,
   BlueskyConnectResponse,
   PaymentLinkListResponse,
@@ -689,6 +692,50 @@ export const api = {
       return request<PinterestOAuthStartResponse>(
         `/api/tenants/${tenantId}/pinterest-oauth/start`,
         { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /**
+     * GET .../channels/:channelId/pinterest-boards — daftar board akun
+     * Pinterest + pilihan board tujuan tersimpan (pemilih board).
+     * Owner/admin saja.
+     */
+    pinterestBoards(
+      tenantId: string,
+      channelId: string,
+    ): Promise<PinterestBoardsResponse> {
+      return request<PinterestBoardsResponse>(
+        `/api/tenants/${tenantId}/channels/${channelId}/pinterest-boards`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * PUT .../channels/:channelId/pinterest-board {boardId} — simpan
+     * pilihan board tujuan akun (server memvalidasi board milik akun
+     * itu); boardId null membersihkan pilihan → board pertama.
+     */
+    pinterestBoardSelect(
+      tenantId: string,
+      channelId: string,
+      boardId: string | null,
+    ): Promise<PinterestBoardsResponse> {
+      return request<PinterestBoardsResponse>(
+        `/api/tenants/${tenantId}/channels/${channelId}/pinterest-board`,
+        { method: "PUT", body: JSON.stringify({ boardId }) },
+      );
+    },
+    /**
+     * POST .../channels/:channelId/pinterest-boards — buat board baru
+     * di akun Pinterest (POST /v5/boards); board baru otomatis menjadi
+     * pilihan tujuan akun.
+     */
+    pinterestBoardCreate(
+      tenantId: string,
+      channelId: string,
+      body: PinterestBoardCreateRequest,
+    ): Promise<PinterestBoardCreateResponse> {
+      return request<PinterestBoardCreateResponse>(
+        `/api/tenants/${tenantId}/channels/${channelId}/pinterest-boards`,
+        { method: "POST", body: JSON.stringify(body) },
       );
     },
     /**

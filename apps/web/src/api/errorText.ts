@@ -93,6 +93,10 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.THREADS_OAUTH_CANCELLED");
     case "THREADS_ACCOUNT_ALREADY_CONNECTED":
       return t("errors.THREADS_ACCOUNT_ALREADY_CONNECTED");
+    case "PINTEREST_BOARD_NOT_FOUND":
+      return t("errors.PINTEREST_BOARD_NOT_FOUND");
+    case "PINTEREST_BOARDS_UNAVAILABLE":
+      return t("errors.PINTEREST_BOARDS_UNAVAILABLE");
     case "CHANNEL_DELETE_CONFIRMATION_MISMATCH":
       return t("errors.CHANNEL_DELETE_CONFIRMATION_MISMATCH");
     case "CHANNEL_ALREADY_TRASHED":

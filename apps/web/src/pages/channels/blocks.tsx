@@ -5,17 +5,27 @@
  * Semua sudah berupa komponen dengan props eksplisit — tidak ada yang
  * membaca closure halaman — sehingga pemindahannya murni relokasi.
  */
-import type { CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from "react";
 import type {
   ChannelAccountResponse,
   GoogleService,
   GoogleServiceConnection,
   MetaOAuthProvider,
   MetaWebhookInfoResponse,
+  PinterestBoardPrivacy,
+  PinterestBoardsResponse,
   ThreadsOAuthInfoResponse,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
-import { FieldError } from "../../components/AuthLayout";
+import { api, ApiClientError } from "../../api/client";
+import { translateApiError } from "../../api/errorText";
+import { FieldError, inputClassName } from "../../components/AuthLayout";
 import { formatDateTime, formatRelativeTime } from "../../utils/format";
 import type { Translate } from "./helpers";
 import { CheckIcon, CopyIcon, FacebookIcon } from "./icons";
@@ -291,6 +301,246 @@ export function GoogleChannelsStepBlock({
           <FieldError message={startError} />
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * Pemilih board Pinterest pada kartu akun Channels: dropdown board
+ * tujuan Pin PER AKUN + formulir buat board baru (POST /v5/boards).
+ * Blok ini sengaja mandiri — memuat & menyimpan lewat API channels
+ * sendiri dari props tenantId + channelId — agar perubahan halaman
+ * Channels sekecil mungkin. Pilihan disimpan server per akun dan
+ * dibaca penerbit saat publikasi; tanpa pilihan penerbit memakai
+ * board pertama akun. Board terpilih yang sudah dihapus di
+ * Pinterest tetap ditampilkan dari snapshot namanya + catatan
+ * jujur, sampai pemilik memilih ulang.
+ */
+export function PinterestBoardPickerBlock({
+  t,
+  tenantId,
+  channelId,
+}: {
+  t: Translate;
+  tenantId: string;
+  channelId: string;
+}) {
+  const [data, setData] = useState<PinterestBoardsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [forbidden, setForbidden] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newPrivacy, setNewPrivacy] =
+    useState<PinterestBoardPrivacy>("PUBLIC");
+  const [creating, setCreating] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await api.channels.pinterestBoards(tenantId, channelId));
+    } catch (err) {
+      // Peran selain owner/admin: panel memang bukan untuk mereka —
+      // sembunyikan blok ini (pola info webhook Meta), bukan error.
+      if (err instanceof ApiClientError && err.status === 403) {
+        setForbidden(true);
+      } else {
+        setError(translateApiError(t, err));
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [t, tenantId, channelId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const selectedId = data?.selectedBoardId ?? null;
+  const selectedMissing =
+    data !== null &&
+    selectedId !== null &&
+    !data.boards.some((b) => b.id === selectedId);
+
+  async function handleSelect(value: string) {
+    setSaving(true);
+    setError(null);
+    try {
+      setData(
+        await api.channels.pinterestBoardSelect(
+          tenantId,
+          channelId,
+          value === "" ? null : value,
+        ),
+      );
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (forbidden) return null;
+
+  async function handleCreate(ev: FormEvent) {
+    ev.preventDefault();
+    setCreating(true);
+    setError(null);
+    try {
+      const created = await api.channels.pinterestBoardCreate(
+        tenantId,
+        channelId,
+        {
+          name: newName.trim(),
+          ...(newDesc.trim() ? { description: newDesc.trim() } : {}),
+          privacy: newPrivacy,
+        },
+      );
+      setData(created);
+      setShowCreate(false);
+      setNewName("");
+      setNewDesc("");
+      setNewPrivacy("PUBLIC");
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-line pt-3">
+      <div className="text-sm font-medium">
+        {t("channels.pinterestBoardTitle")}
+      </div>
+      <p className="text-xs text-muted">{t("channels.pinterestBoardHint")}</p>
+      {loading ? (
+        <p className="text-xs text-muted">
+          {t("channels.pinterestBoardLoading")}
+        </p>
+      ) : data ? (
+        <>
+          <select
+            aria-label={t("channels.pinterestBoardTitle")}
+            className={inputClassName}
+            value={selectedId ?? ""}
+            disabled={saving}
+            onChange={(e) => void handleSelect(e.target.value)}
+          >
+            <option value="">
+              {t("channels.pinterestBoardDefaultOption")}
+            </option>
+            {selectedMissing ? (
+              <option value={selectedId ?? ""}>
+                {data.selectedBoardName ?? selectedId}
+              </option>
+            ) : null}
+            {data.boards.map((board) => (
+              <option key={board.id} value={board.id}>
+                {board.name ?? board.id}
+              </option>
+            ))}
+          </select>
+          {selectedMissing ? (
+            <p className="text-xs text-warning">
+              {t("channels.pinterestBoardMissingNote")}
+            </p>
+          ) : null}
+          {saving ? (
+            <p className="text-xs text-muted">
+              {t("channels.pinterestBoardSaving")}
+            </p>
+          ) : null}
+        </>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="rounded-md bg-elevated px-3 py-1 text-sm"
+        >
+          {t("common.retry")}
+        </button>
+      )}
+      {error ? <FieldError message={error} /> : null}
+      {showCreate ? (
+        <form onSubmit={(ev) => void handleCreate(ev)} className="space-y-2">
+          <div>
+            <label className="text-xs text-muted" htmlFor={`pin-board-name-${channelId}`}>
+              {t("channels.pinterestBoardNameLabel")}
+            </label>
+            <input
+              id={`pin-board-name-${channelId}`}
+              className={inputClassName}
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              placeholder={t("channels.pinterestBoardNamePlaceholder")}
+              maxLength={180}
+              required
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted" htmlFor={`pin-board-desc-${channelId}`}>
+              {t("channels.pinterestBoardDescLabel")}
+            </label>
+            <input
+              id={`pin-board-desc-${channelId}`}
+              className={inputClassName}
+              value={newDesc}
+              onChange={(e) => setNewDesc(e.target.value)}
+              maxLength={500}
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted" htmlFor={`pin-board-privacy-${channelId}`}>
+              {t("channels.pinterestBoardPrivacyLabel")}
+            </label>
+            <select
+              id={`pin-board-privacy-${channelId}`}
+              className={inputClassName}
+              value={newPrivacy}
+              onChange={(e) =>
+                setNewPrivacy(e.target.value as PinterestBoardPrivacy)
+              }
+            >
+              <option value="PUBLIC">
+                {t("channels.pinterestBoardPrivacyPublic")}
+              </option>
+              <option value="PROTECTED">
+                {t("channels.pinterestBoardPrivacyProtected")}
+              </option>
+            </select>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={creating || newName.trim() === ""}
+              className="rounded-md bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {creating
+                ? t("channels.pinterestBoardCreating")
+                : t("channels.pinterestBoardCreateButton")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreate(false)}
+              className="rounded-md px-3 py-1.5 text-sm text-muted hover:bg-elevated"
+            >
+              {t("common.cancel")}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setShowCreate(true)}
+          className="text-sm font-medium text-accent hover:underline"
+        >
+          {t("channels.pinterestBoardCreateToggle")}
+        </button>
+      )}
     </div>
   );
 }
