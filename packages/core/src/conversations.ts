@@ -349,11 +349,43 @@ async function lastInboundAtInTx(
   return toDate(row?.lastInboundAt ?? null);
 }
 
+/**
+ * Jenis percakapan sebagaimana dimodelkan kolom `kind` (cek DB:
+ * `conversations_kind_valid`). `private` = DM satu-lawan-satu, `group` =
+ * grup, `channel` = linimasa siaran satu arah milik akun channel
+ * (sasaran postingan, BUKAN percakapan pesan).
+ */
+export type ConversationKind = "private" | "group" | "channel";
+
+/**
+ * Himpunan kind PERCAKAPAN PESAN — yang lahir dari ingest pesan (Meta
+ * WhatsApp/Messenger/Instagram DM, Telegram, Webchat) dan menjadi isi
+ * Inbox. Dipakai permukaan Inbox sebagai saringan `kinds` pada
+ * `listConversations`: baris `channel` adalah sasaran linimasa
+ * postingan (dikelola dari /posts & Siaran), bukan utas pesan, jadi
+ * tidak tampil di Inbox — termasuk baris channel milik akun campuran
+ * seperti Instagram (DM-nya tetap tampil; baris channel-nya tidak).
+ * Pemanggil non-Inbox (API publik v1) TIDAK meneruskan saringan ini
+ * dan mempertahankan perilaku lama persis.
+ */
+export const MESSAGE_CONVERSATION_KINDS: readonly ConversationKind[] = [
+  "private",
+  "group",
+];
+
 export async function listConversations(
   db: Database,
   ctx: Pick<TenantContext, "tenantId">,
   input: {
     status?: Conversation["status"];
+    /**
+     * Saringan jenis percakapan: hanya kind yang disebutkan yang
+     * dikembalikan. Tanpa opsi ini (atau larik kosong) SEMUA kind
+     * dikembalikan — perilaku lama untuk pemanggil non-Inbox (API
+     * publik v1). Permukaan Inbox meneruskan
+     * `MESSAGE_CONVERSATION_KINDS` agar baris `channel` tidak tampil.
+     */
+    kinds?: readonly ConversationKind[];
     /**
      * Filter penugasan (Fase 9C): `mine` = hanya yang ditugaskan ke
      * `assignmentUserId` (user sesi — wajib disertakan pemanggil),
@@ -378,6 +410,9 @@ export async function listConversations(
   return withTenantDb(db, ctx.tenantId, async (tx) => {
     const conditions = [eq(conversations.tenantId, ctx.tenantId)];
     if (input.status) conditions.push(eq(conversations.status, input.status));
+    if (input.kinds && input.kinds.length > 0) {
+      conditions.push(inArray(conversations.kind, [...input.kinds]));
+    }
     if (input.assignment === "mine" && input.assignmentUserId) {
       conditions.push(eq(conversations.assigneeUserId, input.assignmentUserId));
     } else if (input.assignment === "unassigned") {

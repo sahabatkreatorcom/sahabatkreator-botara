@@ -125,6 +125,8 @@ export {
 } from "./dashboard";
 export {
   listConversations,
+  MESSAGE_CONVERSATION_KINDS,
+  type ConversationKind,
   getConversation,
   assignConversation,
   type AssignConversationResult,
