@@ -1,0 +1,28 @@
+-- 0026_post_publish_options.sql
+--
+-- Opsi penerbitan PER TARGET postingan (gelombang Pilihan Privasi &
+-- AI per Postingan, perintah pemilik 2026-11-12).
+--
+-- Pilihan privasi YouTube/TikTok dan pengungkapan konten AI adalah
+-- keputusan PENGGUNA per postingan menurut syarat kedua platform
+-- (TikTok Content Sharing Guidelines: privasi dipilih kreator tanpa
+-- nilai terpilih duluan; YouTube: privacyStatus + containsSyntheticMedia
+-- per video) — bukan lagi semata pengaturan platform. Karena satu
+-- baris `posts` = satu sasaran = satu provider, pilihan itu melekat
+-- per baris di sini, BUKAN pada grup induk: anggota grup yang berbeda
+-- platform membawa pilihan platformnya masing-masing.
+--
+-- - `publish_options`: jsonb bentuk `PostPublishOptions` pada
+--   kontrak (packages/contracts/src/posts.ts) — field per provider
+--   (youtubePrivacyStatus / tiktokPrivacyLevel / aiGenerated /
+--   madeForKids / toggle interaksi & brand TikTok). NULL = pengguna
+--   belum memilih pada postingan ini; resolusi saat publish jatuh
+--   ke nilai bawaan platform (Panel Admin → env) untuk privasi,
+--   kecuali TikTok yang oleh guidelines tidak boleh terjadwal dari
+--   formulir tanpa pilihan eksplisit (ditegakkan core).
+--
+-- Kolom generik jsonb (bukan kolom per-provider) karena himpunan
+-- opsinya lintas provider dan bertambah mengikuti field resmi
+-- platform; validasi bentuknya milik kontrak + core, bukan DDL.
+
+ALTER TABLE "posts" ADD COLUMN IF NOT EXISTS "publish_options" jsonb;

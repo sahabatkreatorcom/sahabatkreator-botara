@@ -1,6 +1,7 @@
 import {
   index,
   integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -49,6 +50,28 @@ export const postStatusEnum = pgEnum("post_status", [
   "failed",
   "cancelled",
 ]);
+
+/**
+ * Cermin struktural `PostPublishOptions` (packages/contracts) untuk
+ * kolom `posts.publish_options` — lihat komentar kolomnya. Semua
+ * field opsional: kelengkapan yang diwajibkan platform ditegakkan
+ * core saat penjadwalan, bukan oleh tipe ini.
+ */
+export interface PostPublishOptionsRecord {
+  youtubePrivacyStatus?: "private" | "unlisted" | "public";
+  tiktokPrivacyLevel?:
+    | "PUBLIC_TO_EVERYONE"
+    | "MUTUAL_FOLLOW_FRIENDS"
+    | "FOLLOWER_OF_CREATOR"
+    | "SELF_ONLY";
+  aiGenerated?: boolean;
+  madeForKids?: boolean;
+  tiktokAllowComment?: boolean;
+  tiktokAllowDuet?: boolean;
+  tiktokAllowStitch?: boolean;
+  tiktokBrandOrganic?: boolean;
+  tiktokBrandContent?: boolean;
+}
 
 /**
  * Grup multi-target (migrasi 0013, Gelombang 0 butir 3): satu konten
@@ -126,6 +149,16 @@ export const posts = pgTable(
      * memuat token atau URL bertoken.
      */
     errorCode: varchar("error_code", { length: 128 }),
+    /**
+     * Opsi penerbitan per target (migrasi 0026): pilihan PENGGUNA pada
+     * formulir postingan — privasi + pengungkapan AI + field resmi
+     * per platform. Bentuk sahnya adalah `PostPublishOptions` pada
+     * kontrak; paket db tidak bergantung pada kontrak, jadi di sini
+     * ia tipe struktural cermin — validasi & pembersihannya di core
+     * (PostPublishOptionsSchema), bukan di lapisan skema. NULL =
+     * belum dipilih (resolusi publish jatuh ke bawaan platform).
+     */
+    publishOptions: jsonb("publish_options").$type<PostPublishOptionsRecord>(),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
