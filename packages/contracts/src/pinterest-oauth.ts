@@ -26,8 +26,10 @@ import { z } from "zod";
 // via grant `refresh_token` — Pinterest mendukung penyegaran
 // BERKELANJUTAN (refresh token tidak berkedaluwarsa selama tidak
 // dicabut, dan setiap grant menerbitkan refresh token baru).
-// Board tujuan penerbitan tetap keputusan adapter Gelombang 3
-// (board pertama akun) — connect tidak mengubahnya.
+// Board tujuan penerbitan: pilihan per akun dari pemilih board
+// (lihat pinterest-boards.ts); tanpa pilihan adapter memakai
+// board pertama akun (keputusan Gelombang 3) — connect tidak
+// mengubah pilihan itu.
 // ---------------------------------------------------------------------------
 
 /** Start tidak membawa pilihan apa pun (satu provider, satu akun). */

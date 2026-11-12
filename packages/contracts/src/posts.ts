@@ -298,7 +298,9 @@ export const POST_PROVIDER_CAPABILITIES: Record<
   },
   pinterest: {
     // Pinterest API v5 (Gelombang 3): satu post = satu Pin pada
-    // board pertama akun. Pin WAJIB media (mediaRequired) dan hanya
+    // board pilihan akun (pemilih board Channels; tanpa pilihan —
+    // atau pilihan sudah hilang di Pinterest — board pertama akun).
+    // Pin WAJIB media (mediaRequired) dan hanya
     // membawa SATU media (maxMedia 1 — tidak ada album Pin).
     // Pemetaan field: `title` post menjadi judul Pin (maks 100,
     // ditegakkan lewat maxTitle) dan `caption` menjadi deskripsi Pin

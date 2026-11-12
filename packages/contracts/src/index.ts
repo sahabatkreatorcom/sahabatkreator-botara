@@ -19,6 +19,7 @@ export * from "./threads-oauth";
 export * from "./tiktok-oauth";
 export * from "./linkedin-oauth";
 export * from "./pinterest-oauth";
+export * from "./pinterest-boards";
 export * from "./bluesky-connect";
 export * from "./webchat";
 export * from "./automations";

@@ -67,8 +67,9 @@ export const ChannelProviderSchema = z.enum([
    * sasaran post, dan capability berbagi satu sumber, tetapi ia
    * BUKAN channel inbox: tidak ada webhook pesan, percakapan dua
    * arah, broadcast, atau jalur connect channel generik untuknya.
-   * Satu post = satu Pin (API v5) pada board pertama akun; access
-   * token OAuth tersimpan terenkripsi pada akun channel.
+   * Satu post = satu Pin (API v5) pada board pilihan akun (pemilih
+   * board Channels; bawaan board pertama akun); access token OAuth
+   * tersimpan terenkripsi pada akun channel.
    */
   "pinterest",
   /**

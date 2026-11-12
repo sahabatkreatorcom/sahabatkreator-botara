@@ -55,6 +55,11 @@ export const ErrorCodeSchema = z.enum([
   "PINTEREST_OAUTH_EXCHANGE_FAILED",
   "PINTEREST_OAUTH_CANCELLED",
   "PINTEREST_ACCOUNT_ALREADY_CONNECTED",
+  // Pemilih board Pinterest: board_id yang hendak disimpan tidak
+  // ada di daftar board akun saat divalidasi → 422; daftar board /
+  // pembuatan board ditolak atau tak terjangkau di provider → 502.
+  "PINTEREST_BOARD_NOT_FOUND",
+  "PINTEREST_BOARDS_UNAVAILABLE",
   // Bluesky connect BUKAN OAuth (formulir handle + App Password):
   // kredensial ditolak Bluesky → 422; server tidak bisa menjangkau
   // entryway Bluesky → 502; penyimpanan kredensial belum
