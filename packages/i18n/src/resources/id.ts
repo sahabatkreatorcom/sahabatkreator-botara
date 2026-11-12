@@ -440,6 +440,7 @@ export const id: Resources = {
     tiktokStarting: "Membuka TikTok…",
     tiktokNotConfigured: "Login TikTok belum tersedia: admin platform perlu mengisi Client Key dan Client Secret aplikasi TikTok di Panel Admin lebih dulu.",
     tiktokConnectedNotice: "Akun TikTok terhubung. Akun ini sekarang tersedia sebagai sasaran postingan terjadwal.",
+    tiktokProfileIncompleteWarning: "Akun TikTok terhubung, tetapi nama & foto profilnya tidak terbaca karena scope profil (user.info.basic — produk Login Kit) belum disetujui untuk aplikasi TikTok. Aktifkan scope itu di portal TikTok for Developers, lalu hubungkan ulang akun ini agar nama & avatarnya terisi.",
     linkedinTitle: "Hubungkan LinkedIn",
     linkedinConnectBody: "Hubungkan profil LinkedIn pribadi workspace dengan login LinkedIn resmi. Akun yang terhubung menjadi sasaran postingan terjadwal. Token LinkedIn berlaku ±60 hari dan TIDAK bisa disegarkan otomatis (LinkedIn tidak menerbitkan refresh token untuk program standar) — menjelang kedaluwarsa akun ditandai agar dihubungkan ulang di sini.",
     linkedinRedirectUriLabel: "Redirect URI (daftarkan persis seperti ini di aplikasi LinkedIn)",

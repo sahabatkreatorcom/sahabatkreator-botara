@@ -441,6 +441,7 @@ export const en = {
     tiktokStarting: "Opening TikTok…",
     tiktokNotConfigured: "TikTok sign-in is not available yet: a platform admin needs to fill in the TikTok app's Client Key and Client Secret in the Admin Panel first.",
     tiktokConnectedNotice: "TikTok account connected. It is now available as a scheduled-post target.",
+    tiktokProfileIncompleteWarning: "TikTok account connected, but its name & profile photo could not be read because the profile scope (user.info.basic — the Login Kit product) has not been approved for the TikTok app yet. Enable that scope in the TikTok for Developers portal, then reconnect this account so its name & avatar are filled in.",
     linkedinTitle: "Connect LinkedIn",
     linkedinConnectBody: "Connect the workspace's personal LinkedIn profile with the official LinkedIn sign-in. A connected account becomes a target for scheduled posts. LinkedIn tokens last ±60 days and CANNOT be refreshed automatically (LinkedIn issues no refresh token for standard programs) — as expiry approaches the account is flagged so you can reconnect it here.",
     linkedinRedirectUriLabel: "Redirect URI (register it exactly like this in the LinkedIn app)",

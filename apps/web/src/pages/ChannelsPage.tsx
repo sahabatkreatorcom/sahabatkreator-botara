@@ -365,7 +365,9 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     const threadsResult = params.get("threads_oauth");
     const threadsError = params.get("threads_oauth_error");
     // Kepulangan provider gelombang Semua OAuth — penanda per
-    // provider dengan bentuk yang sama seperti Threads.
+    // provider dengan bentuk yang sama seperti Threads. Satu nilai
+    // khusus TikTok: `connected_profile_incomplete` = terhubung
+    // tetapi profil tidak terbaca (scope) → banner peringatan.
     const waveProviders = [
       { key: "tiktok", noticeKey: "channels.tiktokConnectedNotice" },
       { key: "linkedin", noticeKey: "channels.linkedinConnectedNotice" },
@@ -418,7 +420,17 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
           translateApiError(t, new ApiClientError(0, w.error, "")),
         );
       }
-      if (w.result === "connected") {
+      if (
+        w.key === "tiktok" &&
+        w.result === "connected_profile_incomplete"
+      ) {
+        // Akun TikTok terhubung, tetapi profilnya tidak terbaca
+        // (scope user.info.basic belum disetujui untuk aplikasi) —
+        // banner PERINGATAN yang menjelaskan cara memperbaikinya,
+        // bukan banner sukses polos.
+        setConnectWarning(t("channels.tiktokProfileIncompleteWarning"));
+        void load();
+      } else if (w.result === "connected") {
         setOauthConnectedNotice(t(w.noticeKey));
         void load();
       }
@@ -970,8 +982,8 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
       ) : null}
 
       {connectWarning ? (
-        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-line bg-elevated px-3 py-2">
-          <p className="text-sm text-ink">{connectWarning}</p>
+        <div className="mt-4 flex items-start justify-between gap-3 rounded-lg border border-warning/40 bg-warning/10 px-3 py-2">
+          <p className="text-sm text-warning">{connectWarning}</p>
           <button
             type="button"
             onClick={() => setConnectWarning(null)}
