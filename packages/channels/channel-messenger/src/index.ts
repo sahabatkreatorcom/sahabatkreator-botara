@@ -1864,6 +1864,63 @@ export function verifyMetaWebhookSignature(
   return timingSafeEqual(presented, wanted);
 }
 
+/** Hasil parse `signed_request` Meta yang LOLOS verifikasi tanda tangan. */
+export interface MetaSignedRequestPayload {
+  /** ID pengguna dalam lingkup aplikasi (app-scoped user id). */
+  userId: string;
+  /** Waktu terbit (epoch detik) bila disertakan platform. */
+  issuedAt: number | null;
+  /** Payload mentah terverifikasi (field lain milik platform). */
+  raw: Record<string, unknown>;
+}
+
+/**
+ * Verifikasi + parse `signed_request` Meta (callback penghapusan data
+ * dan deauthorize): format `<base64url(tanda tangan)>.<base64url(JSON
+ * payload)>`; tanda tangan = HMAC-SHA256 atas string bagian payload
+ * PERSIS sebagaimana terkirim, dikunci app secret; payload wajib
+ * mengaku `algorithm: "HMAC-SHA256"`. Mengembalikan null untuk segala
+ * bentuk tidak sah — format rusak, algoritma lain, tanda tangan tidak
+ * cocok, atau `user_id` hilang — agar pemanggil menolak tanpa
+ * membedakan alasannya ke luar.
+ */
+export function parseMetaSignedRequest(
+  signedRequest: string,
+  appSecret: string,
+): MetaSignedRequestPayload | null {
+  const dot = signedRequest.indexOf(".");
+  if (dot <= 0) return null;
+  const signaturePart = signedRequest.slice(0, dot);
+  const payloadPart = signedRequest.slice(dot + 1);
+  if (!signaturePart || !payloadPart) return null;
+  let presented: Buffer;
+  let payloadJson: string;
+  try {
+    presented = Buffer.from(signaturePart, "base64url");
+    payloadJson = Buffer.from(payloadPart, "base64url").toString("utf8");
+  } catch {
+    return null;
+  }
+  const expected = createHmac("sha256", appSecret)
+    .update(payloadPart, "utf8")
+    .digest();
+  if (presented.length !== expected.length) return null;
+  if (!timingSafeEqual(presented, expected)) return null;
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(payloadJson) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (payload.algorithm !== "HMAC-SHA256") return null;
+  if (typeof payload.user_id !== "string" || !payload.user_id) return null;
+  return {
+    userId: payload.user_id,
+    issuedAt: typeof payload.issued_at === "number" ? payload.issued_at : null,
+    raw: payload,
+  };
+}
+
 /** Satu event messaging yang dinormalisasi dari payload webhook Meta. */
 export interface MetaMessagingEvent {
   /** Objek webhook: 'page' → messenger, 'instagram' → instagram. */

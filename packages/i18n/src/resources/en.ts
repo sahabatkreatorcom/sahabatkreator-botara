@@ -422,6 +422,7 @@ export const en = {
     metaWebhookBody: "In your Meta app, open Webhooks and add the Callback URL and Verify Token below. Then subscribe to the messages field for each object you use.",
     metaWebhookUrlLabel: "Callback URL",
     whatsappWebhookUrlLabel: "WhatsApp Callback URL",
+    dataDeletionCallbackUrlLabel: "Data Deletion Callback URL",
     metaWebhookTokenLabel: "Verify Token",
     metaWebhookNotConfigured: "Webhook setup is not available yet.",
     metaWebhookSecretMissing: "Incoming webhooks will be rejected until the app secret is configured.",
@@ -2327,6 +2328,8 @@ export const en = {
     },
     deletion: {
       title: "Data Deletion",
+      statusTitle: "Deletion request status",
+      statusBody: "Your data deletion request from Meta has been received and recorded under confirmation code {code}. Our team processes requests within 30 days; keep this code to ask about its status via {email}.",
       intro: "This page explains how data is deleted in Sahabat Kreator, including data received from Meta platforms, and how to request complete deletion. These instructions also serve as our data deletion instructions URL for the Meta app settings.",
       s1Title: "Disconnecting a channel",
       s1Body: "When you disconnect a channel (WhatsApp, Instagram, Messenger, Telegram, or web chat), the stored access token for that channel is deleted immediately and the channel stops sending and receiving. Conversations already in your inbox remain visible in your workspace until you delete the channel.",

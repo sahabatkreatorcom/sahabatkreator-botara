@@ -1,4 +1,4 @@
-import { timingSafeEqual, createHash } from "node:crypto";
+import { timingSafeEqual, createHash, randomBytes } from "node:crypto";
 import { Hono, type Context } from "hono";
 import {
   getProviderSecret,
@@ -6,7 +6,10 @@ import {
   type PlatformSettingsOptions,
   type RecordIntegrationLogInput,
 } from "@sahabat-kreator/core";
-import { verifyMetaWebhookSignature } from "@sahabat-kreator/channel-messenger";
+import {
+  parseMetaSignedRequest,
+  verifyMetaWebhookSignature,
+} from "@sahabat-kreator/channel-messenger";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
@@ -26,6 +29,17 @@ import { processMetaWebhookPayload } from "./process";
  *                              aplikasi Meta); hanya label provider
  *                              baris log gerbangnya yang berbeda
  *                              ('whatsapp').
+ *   POST /webhooks/meta/data-deletion  callback penghapusan data Meta:
+ *                              POST form `signed_request` terverifikasi
+ *                              app secret → permintaan dicatat ke log
+ *                              integrasi (provider 'meta') → respons
+ *                              JSON `{url, confirmation_code}` sesuai
+ *                              spesifikasi Meta; `url` menunjuk halaman
+ *                              status publik /data-deletion?code=…
+ *                              BATAS: pencatatan adalah antrean tindak
+ *                              lanjut admin platform (penghapusan data
+ *                              pengguna dikerjakan dari catatan itu);
+ *                              belum ada penghapusan otomatis per baris.
  *
  * Penyeragaman URL 2026-11-12: path lama /meta/webhook TIDAK
  * didaftarkan lagi (aturan pemilik: tanpa alias/fallback — registrasi
@@ -90,6 +104,8 @@ export interface MetaModuleOptions {
   metaApiBase?: string;
   /** Versi Graph ter-pin (dari @sahabat-kreator/config). */
   graphApiVersion: string;
+  /** URL publik aplikasi (env BETTER_AUTH_URL) — dasar URL status penghapusan data pada respons callback Meta. */
+  publicBaseUrl?: string;
 }
 
 type ApiContext = Context<{ Variables: AppVariables }>;
@@ -279,6 +295,88 @@ export function createMetaRoutes(
     app.get(path, (c) => handleHandshake(c, gateProvider));
     app.post(path, (c) => handleEvent(c, gateProvider));
   }
+
+  // Callback penghapusan data Meta (spesifikasi Meta untuk aplikasi
+  // yang memproses data pengguna): POST form-urlencoded berisi
+  // `signed_request`. Berbeda dari webhook event, gerbangnya adalah
+  // tanda tangan DI DALAM signed_request itu sendiri (HMAC app
+  // secret), bukan header. Permintaan yang lolos dicatat ke log
+  // integrasi sebagai antrean tindak lanjut admin platform, lalu
+  // dijawab {url, confirmation_code} persis format Meta.
+  app.post("/webhooks/meta/data-deletion", async (c) => {
+    if (!bundle) {
+      return apiError(c, 503, "INTERNAL_ERROR", "Database is not configured");
+    }
+    const appSecret = opts.platform
+      ? await getProviderSecret(bundle.db, "meta_app_secret", opts.platform)
+      : opts.appSecret;
+    if (!appSecret) {
+      await logIntegration({
+        direction: "in",
+        provider: "meta",
+        outcome: "rejected_unconfigured",
+        summary: "Data deletion rejected: meta app secret not configured",
+      });
+      return apiError(
+        c,
+        503,
+        "META_NOT_CONFIGURED",
+        "Meta app secret is not configured",
+      );
+    }
+    const rawBody = await c.req.text();
+    const signedRequest = new URLSearchParams(rawBody).get("signed_request");
+    if (!signedRequest) {
+      await logIntegration({
+        direction: "in",
+        provider: "meta",
+        signatureValid: false,
+        outcome: "error",
+        errorCode: "missing_signed_request",
+        summary: "Data deletion rejected: signed_request missing",
+      });
+      return apiError(
+        c,
+        400,
+        "VALIDATION_ERROR",
+        "signed_request is required",
+      );
+    }
+    const parsed = parseMetaSignedRequest(signedRequest, appSecret);
+    if (!parsed) {
+      await logIntegration({
+        direction: "in",
+        provider: "meta",
+        signatureValid: false,
+        outcome: "rejected_signature",
+        summary: "Data deletion rejected: signed_request invalid",
+      });
+      return apiError(
+        c,
+        401,
+        "META_SIGNATURE_INVALID",
+        "Invalid signed_request signature",
+      );
+    }
+    const confirmationCode = randomBytes(9).toString("hex");
+    await logIntegration({
+      direction: "in",
+      provider: "meta",
+      signatureValid: true,
+      outcome: "recorded",
+      summary: `Data deletion request recorded for Meta user ${parsed.userId}`,
+      payload: {
+        userId: parsed.userId,
+        confirmationCode,
+        issuedAt: parsed.issuedAt,
+      },
+    });
+    const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
+    return c.json({
+      url: `${webBase}/data-deletion?code=${confirmationCode}`,
+      confirmation_code: confirmationCode,
+    });
+  });
 
   return app;
 }

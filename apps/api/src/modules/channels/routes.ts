@@ -853,6 +853,7 @@ export function createChannelsRoutes(
     const body = MetaWebhookInfoResponseSchema.parse({
       webhookUrl: `${baseUrl}/api/webhooks/meta`,
       whatsappWebhookUrl: `${baseUrl}/api/webhooks/whatsapp`,
+      dataDeletionCallbackUrl: `${baseUrl}/api/webhooks/meta/data-deletion`,
       verifyToken,
       appSecretConfigured,
     });

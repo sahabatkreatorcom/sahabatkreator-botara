@@ -446,6 +446,7 @@ routes.route(
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
     metaApiBase: env.META_API_BASE,
     graphApiVersion: META_GRAPH_API_VERSION,
+    publicBaseUrl: env.BETTER_AUTH_URL,
   }),
 );
 // Modul telegram publik (Fase 6A) — webhook Bot API /telegram/webhook/:id.

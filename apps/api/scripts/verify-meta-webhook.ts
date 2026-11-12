@@ -13,7 +13,13 @@
  *   [5] POST tanda tangan palsu → 401 di kedua path, dan baris log
  *       gerbangnya memakai provider sesuai path ('meta'/'whatsapp');
  *   [6] path lama /meta/webhook → 404 (GET & POST): tidak terdaftar
- *       lagi, tidak ada alias/fallback.
+ *       lagi, tidak ada alias/fallback;
+ *   [7] POST /webhooks/meta/data-deletion dengan signed_request SAH →
+ *       200 {url, confirmation_code} persis format Meta, url menunjuk
+ *       halaman status /data-deletion?code=…, dan permintaan tercatat
+ *       di log integrasi (payload memuat kode konfirmasinya);
+ *   [8] signed_request bertanda tangan RUSAK → 401;
+ *   [9] signed_request HILANG → 400.
  *
  * Kredensial di skrip ini BUKAN kredensial sungguhan.
  *
@@ -59,6 +65,7 @@ app.route(
     verifyToken: VERIFY_TOKEN,
     appSecret: APP_SECRET,
     graphApiVersion: "v26.0",
+    publicBaseUrl: "https://app.test",
   }),
 );
 
@@ -139,6 +146,69 @@ async function handshake(pathname: string, token: string) {
   assert.ok(providers.includes("meta"), "log gerbang /webhooks/meta berprovider 'meta'");
   assert.ok(providers.includes("whatsapp"), "log gerbang /webhooks/whatsapp berprovider 'whatsapp'");
   console.log("[5] tanda tangan palsu → 401; provider log gerbang sesuai path: OK");
+}
+
+// ---------- [7] Data deletion: signed_request sah ----------
+function buildSignedRequest(userId: string, secret: string): string {
+  const payloadPart = Buffer.from(
+    JSON.stringify({
+      algorithm: "HMAC-SHA256",
+      user_id: userId,
+      issued_at: 1_760_000_000,
+    }),
+    "utf8",
+  ).toString("base64url");
+  const signature = createHmac("sha256", secret)
+    .update(payloadPart, "utf8")
+    .digest()
+    .toString("base64url");
+  return `${signature}.${payloadPart}`;
+}
+
+{
+  const signedRequest = buildSignedRequest("meta-user-uji", APP_SECRET);
+  const res = await app.request("/webhooks/meta/data-deletion", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ signed_request: signedRequest }).toString(),
+  });
+  assert.equal(res.status, 200);
+  const body = (await res.json()) as { url: string; confirmation_code: string };
+  assert.ok(body.confirmation_code.length >= 8);
+  assert.equal(
+    body.url,
+    `https://app.test/data-deletion?code=${body.confirmation_code}`,
+  );
+  const rows = await client.query<{ payload: string }>(
+    `SELECT payload::text AS payload FROM integration_log WHERE outcome = 'recorded' AND summary LIKE 'Data deletion request%'`,
+  );
+  assert.equal(rows.rows.length, 1);
+  assert.ok(rows.rows[0]!.payload.includes(body.confirmation_code));
+  assert.ok(rows.rows[0]!.payload.includes("meta-user-uji"));
+  console.log("[7] data-deletion signed_request sah → 200 {url, confirmation_code} + tercatat: OK");
+}
+
+// ---------- [8] Data deletion: tanda tangan rusak ----------
+{
+  const signedRequest = buildSignedRequest("meta-user-uji", "secret-lain");
+  const res = await app.request("/webhooks/meta/data-deletion", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ signed_request: signedRequest }).toString(),
+  });
+  assert.equal(res.status, 401);
+  console.log("[8] data-deletion tanda tangan salah → 401: OK");
+}
+
+// ---------- [9] Data deletion: signed_request hilang ----------
+{
+  const res = await app.request("/webhooks/meta/data-deletion", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded" },
+    body: "bukan_signed_request=1",
+  });
+  assert.equal(res.status, 400);
+  console.log("[9] data-deletion tanpa signed_request → 400: OK");
 }
 
 // ---------- [6] Path lama tidak terdaftar ----------

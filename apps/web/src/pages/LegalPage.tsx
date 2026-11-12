@@ -118,6 +118,13 @@ interface LegalPageProps {
 export function LegalPage({ t, kind, controls, onNavigate }: LegalPageProps) {
   const doc = LEGAL_DOCS[kind];
   const params = { email: LEGAL_CONTACT_EMAIL };
+  // Kode konfirmasi dari callback penghapusan data Meta: API menjawab
+  // permintaan Meta dengan URL halaman ini + `?code=<kode>`; bila ada,
+  // tampilkan status penerimaan permintaannya di atas dokumen.
+  const deletionCode =
+    kind === "deletion" && typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("code")
+      : null;
   return (
     <div className="min-h-screen bg-bg text-ink">
       <div className="mx-auto w-full max-w-3xl px-4 py-8 md:py-12">
@@ -145,6 +152,16 @@ export function LegalPage({ t, kind, controls, onNavigate }: LegalPageProps) {
           <p className="mt-4 text-sm leading-relaxed text-ink">
             {t(doc.intro, params)}
           </p>
+          {deletionCode ? (
+            <div className="mt-5 rounded-xl border border-line bg-elevated p-4">
+              <h2 className="text-sm font-semibold text-ink">
+                {t("legal.deletion.statusTitle")}
+              </h2>
+              <p className="mt-1 text-sm leading-relaxed text-ink">
+                {t("legal.deletion.statusBody", { ...params, code: deletionCode })}
+              </p>
+            </div>
+          ) : null}
           {doc.sections.map((section) => (
             <section key={section.title} className="mt-7">
               <h2 className="text-base font-semibold text-ink">

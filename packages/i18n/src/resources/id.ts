@@ -421,6 +421,7 @@ export const id: Resources = {
     metaWebhookBody: "Di aplikasi Meta Anda, buka Webhooks lalu isi Callback URL dan Verify Token di bawah. Setelah itu berlangganan field messages untuk setiap objek yang dipakai.",
     metaWebhookUrlLabel: "Callback URL",
     whatsappWebhookUrlLabel: "Callback URL WhatsApp",
+    dataDeletionCallbackUrlLabel: "Callback URL Penghapusan Data",
     metaWebhookTokenLabel: "Verify Token",
     metaWebhookNotConfigured: "Pengaturan webhook belum tersedia.",
     metaWebhookSecretMissing: "Webhook masuk akan ditolak sampai app secret dikonfigurasi.",
@@ -2326,6 +2327,8 @@ export const id: Resources = {
     },
     deletion: {
       title: "Penghapusan Data",
+      statusTitle: "Status permintaan penghapusan",
+      statusBody: "Permintaan penghapusan data Anda dari platform Meta sudah kami terima dan catat dengan kode konfirmasi {code}. Permintaan diproses oleh tim kami paling lambat 30 hari; simpan kode ini untuk menanyakan statusnya lewat {email}.",
       intro: "Halaman ini menjelaskan cara data dihapus di Sahabat Kreator, termasuk data yang diterima dari platform Meta, dan cara meminta penghapusan menyeluruh. Instruksi ini juga berfungsi sebagai URL instruksi penghapusan data kami untuk pengaturan aplikasi Meta.",
       s1Title: "Memutus channel",
       s1Body: "Saat Anda memutus channel (WhatsApp, Instagram, Messenger, Telegram, atau web chat), token akses tersimpan untuk channel itu segera dihapus dan channel berhenti mengirim serta menerima pesan. Percakapan yang sudah ada di kotak masuk Anda tetap terlihat di workspace Anda sampai Anda menghapus channel-nya.",

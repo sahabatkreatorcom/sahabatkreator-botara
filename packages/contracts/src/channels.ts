@@ -270,6 +270,13 @@ export const MetaWebhookInfoResponseSchema = z.object({
    * whatsapp_business_account.
    */
   whatsappWebhookUrl: z.string(),
+  /**
+   * URL callback penghapusan data Meta:
+   * `{publicBaseUrl}/api/webhooks/meta/data-deletion` — didaftarkan ke
+   * pengaturan aplikasi Meta (Data Deletion Callback); Meta mengirim
+   * POST `signed_request` ke sini saat pengguna meminta penghapusan.
+   */
+  dataDeletionCallbackUrl: z.string(),
   /** Verify token untuk ditempel ke Meta App; null bila env belum diset. */
   verifyToken: z.string().nullable(),
   /** True bila platform sudah punya app secret untuk memverifikasi tanda tangan. */
