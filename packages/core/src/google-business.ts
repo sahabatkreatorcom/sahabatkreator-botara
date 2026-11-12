@@ -2,7 +2,7 @@ import { and, eq, notInArray } from "drizzle-orm";
 import { channelAccounts, type Database } from "@sahabat-kreator/db";
 import {
   GOOGLE_BUSINESS_MANAGE_SCOPE,
-  getValidGoogleAccess,
+  getValidGoogleServiceAccess,
   type GoogleDeps,
 } from "./google-calendar";
 import { googleScopesInclude } from "./youtube";
@@ -11,15 +11,17 @@ import { withTenantDb } from "./tx";
 /**
  * Google Business Profile (Gelombang 3) — jembatan antara koneksi
  * Google tenant dan content schedule, saudara kandung core/youtube.
- * Modul ini TIDAK membuat jalur OAuth kedua:
  *
- * - Koneksi Google (Fase 13G, `google_calendar_connections`) adalah
- *   SATU-SATUNYA tempat kredensial Google tenant tinggal — access +
- *   refresh token terenkripsi, klien OAuth milik platform, refresh
- *   lewat `getValidGoogleAccess` yang sama dengan Calendar/YouTube.
- *   Sejak gelombang ini `GOOGLE_OAUTH_SCOPES` juga meminta
- *   `business.manage`, jadi satu consent melayani kalender, kanal,
- *   dan profil bisnis.
+ * - Sejak pemisahan Google (2026-11-12) kredensial Business tenant
+ *   tinggal di koneksi layanan BUSINESS-nya sendiri
+ *   (`google_connections` service='business', consent sempit
+ *   business.manage, klien OAuth proyek Business sendiri bila diisi
+ *   Panel Admin) — BUKAN lagi koneksi gabungan Calendar. Refresh
+ *   lewat `getValidGoogleServiceAccess(..., "business", ...)`
+ *   memakai klien penerbit token itu. (Model lama Gelombang 3 —
+ *   satu consent gabungan — berakhir di migrasi 0023; koneksi
+ *   gabungan lama tersemai menjadi baris business di sana bila
+ *   scope-nya mencakup.)
  * - Akun channel `provider='google_business'` hanya membawa
  *   IDENTITAS LOKASI: `external_id` = nama resource lokasi
  *   (`accounts/{accountId}/locations/{locationId}`), `display_name` =
@@ -138,24 +140,26 @@ export async function fetchGoogleBusinessLocations(
 
 /**
  * Sinkronkan akun lokasi google_business tenant dari koneksi
- * Googlenya: ambil access token yang sah, baca semua lokasi
- * (`business.manage` wajib — tanpa scope itu daftar lokasi tidak
- * bisa diketahui), lalu upsert satu baris `channel_accounts` per
- * lokasi. Baris google_business LAIN milik tenant yang tidak lagi
- * muncul pada daftar segar diturunkan ke `disconnected`: himpunan
- * lokasi aktif selalu mencerminkan koneksi Google saat ini.
+ * Business-nya: ambil access token layanan business yang sah, baca
+ * semua lokasi (`business.manage` wajib — tanpa scope itu daftar
+ * lokasi tidak bisa diketahui), lalu upsert satu baris
+ * `channel_accounts` per lokasi. Baris google_business LAIN milik
+ * tenant yang tidak lagi muncul pada daftar segar diturunkan ke
+ * `disconnected`: himpunan lokasi aktif selalu mencerminkan koneksi
+ * Business saat ini.
  *
- * Dipanggil dari callback OAuth Google (modul janji temu) tepat
- * setelah koneksi disimpan. Mengembalikan daftar lokasi, atau null
- * bila sinkron tidak bisa dilakukan (belum terhubung, scope kurang,
- * provider tak terjangkau) — pemanggil mengabaikan null.
+ * Dipanggil dari callback OAuth Google layanan business tepat
+ * setelah koneksi business disimpan. Mengembalikan daftar lokasi,
+ * atau null bila sinkron tidak bisa dilakukan (belum terhubung,
+ * scope kurang, provider tak terjangkau) — pemanggil mengabaikan
+ * null.
  */
 export async function syncGoogleBusinessLocationAccounts(
   db: Database,
   tenantId: string,
   deps: GoogleDeps,
 ): Promise<GoogleBusinessLocationIdentity[] | null> {
-  const access = await getValidGoogleAccess(db, tenantId, deps);
+  const access = await getValidGoogleServiceAccess(db, tenantId, "business", deps);
   if (!access) return null;
   if (
     !googleScopesInclude(access.connection.scopes, GOOGLE_BUSINESS_MANAGE_SCOPE)
@@ -228,22 +232,24 @@ export type GoogleBusinessPublishAccess =
   | { kind: "ok"; accessToken: string }
   /** Tidak ada koneksi Google yang bisa dipakai (belum terhubung / refresh mati / klien platform belum terkonfigurasi). */
   | { kind: "not_connected" }
-  /** Terhubung, tetapi consent lama belum mencakup `business.manage` — pemilik perlu menghubungkan ulang Google. */
+  /** Terhubung, tetapi consent koneksi business belum mencakup `business.manage` — pemilik perlu menghubungkan ulang Google Business. */
   | { kind: "scope_missing" };
 
 /**
  * Access token untuk SATU publikasi Google Business: refresh token
- * koneksi Google ditukar/dipakai ulang lewat `getValidGoogleAccess`
- * yang sama dengan Calendar/YouTube (access token TIDAK pernah
- * disimpan oleh pemanggil). Scope diperiksa dari daftar scope yang
- * diberikan pada koneksi — refresh tidak mengubah scope grant asal.
+ * koneksi layanan BUSINESS ditukar/dipakai ulang lewat
+ * `getValidGoogleServiceAccess(..., "business", ...)` (access token
+ * TIDAK pernah disimpan oleh pemanggil). Scope diperiksa dari
+ * daftar scope yang diberikan pada koneksi business — refresh tidak
+ * mengubah scope grant asal. Koneksi Calendar/YouTube tenant TIDAK
+ * bisa menerbitkan Business Profile (pemisahan layanan).
  */
 export async function getGoogleBusinessPublishAccess(
   db: Database,
   tenantId: string,
   deps: GoogleDeps,
 ): Promise<GoogleBusinessPublishAccess> {
-  const access = await getValidGoogleAccess(db, tenantId, deps);
+  const access = await getValidGoogleServiceAccess(db, tenantId, "business", deps);
   if (!access) return { kind: "not_connected" };
   if (
     !googleScopesInclude(access.connection.scopes, GOOGLE_BUSINESS_MANAGE_SCOPE)

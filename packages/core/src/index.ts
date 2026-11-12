@@ -638,8 +638,10 @@ export {
 export {
   // YouTube (Gelombang 2): sinkronisasi akun channel dari koneksi
   // Google + gerbang akses publikasi (scope youtube.upload).
+  // Pemisahan Google: sumbernya koneksi layanan youtube tenant.
   fetchYouTubeOwnChannel,
   syncYouTubeChannelAccount,
+  backfillYouTubeChannelProfile,
   getYouTubePublishAccess,
   googleScopesInclude,
   type YouTubeChannelIdentity,

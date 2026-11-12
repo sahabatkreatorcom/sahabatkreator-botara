@@ -1,10 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   GOOGLE_BUSINESS_MANAGE_SCOPE,
-  GOOGLE_OAUTH_SCOPES,
+  GOOGLE_SERVICE_SCOPES,
   YOUTUBE_UPLOAD_SCOPE,
-  deleteGoogleConnection,
-  saveGoogleConnection,
+  deleteGoogleServiceConnection,
+  saveGoogleServiceConnection,
   type GoogleDeps,
 } from "./google-calendar";
 import {
@@ -21,26 +21,25 @@ import {
 /**
  * Google Business (Gelombang 3) — jembatan koneksi Google → akun lokasi.
  *
- * Yang dijaga di sini:
- * 1. Satu consent Google melayani Calendar + YouTube + Business
- *    Profile (scope business.manage ada di GOOGLE_OAUTH_SCOPES) —
- *    tidak ada jalur OAuth kedua.
- * 2. Sinkronisasi memetakan koneksi Google menjadi SATU baris akun
+ * Yang dijaga di sini (diperbarui untuk pemisahan Google per
+ * layanan, 2026-11-12):
+ * 1. Consent Business adalah consent LAYANAN business sendiri —
+ *    scope business.manage ada di GOOGLE_SERVICE_SCOPES.business
+ *    dan TIDAK tercampur scope calendar/youtube; sumber tokennya
+ *    koneksi `google_connections` service='business'.
+ * 2. Sinkronisasi memetakan koneksi business menjadi SATU baris akun
  *    channel google_business PER LOKASI (identitas saja, TANPA
  *    token) secara idempoten; lokasi yang hilang dari daftar segar
  *    turun ke disconnected.
  * 3. Gerbang publish membedakan "belum terhubung" dari "scope
- *    kurang" — koneksi Google lama tidak boleh tampak seperti
- *    lokasi mati; ia harus bisa dijelaskan sebagai consent yang
- *    perlu diperbarui.
+ *    kurang" — dan koneksi layanan LAIN saja TIDAK menerbitkan
+ *    Business Profile.
  */
 
 const TOKEN_SECRET = Buffer.alloc(32, 7).toString("base64");
 const FULL_SCOPES = [
   "openid",
   "email",
-  "https://www.googleapis.com/auth/calendar.events",
-  YOUTUBE_UPLOAD_SCOPE,
   GOOGLE_BUSINESS_MANAGE_SCOPE,
 ].join(" ");
 const NO_BUSINESS_SCOPES =
@@ -73,8 +72,11 @@ let stubLocations: Array<{ name: string; title: string }> = [
 
 let ctx: TestDb;
 
-async function saveConnection(scopes: string): Promise<void> {
-  await saveGoogleConnection(ctx.db, TEST_TENANT_ID, {
+async function saveBusinessConnection(
+  tenantId: string,
+  scopes: string,
+): Promise<void> {
+  await saveGoogleServiceConnection(ctx.db, tenantId, "business", {
     tokens: {
       accessToken: "akses-uji",
       refreshToken: "refresh-uji",
@@ -109,7 +111,7 @@ beforeAll(async () => {
       throw new Error(`fetch tak terduga di test google-business: ${url}`);
     }),
   );
-  await saveConnection(FULL_SCOPES);
+  await saveBusinessConnection(TEST_TENANT_ID, FULL_SCOPES);
 });
 
 afterAll(async () => {
@@ -117,9 +119,17 @@ afterAll(async () => {
   await ctx.close();
 });
 
-describe("koneksi Google → Google Business", () => {
-  it("satu consent Google memuat scope business.manage", () => {
-    expect(GOOGLE_OAUTH_SCOPES).toContain(GOOGLE_BUSINESS_MANAGE_SCOPE);
+describe("koneksi Business → akun lokasi", () => {
+  it("consent per layanan: scope business.manage hanya di set business", () => {
+    expect(GOOGLE_SERVICE_SCOPES.business).toContain(
+      GOOGLE_BUSINESS_MANAGE_SCOPE,
+    );
+    expect(GOOGLE_SERVICE_SCOPES.business.join(" ")).not.toContain(
+      "calendar.events",
+    );
+    expect(GOOGLE_SERVICE_SCOPES.business).not.toContain(
+      YOUTUBE_UPLOAD_SCOPE,
+    );
   });
 
   it("sinkron membuat satu akun lokasi per lokasi (identitas saja) dan idempoten", async () => {
@@ -147,7 +157,7 @@ describe("koneksi Google → Google Business", () => {
       external_id: LOCATION_ONE.name,
       display_name: LOCATION_ONE.title,
       status: "connected",
-      // Kredensial TIDAK tinggal di akun channel — ia di koneksi Google.
+      // Kredensial TIDAK tinggal di akun channel — ia di koneksi business.
       access_token_encrypted: null,
     });
   });
@@ -186,8 +196,8 @@ describe("koneksi Google → Google Business", () => {
     expect(access).toEqual({ kind: "ok", accessToken: "akses-uji" });
   });
 
-  it("koneksi Google lama (tanpa scope business) → scope_missing, bukan not_connected", async () => {
-    await saveConnection(NO_BUSINESS_SCOPES);
+  it("koneksi business tanpa scope business → scope_missing, bukan not_connected", async () => {
+    await saveBusinessConnection(TEST_TENANT_ID, NO_BUSINESS_SCOPES);
     const access = await getGoogleBusinessPublishAccess(
       ctx.db,
       TEST_TENANT_ID,
@@ -198,17 +208,27 @@ describe("koneksi Google → Google Business", () => {
     expect(
       await syncGoogleBusinessLocationAccounts(ctx.db, TEST_TENANT_ID, deps),
     ).toBeNull();
-    await saveConnection(FULL_SCOPES);
+    await saveBusinessConnection(TEST_TENANT_ID, FULL_SCOPES);
   });
 
-  it("tenant tanpa koneksi Google → not_connected", async () => {
+  it("tenant yang hanya punya koneksi CALENDAR → Business not_connected (layanan terpisah)", async () => {
+    await saveGoogleServiceConnection(ctx.db, TEST_TENANT_B_ID, "calendar", {
+      tokens: {
+        accessToken: "akses-kalender",
+        refreshToken: "refresh-kalender",
+        expiresInSec: 3600,
+        scope: FULL_SCOPES,
+      },
+      accountEmail: "b@example.com",
+      tokenSecret: TOKEN_SECRET,
+    });
     expect(
       await getGoogleBusinessPublishAccess(ctx.db, TEST_TENANT_B_ID, deps),
     ).toEqual({ kind: "not_connected" });
     expect(
       await syncGoogleBusinessLocationAccounts(ctx.db, TEST_TENANT_B_ID, deps),
     ).toBeNull();
-    await deleteGoogleConnection(ctx.db, TEST_TENANT_B_ID).catch(
+    await deleteGoogleServiceConnection(ctx.db, TEST_TENANT_B_ID, "business").catch(
       () => undefined,
     );
   });
