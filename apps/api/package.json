@@ -24,6 +24,7 @@
     "verify:pinterest-boards": "tsx scripts/verify-pinterest-boards.ts",
     "verify:bluesky-connect": "tsx scripts/verify-bluesky-connect.ts",
     "verify:google-channels": "tsx scripts/verify-google-channels.ts",
+    "verify:agent-templates": "tsx scripts/verify-agent-templates.ts",
     "backfill:reply-snapshots": "tsx scripts/backfill-reply-snapshots.ts",
     "backfill:usage-meta": "tsx scripts/backfill-usage-meta.ts",
     "backfill:kb-embeddings": "tsx scripts/backfill-kb-embeddings.ts"
