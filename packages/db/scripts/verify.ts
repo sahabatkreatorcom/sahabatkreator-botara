@@ -111,7 +111,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 1 tabel Templat Instruction / migrasi 0027 (agent_instruction_templates)
 // + 1 tabel Gelombang G2 / migrasi 0028 (sequence_templates)
 // + 1 tabel Gelombang G3 / migrasi 0029 (flow_versions)
-assert.equal(Number(tablesRes.rows[0].count), 67);
+// + 1 tabel Gelombang G8 / migrasi 0032 (contact_notes)
+assert.equal(Number(tablesRes.rows[0].count), 68);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -275,7 +276,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-12: migrasi 0029 (Gelombang G3 — versioning flow) menambah
 // `flow_versions` dengan tenant_isolation → 92.
-assert.equal(Number(policies.rows[0].count), 92);
+//
+// 2026-11-12: migrasi 0032 (Gelombang G8 — catatan level kontak)
+// menambah `contact_notes` dengan tenant_isolation → 93.
+assert.equal(Number(policies.rows[0].count), 93);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2429,8 +2433,11 @@ function oneHotVector(index: number): string {
   // policy 91.
   // 2026-11-12: migrasi 0029 (Gelombang G3 — versioning flow) menambah
   // flow_versions beserta tenant_isolation-nya → tabel 67, policy 92.
-  assert.equal(counts.rows[0].tables, "67");
-  assert.equal(counts.rows[0].policies, "92");
+  // 2026-11-12: migrasi 0032 (Gelombang G8 — catatan level kontak)
+  // menambah contact_notes beserta tenant_isolation-nya → tabel 68,
+  // policy 93.
+  assert.equal(counts.rows[0].tables, "68");
+  assert.equal(counts.rows[0].policies, "93");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

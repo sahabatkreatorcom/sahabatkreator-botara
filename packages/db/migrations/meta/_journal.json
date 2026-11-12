@@ -225,6 +225,13 @@
       "when": 1794477824043,
       "tag": "0031_agent_conversation_reply_cap",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1794477824044,
+      "tag": "0032_contact_notes",
+      "breakpoints": true
     }
   ]
 }

@@ -494,6 +494,45 @@ export const conversationNotes = pgTable(
 
 export type ConversationNote = typeof conversationNotes.$inferSelect;
 export type NewConversationNote = typeof conversationNotes.$inferInsert;
+
+/**
+ * Catatan internal KONTAK (Gelombang G8) — saudara `conversation_notes`
+ * yang menempel pada kontak, bukan percakapan: hal yang perlu diingat
+ * tim tentang ORANGNYA (lintas semua percakapan & kanal), bukan tentang
+ * satu utas. Tabelnya sendiri dengan alasan yang sama seperti 9C —
+ * tidak ada jalur pengiriman yang membaca tabel ini, jadi catatan tidak
+ * bisa terkirim ke kontak. `author_user_id` ON DELETE SET NULL seperti
+ * catatan percakapan (penulis yatim hanya bisa dihapus owner/admin).
+ * Keduanya SENGAJA tidak dicampur: catatan kontak tidak tampil di
+ * daftar catatan percakapan dan sebaliknya; linimasa kontak hanya
+ * mencatat PERISTIWA "catatan ditambahkan" dari keduanya sebagai dua
+ * jenis peristiwa yang berbeda label.
+ */
+export const contactNotes = pgTable(
+  "contact_notes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    contactId: uuid("contact_id")
+      .notNull()
+      .references(() => contacts.id, { onDelete: "cascade" }),
+    authorUserId: uuid("author_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("contact_notes_tenant_id_idx").on(t.tenantId),
+    index("contact_notes_contact_created_idx").on(t.contactId, t.createdAt),
+  ],
+);
+
+export type ContactNote = typeof contactNotes.$inferSelect;
+export type NewContactNote = typeof contactNotes.$inferInsert;
 export const channelIdentities = pgTable(
   "channel_identities",
   {
