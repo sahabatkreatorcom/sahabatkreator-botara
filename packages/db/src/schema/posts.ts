@@ -52,6 +52,33 @@ export const postStatusEnum = pgEnum("post_status", [
 ]);
 
 /**
+ * Keadaan persetujuan postingan (Fase Susulan S1, migrasi 0046).
+ *
+ * Mesin statusnya terpisah dari `post_status` dengan sengaja: status
+ * publikasi menjawab "sudah tayang atau belum", status persetujuan
+ * menjawab "sudah boleh tayang atau belum". Nilai:
+ * - `draft`             : belum diajukan (keadaan awal; juga hasil
+ *                         reset saat isi postingan disunting).
+ * - `pending_review`    : diajukan, menunggu keputusan peninjau.
+ * - `approved`          : disetujui — satu-satunya keadaan yang boleh
+ *                         melewati gerbang penerbitan saat tenant
+ *                         mengaktifkan persetujuan wajib.
+ * - `rejected`          : ditolak; `approval_note` wajib terisi.
+ * - `changes_requested` : diminta revisi; catatan wajib terisi.
+ *
+ * Keadaan hidup per baris `posts`, tetapi transisi di core selalu
+ * bekerja pada UNIT grup multi-target (satu keputusan per konten
+ * induk) — lihat komentar kolom `tenants.postApprovalRequired`.
+ */
+export const postApprovalStatusEnum = pgEnum("post_approval_status", [
+  "draft",
+  "pending_review",
+  "approved",
+  "rejected",
+  "changes_requested",
+]);
+
+/**
  * Cermin struktural `PostPublishOptions` (packages/contracts) untuk
  * kolom `posts.publish_options` — lihat komentar kolomnya. Semua
  * field opsional: kelengkapan yang diwajibkan platform ditegakkan
@@ -160,6 +187,32 @@ export const posts = pgTable(
      * belum dipilih (resolusi publish jatuh ke bawaan platform).
      */
     publishOptions: jsonb("publish_options").$type<PostPublishOptionsRecord>(),
+    /**
+     * Persetujuan (Fase Susulan S1, migrasi 0046). Kolom-kolom ini
+     * hanya MAKNA bila tenant mengaktifkan `post_approval_required`;
+     * bila tidak, semuanya tetap pada keadaan awal dan tidak dibaca
+     * gerbang mana pun. `approval_note` = catatan keputusan terakhir
+     * (penolakan / minta revisi) — tampil ke pembuat; riwayat
+     * keputusan lengkap hidup di `audit_logs`, bukan disalin ke sini.
+     */
+    approvalStatus: postApprovalStatusEnum("approval_status")
+      .notNull()
+      .default("draft"),
+    approvalNote: text("approval_note"),
+    approvalSubmittedByUserId: uuid("approval_submitted_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    approvalSubmittedAt: timestamp("approval_submitted_at", {
+      withTimezone: true,
+    }),
+    approvalReviewedByUserId: uuid("approval_reviewed_by_user_id").references(
+      () => users.id,
+      { onDelete: "set null" },
+    ),
+    approvalReviewedAt: timestamp("approval_reviewed_at", {
+      withTimezone: true,
+    }),
     createdByUserId: uuid("created_by_user_id").references(() => users.id, {
       onDelete: "set null",
     }),
@@ -175,6 +228,8 @@ export const posts = pgTable(
     index("posts_tenant_scheduled_idx").on(t.tenantId, t.scheduledAt),
     // Saringan status di daftar (draft/scheduled/...).
     index("posts_tenant_status_idx").on(t.tenantId, t.status),
+    // Antrean tinjauan: saringan daftar per status persetujuan (S1).
+    index("posts_tenant_approval_idx").on(t.tenantId, t.approvalStatus),
     // Sasaran per channel (dipakai saat disconnect: apa yang masih terjadwal).
     index("posts_conversation_idx").on(t.conversationId),
     // Anggota satu grup dibaca bersama (kartu grup di kalender).
@@ -219,3 +274,4 @@ export type Post = typeof posts.$inferSelect;
 export type NewPost = typeof posts.$inferInsert;
 export type PostMedia = typeof postMedia.$inferSelect;
 export type PostStatus = Post["status"];
+export type PostApprovalStatus = Post["approvalStatus"];

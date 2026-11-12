@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -72,6 +73,17 @@ export const tenants = pgTable("tenants", {
    * bukan dianggap patuh. Zona waktunya = `timezone` tenant.
    */
   defaultWorkSchedule: jsonb("default_work_schedule").$type<WorkSchedule>(),
+  /**
+   * Persetujuan wajib untuk postingan terjadwal (Fase Susulan S1,
+   * migrasi 0046). OPT-IN: bawaan false = perilaku lama utuh. Bila
+   * true, postingan hanya boleh terbit sesudah berstatus persetujuan
+   * `approved`; worker `post.publish` menolak yang belum disetujui
+   * dan mencatat alasannya (`post_approval_required`) pada baris
+   * postingan — bukan gagal diam-diam, bukan terbit diam-diam.
+   */
+  postApprovalRequired: boolean("post_approval_required")
+    .notNull()
+    .default(false),
   status: tenantStatusEnum("status").notNull().default("active"),
   /** Alasan penangguhan yang diketik admin — dibaca pemilik saat mengajukan banding. */
   statusReason: text("status_reason"),
