@@ -50,6 +50,13 @@ import { contacts, conversations, messages } from "./inbox";
  *                       `detail` mencatat tool call yang DIUSULKAN agent
  *                       (di mode suggest tool TIDAK dieksekusi, termasuk
  *                       setelah approve: approve hanya mengirim teks).
+ * - agent_instruction_templates : templat instruksi PRIBADI tenant
+ *                       (gelombang Templat Instruction /agents) — salinan
+ *                       instruction + mode + bahasa yang disimpan pemilik
+ *                       dari formulir agent untuk dipakai ulang dari galeri
+ *                       templat yang sama dengan templat bawaan statis
+ *                       (katalog bawaan hidup di kontrak, BUKAN di tabel
+ *                       ini). RLS migrasi 0027.
  * Semua tabel tenant-scoped: tenant_id + index, dilindungi RLS (migrasi 0010).
  *
  * Catatan kolom handoff: RANCANGAN menamai saklar AI per percakapan
@@ -280,6 +287,43 @@ export const agentSuggestions = pgTable(
   ],
 );
 
+/**
+ * Templat instruksi pribadi tenant: satu baris = satu templat yang
+ * disimpan pemilik dari formulir buat/edit agent (nama bebas dari
+ * pemilik; isi = instruction + mode + bahasa saat disimpan). Dipakai
+ * ulang dari galeri templat di formulir yang sama; menghapusnya tidak
+ * menyentuh agent mana pun (templat adalah salinan, bukan rujukan).
+ * `language` NULL = templat tidak menyarankan bahasa (ikuti lawan
+ * bicara, sama seperti config.language kosong pada agent).
+ */
+export const agentInstructionTemplates = pgTable(
+  "agent_instruction_templates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    name: varchar("name", { length: 255 }).notNull(),
+    /** Instruction (system prompt) salinan saat templat disimpan. */
+    systemPrompt: text("system_prompt").notNull().default(""),
+    /** Mode yang disarankan templat (pola kolom mode pada `agents`). */
+    mode: agentModeEnum("mode").notNull().default("suggest"),
+    /** Bahasa balasan yang disarankan ('id' | 'en'); NULL = tanpa saran. */
+    language: varchar("language", { length: 16 }),
+    /** User penyimpan; SET NULL bila user hilang (pola saved_replies). */
+    createdBy: uuid("created_by").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("agent_instruction_templates_tenant_id_idx").on(t.tenantId)],
+);
+
 export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
 export type KbDocument = typeof kbDocuments.$inferSelect;
@@ -290,3 +334,7 @@ export type KbChunk = typeof kbChunks.$inferSelect;
 export type NewKbChunk = typeof kbChunks.$inferInsert;
 export type AgentSuggestion = typeof agentSuggestions.$inferSelect;
 export type NewAgentSuggestion = typeof agentSuggestions.$inferInsert;
+export type AgentInstructionTemplate =
+  typeof agentInstructionTemplates.$inferSelect;
+export type NewAgentInstructionTemplate =
+  typeof agentInstructionTemplates.$inferInsert;

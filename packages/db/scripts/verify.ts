@@ -108,7 +108,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 2 tabel Fase 23 / migrasi 0012 (posts, post_media)
 // + 1 tabel Gelombang 0 / migrasi 0013 (post_groups)
 // + 1 tabel Pemisahan Google / migrasi 0023 (google_connections)
-assert.equal(Number(tablesRes.rows[0].count), 64);
+// + 1 tabel Templat Instruction / migrasi 0027 (agent_instruction_templates)
+assert.equal(Number(tablesRes.rows[0].count), 65);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -263,7 +264,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-12: migrasi 0023 (pemisahan Google per layanan) menambah
 // `google_connections` dengan tenant_isolation → 89.
-assert.equal(Number(policies.rows[0].count), 89);
+//
+// 2026-11-12: migrasi 0027 (Templat Instruction /agents) menambah
+// `agent_instruction_templates` dengan tenant_isolation → 90.
+assert.equal(Number(policies.rows[0].count), 90);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
