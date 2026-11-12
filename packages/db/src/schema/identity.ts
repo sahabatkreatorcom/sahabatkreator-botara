@@ -27,6 +27,13 @@ export const users = pgTable("users", {
   name: varchar("name", { length: 255 }),
   /** Bahasa UI pengguna: default & fallback aplikasi adalah 'en' (RANCANGAN §11). */
   locale: varchar("locale", { length: 10 }).notNull().default("en"),
+  /**
+   * Detak kehadiran terakhir (G13 butir 9): ditulis endpoint heartbeat
+   * tim (dijinakkan di core — hanya ditulis bila stempel sebelumnya
+   * lebih tua dari ambang), dibaca daftar member untuk penanda
+   * online/terakhir-aktif. NULL = belum pernah tercatat berdetak.
+   */
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   /** Preferensi tema: system | light | dark (RANCANGAN §10.3). */
   theme: userThemeEnum("theme").notNull().default("system"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

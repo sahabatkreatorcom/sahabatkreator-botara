@@ -228,6 +228,21 @@ export const conversations = pgTable(
 );
 
 /**
+ * Detail teknis kegagalan kirim — bentuk kolom `messages.error_detail`
+ * (G13 butir 6). Semua bidang opsional: provider hanya mengirim yang
+ * ia punya (webhook status WhatsApp tidak membawa fbtrace_id; Send API
+ * membawanya). TIDAK pernah memuat token/kredensial.
+ */
+export interface MessageErrorDetail {
+  /** Pesan resmi provider (mis. teks error Graph), dipotong wajar. */
+  description?: string | null;
+  /** Subkode error Graph (error_subcode), bila ada. */
+  subcode?: number | null;
+  /** Id penelusuran Meta untuk tiket dukungan, bila ada. */
+  fbtraceId?: string | null;
+}
+
+/**
  * Sinyal pemicu pada satu pesan masuk (G5) — bentuk kolom
  * `messages.trigger_signal`. `payload` adalah string mesin dari
  * platform (dicocokkan PERSIS ke trigger_config.payloads aturan);
@@ -267,6 +282,16 @@ export const messages = pgTable(
     providerMessageId: varchar("provider_message_id", { length: 255 }),
     status: messageStatusEnum("status").notNull().default("received"),
     errorCode: varchar("error_code", { length: 128 }),
+    /**
+     * Detail teknis kegagalan kirim (G13 butir 6, migrasi 0036):
+     * potongan AMAN dari body error provider — deskripsi resmi Graph,
+     * subkode, dan `fbtrace_id` untuk penelusuran dukungan Meta. Kode
+     * ringkasnya tetap di `error_code`; UI menerjemahkan kode menjadi
+     * bahasa awam dan menampilkan kolom ini sebagai detail teknis.
+     * NULL bila kegagalan tidak membawa detail provider (kegagalan
+     * lokal/gateway, atau baris warisan sebelum kolom ini ada).
+     */
+    errorDetail: jsonb("error_detail").$type<MessageErrorDetail>(),
     /**
      * Klaim pengiriman (Hotfix analisis 2026-11-03): diisi poller tepat
      * sebelum mengirim lewat `claimOutboundMessage` (UPDATE atomik).
@@ -565,3 +590,62 @@ export const channelIdentities = pgTable(
 
 export type ChannelIdentity = typeof channelIdentities.$inferSelect;
 export type NewChannelIdentity = typeof channelIdentities.$inferInsert;
+
+/**
+ * Reaksi emoji pada pesan (G13 butir 11, migrasi 0036) — satu baris per
+ * (pesan, aktor, emoji). Dua kelas aktor:
+ * - 'user'    : anggota tim lewat Inbox. Baris ditulis API; pengiriman
+ *               keluar ke provider adalah efek samping jalur API yang
+ *               sama (WhatsApp Cloud API & Telegram Bot API mendukung
+ *               reaksi keluar; Messenger/Instagram/webchat TIDAK punya
+ *               API reaksi keluar untuk akun bisnis — API menolaknya
+ *               dengan jujur dan tidak menulis baris).
+ * - 'contact' : kontak, dari webhook provider yang melaporkan reaksi
+ *               masuk (WhatsApp `reaction`).
+ * `actor_key` adalah identitas aktor di dalam satu pesan untuk kunci
+ * unik: 'user:<userId>' / 'contact:<externalUserId>'. Mengganti emoji
+ * = hapus baris lama + tulis baris baru (satu reaksi aktif per aktor
+ * per pesan ditegakkan di core, meniru semantik provider).
+ */
+export const messageReactions = pgTable(
+  "message_reactions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => messages.id, { onDelete: "cascade" }),
+    /** Denormalisasi dari pesan — daftar reaksi satu percakapan murah. */
+    conversationId: uuid("conversation_id")
+      .notNull()
+      .references(() => conversations.id, { onDelete: "cascade" }),
+    actorType: varchar("actor_type", { length: 16 }).notNull(),
+    /** Pengguna tim untuk aktor 'user'; SET NULL agar reaksi bertahan. */
+    actorUserId: uuid("actor_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    actorKey: varchar("actor_key", { length: 128 }).notNull(),
+    emoji: varchar("emoji", { length: 16 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("message_reactions_message_actor_emoji_unique").on(
+      t.messageId,
+      t.actorKey,
+      t.emoji,
+    ),
+    index("message_reactions_tenant_id_idx").on(t.tenantId),
+    index("message_reactions_message_id_idx").on(t.messageId),
+    index("message_reactions_conversation_id_idx").on(t.conversationId),
+    check(
+      "message_reactions_actor_type_valid",
+      sql`${t.actorType} IN ('user', 'contact')`,
+    ),
+  ],
+);
+
+export type MessageReaction = typeof messageReactions.$inferSelect;
+export type NewMessageReaction = typeof messageReactions.$inferInsert;

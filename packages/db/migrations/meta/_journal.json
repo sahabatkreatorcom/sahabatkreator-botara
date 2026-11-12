@@ -253,6 +253,13 @@
       "when": 1794477824047,
       "tag": "0035_deals",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1794477824048,
+      "tag": "0036_wacrm_extras",
+      "breakpoints": true
     }
   ]
 }
