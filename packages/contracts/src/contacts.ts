@@ -40,6 +40,18 @@ export const UpdateContactRequestSchema = z.object({
   pipelineStage: z.string().trim().min(1).max(64).optional(),
   optInStatus: OptInStatusSchema.optional(),
   customFields: ContactCustomFieldsSchema.optional(),
+  /**
+   * Kanal penghapusan kunci field kustom (aditif): semantik
+   * `customFields` sendiri TIDAK berubah (tetap gabung per kunci);
+   * kunci yang disebut di sini dihapus dari peta tersimpan. Dipakai
+   * editor field kustom dashboard yang mengelola himpunan lengkap —
+   * tanpa kanal ini kunci yang dihapus dari formulir akan hidup lagi
+   * pada pemuatan berikutnya karena gabung tidak bisa menghapus.
+   */
+  customFieldsDelete: z
+    .array(z.string().trim().min(1).max(64))
+    .max(50)
+    .optional(),
 });
 export type UpdateContactRequest = z.infer<typeof UpdateContactRequestSchema>;
 
@@ -140,3 +152,121 @@ export const MergeContactRequestSchema = z.object({
   mergedId: z.string().uuid(),
 });
 export type MergeContactRequest = z.infer<typeof MergeContactRequestSchema>;
+
+// ---------------------------------------------------------------------------
+// Percakapan milik kontak (panel detail /contacts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu percakapan milik kontak untuk panel detail. `kind` menentukan
+ * apakah baris ini boleh diberi tautan "Buka di Inbox": hanya
+ * percakapan PESAN (`private`/`group`) yang hidup di Inbox; baris
+ * `channel` adalah linimasa postingan akun itu sendiri — menautkannya
+ * ke Inbox akan menyesatkan (Inbox memang menyaringnya keluar), jadi
+ * UI menampilkannya tanpa tautan.
+ */
+export const ContactConversationSchema = z.object({
+  id: z.string().uuid(),
+  provider: ChannelProviderSchema,
+  kind: z.enum(["private", "group", "channel"]),
+  /** Judul percakapan (grup/channel); null untuk privat. */
+  title: z.string().nullable(),
+  status: z.enum(["open", "pending", "closed"]),
+  lastMessageAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type ContactConversation = z.infer<typeof ContactConversationSchema>;
+
+export const ContactConversationListResponseSchema = z.object({
+  conversations: z.array(ContactConversationSchema),
+});
+export type ContactConversationListResponse = z.infer<
+  typeof ContactConversationListResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Aksi massal kontak (daftar utama /contacts)
+// ---------------------------------------------------------------------------
+
+const ContactBulkIdsSchema = z
+  .array(z.string().uuid())
+  .min(1)
+  .max(500);
+
+/**
+ * Body POST /contacts/bulk — SATU aksi untuk banyak kontak dalam satu
+ * panggilan. Id yang dikirim klien tetap divalidasi server di dalam
+ * tenant (id asing / tak dikenal dilaporkan gagal per id, bukan
+ * menggagalkan seluruh panggilan). Aksi `delete` digerbang
+ * owner/admin di route (sejajar merge) dan menghapus kontak beserta
+ * turunan cascade-nya — UI wajib mengonfirmasi lebih dulu.
+ */
+export const ContactBulkRequestSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.literal("add_tag"),
+    ids: ContactBulkIdsSchema,
+    tag: z.string().trim().min(1).max(64),
+  }),
+  z.object({
+    action: z.literal("remove_tag"),
+    ids: ContactBulkIdsSchema,
+    tag: z.string().trim().min(1).max(64),
+  }),
+  z.object({
+    action: z.literal("set_stage"),
+    ids: ContactBulkIdsSchema,
+    stage: z.string().trim().min(1).max(64),
+  }),
+  z.object({ action: z.literal("opt_out"), ids: ContactBulkIdsSchema }),
+  z.object({ action: z.literal("delete"), ids: ContactBulkIdsSchema }),
+]);
+export type ContactBulkRequest = z.infer<typeof ContactBulkRequestSchema>;
+
+export const ContactBulkFailureSchema = z.object({
+  id: z.string().uuid(),
+  /** Kode alasan ringkas — saat ini hanya "not_found" (id bukan milik tenant). */
+  reason: z.string(),
+});
+export type ContactBulkFailure = z.infer<typeof ContactBulkFailureSchema>;
+
+export const ContactBulkResponseSchema = z.object({
+  action: z.enum(["add_tag", "remove_tag", "set_stage", "opt_out", "delete"]),
+  succeeded: z.number().int().nonnegative(),
+  failed: z.array(ContactBulkFailureSchema),
+});
+export type ContactBulkResponse = z.infer<typeof ContactBulkResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Impor CSV kontak (daftar utama /contacts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Body POST /contacts/import — isi berkas CSV sebagai teks utuh
+ * (klien membaca berkas lokal lalu mengirim teksnya; server yang
+ * mem-parsing agar normalisasi + deteksi duplikat memakai mesin yang
+ * sama persis dengan jalur lain). Batas 5 jt karakter menjaga satu
+ * panggilan tetap wajar untuk skala workspace produk ini.
+ */
+export const ContactImportRequestSchema = z.object({
+  csv: z.string().min(1).max(5_000_000),
+});
+export type ContactImportRequest = z.infer<typeof ContactImportRequestSchema>;
+
+/** Satu baris impor yang tidak menjadi kontak, beserta alasannya. */
+export const ContactImportIssueSchema = z.object({
+  /** Nomor baris DATA (1 = baris data pertama; baris judul tidak dihitung). */
+  row: z.number().int().positive(),
+  /** Kode alasan: duplicate_phone | duplicate_email | missing_name | invalid_email | invalid_row | … */
+  reason: z.string(),
+});
+export type ContactImportIssue = z.infer<typeof ContactImportIssueSchema>;
+
+export const ContactImportResponseSchema = z.object({
+  /** Jumlah kontak yang benar-benar dibuat. */
+  imported: z.number().int().nonnegative(),
+  /** Baris yang dilewati karena duplikat (kontak lama atau sesama berkas). */
+  duplicates: z.array(ContactImportIssueSchema),
+  /** Baris yang ditolak karena tidak sah. */
+  invalid: z.array(ContactImportIssueSchema),
+});
+export type ContactImportResponse = z.infer<typeof ContactImportResponseSchema>;
