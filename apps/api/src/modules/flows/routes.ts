@@ -14,10 +14,14 @@ import {
   FlowRunStepListResponseSchema,
   FlowTemplateListResponseSchema,
   FlowValidationResponseSchema,
+  FlowVersionListResponseSchema,
+  FlowVersionResponseSchema,
+  FlowVersionRestoreResponseSchema,
   InstantiateFlowTemplateRequestSchema,
   UpdateFlowRequestSchema,
   type FlowGraph,
   type FlowResponse,
+  type FlowVersionResponse,
 } from "@sahabat-kreator/contracts";
 import {
   activateFlow,
@@ -29,12 +33,15 @@ import {
   instantiateFlowTemplate,
   listFlowRunSteps,
   listFlowRuns,
+  listFlowVersions,
   listFlows,
   normalizeFlowGraph,
+  restoreFlowVersion,
   setFlowArchived,
   updateFlow,
   validateFlowGraph,
   type FlowGraphIssue,
+  type FlowVersionSummary,
   type FlowWithRunCount,
 } from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
@@ -60,6 +67,9 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   GET    /tenants/:tenantId/flows/:id/runs           run milik flow
  *   GET    /tenants/:tenantId/flows/:id/experiments    hasil eksperimen A/B (13D)
  *   GET    /tenants/:tenantId/flows/runs/:runId/steps  langkah satu run
+ *   GET    /tenants/:tenantId/flows/:id/versions       riwayat versi (G3)
+ *   POST   /tenants/:tenantId/flows/:id/versions/:version/restore
+ *                                                      pulihkan versi → versi baru (G3)
  *
  * Eksekusi BUKAN di sini: pesan masuk dievaluasi worker
  * (keyword → flow → agent); run berjalan sebagai job `flow.step`.
@@ -88,6 +98,24 @@ export function serializeFlow(flow: FlowWithRunCount): FlowResponse {
     createdByUserId: flow.createdByUserId,
     createdAt: flow.createdAt.toISOString(),
     updatedAt: flow.updatedAt.toISOString(),
+  });
+}
+
+function serializeFlowVersion(
+  summary: FlowVersionSummary,
+): FlowVersionResponse {
+  const row = summary.version;
+  return FlowVersionResponseSchema.parse({
+    id: row.id,
+    flowId: row.flowId,
+    version: row.version,
+    name: row.name,
+    nodeCount: summary.nodeCount,
+    edgeCount: summary.edgeCount,
+    restoredFromVersion: row.restoredFromVersion,
+    activatedByUserId: row.activatedByUserId,
+    isCurrent: summary.isCurrent,
+    createdAt: row.createdAt.toISOString(),
   });
 }
 
@@ -125,6 +153,8 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
     app.post(`${base}/:id/unarchive`, unavailable);
     app.get(`${base}/:id/runs`, unavailable);
     app.get(`${base}/:id/experiments`, unavailable);
+    app.get(`${base}/:id/versions`, unavailable);
+    app.post(`${base}/:id/versions/:version/restore`, unavailable);
     return app;
   }
 
@@ -456,6 +486,8 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
             nodeId: w.nodeId,
             message: w.message,
           })),
+          // G3: nomor versi snapshot yang ditulis aktivasi ini.
+          version: result.version,
         });
       }
       case "not_found":
@@ -568,6 +600,7 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
         contactId: r.contactId,
         contactName: r.contactName,
         triggerMessageId: r.triggerMessageId,
+        flowVersion: r.flowVersion,
         status: r.status,
         currentNodeId: r.currentNodeId,
         stepCount: r.stepCount,
@@ -598,6 +631,90 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
     });
     if (!result) return apiError(c, 404, "NOT_FOUND", "Flow not found");
     return c.json(FlowExperimentsResponseSchema.parse(result));
+  });
+
+  // ---- Riwayat versi (G3) ---------------------------------------------------------
+  // Baca = semua member. Ringkasan snapshot per aktivasi, terbaru
+  // dulu; graf penuh snapshot tidak keluar di daftar.
+  app.get(`${base}/:id/versions`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const id = parseUuidParam(c, "id");
+    if (!id) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const result = await listFlowVersions(bundle.db, {
+      tenantId: g.tenant.id,
+      flowId: id,
+    });
+    if (result.kind === "not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    }
+    const body = FlowVersionListResponseSchema.parse({
+      versions: result.versions.map(serializeFlowVersion),
+    });
+    return c.json(body);
+  });
+
+  // ---- Pulihkan versi (G3) ---------------------------------------------------------
+  // Mutasi = owner/admin. Mengaktifkan isi snapshot lama sebagai
+  // versi BARU (append-only). Draft kotor → 409 FLOW_RESTORE_DIRTY_DRAFT;
+  // snapshot yang kini tidak sah → 422 FLOW_GRAPH_INVALID.
+  app.post(`${base}/:id/versions/:version/restore`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const id = parseUuidParam(c, "id");
+    if (!id) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const versionRaw = c.req.param("version") ?? "";
+    const version = Number.parseInt(versionRaw, 10);
+    if (!/^\d+$/.test(versionRaw) || !Number.isFinite(version) || version < 1) {
+      return apiError(c, 404, "NOT_FOUND", "Flow version not found");
+    }
+    const result = await restoreFlowVersion(bundle.db, {
+      tenantId: g.tenant.id,
+      flowId: id,
+      version,
+      userId: g.appUser.id,
+    });
+    switch (result.kind) {
+      case "restored": {
+        const detail = await getFlow(bundle.db, {
+          tenantId: g.tenant.id,
+          flowId: id,
+        });
+        const graph = normalizeFlowGraph(result.version.graph);
+        const body = FlowVersionRestoreResponseSchema.parse({
+          flow: serializeFlow(detail ?? { ...result.flow, runCount: 0 }),
+          version: serializeFlowVersion({
+            version: result.version,
+            nodeCount: graph.nodes.length,
+            edgeCount: graph.edges.length,
+            // Baru dipulihkan & aktif: versi ini adalah versi berjalan.
+            isCurrent: true,
+          }),
+        });
+        return c.json(body);
+      }
+      case "not_found":
+        return apiError(c, 404, "NOT_FOUND", "Flow not found");
+      case "version_not_found":
+        return apiError(c, 404, "NOT_FOUND", "Flow version not found");
+      case "invalid_state":
+        return invalidState(c, result.status);
+      case "dirty_draft":
+        return apiError(
+          c,
+          409,
+          "FLOW_RESTORE_DIRTY_DRAFT",
+          "Flow has unactivated draft changes; activate the draft first so it is saved as a version, then restore",
+        );
+      case "invalid":
+        return apiError(
+          c,
+          422,
+          "FLOW_GRAPH_INVALID",
+          "Flow graph failed validation",
+          { issues: graphIssuesBody(result.issues).issues },
+        );
+    }
   });
 
   return app;
