@@ -13,10 +13,17 @@ interface CreateWorkspaceFormProps {
   t: Translate;
   /** Dipanggil setelah workspace berhasil dibuat (mis. menutup form lipat). */
   onCreated?: () => void;
+  /**
+   * Bila diisi, tombol Batal dirender di samping tombol Buat dan
+   * menekannya menutup form TANPA membuat apa pun. Hanya untuk
+   * pemakaian form lipat (pemilih sidebar); pemakaian konten utama
+   * (keadaan kosong Dashboard) tidak mengisinya.
+   */
+  onCancel?: () => void;
 }
 
 /** Form buat workspace — dipakai keadaan kosong Dashboard & pemilih sidebar. */
-export function CreateWorkspaceForm({ t, onCreated }: CreateWorkspaceFormProps) {
+export function CreateWorkspaceForm({ t, onCreated, onCancel }: CreateWorkspaceFormProps) {
   const { create } = useWorkspace();
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -59,13 +66,25 @@ export function CreateWorkspaceForm({ t, onCreated }: CreateWorkspaceFormProps) 
         />
       </div>
       <FieldError message={error} />
-      <button
-        type="submit"
-        disabled={submitting}
-        className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {submitting ? t("workspace.creating") : t("workspace.createButton")}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          disabled={submitting}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {submitting ? t("workspace.creating") : t("workspace.createButton")}
+        </button>
+        {onCancel ? (
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={submitting}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {t("common.cancel")}
+          </button>
+        ) : null}
+      </div>
     </form>
   );
 }
@@ -100,7 +119,11 @@ export function WorkspaceSwitcher({ t }: { t: Translate }) {
       )}
       {formOpen ? (
         <div className="mt-3">
-          <CreateWorkspaceForm t={t} onCreated={() => setFormOpen(false)} />
+          <CreateWorkspaceForm
+            t={t}
+            onCreated={() => setFormOpen(false)}
+            onCancel={() => setFormOpen(false)}
+          />
         </div>
       ) : (
         <button
