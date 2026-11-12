@@ -515,7 +515,11 @@ let stateBusiness = "";
 // ---------- [9] Migrasi 0023 menyemai koneksi gabungan lama ----------
 {
   const seedClient = new PGlite({ extensions: { vector, btree_gist } });
-  const before = files.filter((f) => !f.startsWith("0023"));
+  // Keadaan TEPAT sebelum 0023: hanya migrasi bernomor lebih kecil.
+  // (Filter lama `!startsWith("0023")` ikut menelan migrasi 0024+
+  // yang lahir belakangan — aman sampai 0038, lalu 0039/G16 mengubah
+  // enum google_service yang baru dibuat 0023 dan filter itu runtuh.)
+  const before = files.filter((f) => f < "0023");
   for (const file of before) {
     const sqlText = await readFile(path.join(migrationsDir, file), "utf8");
     await seedClient.exec(sqlText.replaceAll("--> statement-breakpoint", ""));
