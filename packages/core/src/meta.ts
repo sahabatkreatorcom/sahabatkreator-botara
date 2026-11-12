@@ -22,6 +22,7 @@ import {
   type ChannelAccount,
   type Database,
   type Message,
+  type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb } from "./tx";
@@ -558,6 +559,13 @@ export interface RecordMetaInboundInput {
    */
   replyToProviderMessageId?: string | null;
   text: string;
+  /**
+   * Sinyal pemicu ketukan tombol (G5): postback Meta / payload quick
+   * reply pada pesan ini, dinormalkan parser channel. Ditulis apa
+   * adanya ke messages.trigger_signal; evaluator yang menafsirkannya
+   * (trigger-priority.ts). Undefined = pesan biasa.
+   */
+  triggerSignal?: MessageTriggerSignal | null;
 }
 
 /**
@@ -688,6 +696,7 @@ export async function recordMetaInboundMessage(
         contentText: input.text,
         providerMessageId: compositeId,
         replyToMessageId,
+        triggerSignal: input.triggerSignal ?? null,
         status: "received",
       })
       .onConflictDoNothing()

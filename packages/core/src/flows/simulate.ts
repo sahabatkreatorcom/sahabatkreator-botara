@@ -202,14 +202,26 @@ function simNormalizeText(value: string): string {
 }
 
 /**
- * Pencocok pemicu — semantik yang sama dengan `flowTriggerMatches` di
+ * Pencocok pemicu — semantik yang sama dengan `classifyFlowTrigger` di
  * evaluate.ts (disalin lokal mengikuti preseden modul itu sendiri,
  * yang menyalin pencocok keyword automation demi menghindari impor
- * melingkar).
+ * melingkar). Perbedaan yang disengaja untuk pemicu G5 (simulator
+ * hanya punya SATU input teks uji):
+ * - postback/quick_reply: teks uji diperlakukan sebagai PAYLOAD
+ *   ketukan tombol dan dicocokkan PERSIS ke config.payloads.
+ * - welcome: teks uji dianggap pesan PERTAMA kontak (itulah yang
+ *   sedang diuji pemilik flow) → selalu cocok bila ada teks uji.
  */
 function simTriggerMatches(node: FlowGraphNode, messageText: string): boolean {
   const c = node.config;
   if (c.kind === "any_message") return true;
+  if (c.kind === "welcome") return true;
+  if (c.kind === "postback" || c.kind === "quick_reply") {
+    const payloads = Array.isArray(c.payloads)
+      ? c.payloads.filter(isNonEmptyString)
+      : [];
+    return payloads.includes(messageText);
+  }
   if (c.kind === "keyword") {
     const keywords = Array.isArray(c.keywords)
       ? c.keywords.filter(isNonEmptyString)

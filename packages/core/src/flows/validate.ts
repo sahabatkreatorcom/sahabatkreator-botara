@@ -94,8 +94,18 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
         if (c.match !== "exact" && c.match !== "contains") {
           err("TRIGGER_MATCH_INVALID", "Trigger keyword membutuhkan match 'exact' atau 'contains'");
         }
-      } else if (c.kind !== "any_message") {
-        err("TRIGGER_KIND_INVALID", "Trigger membutuhkan kind 'keyword' atau 'any_message'");
+      } else if (c.kind === "postback" || c.kind === "quick_reply") {
+        // G5: pemicu sinyal wajib membawa ≥1 payload non-kosong —
+        // tanpa payload tidak ada yang bisa dicocokkan PERSIS.
+        if (
+          !Array.isArray(c.payloads) ||
+          c.payloads.length === 0 ||
+          !c.payloads.every(isNonEmptyString)
+        ) {
+          err("TRIGGER_PAYLOADS_REQUIRED", "Trigger postback/quick_reply membutuhkan minimal satu payload non-kosong");
+        }
+      } else if (c.kind !== "any_message" && c.kind !== "welcome") {
+        err("TRIGGER_KIND_INVALID", "Trigger membutuhkan kind 'keyword', 'any_message', 'postback', 'quick_reply', atau 'welcome'");
       }
       break;
     }

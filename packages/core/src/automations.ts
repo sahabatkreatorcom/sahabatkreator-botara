@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, or, sql } from "drizzle-orm";
 import {
   findAutomationTemplate,
   resolveAutomationSequenceContent,
@@ -23,7 +23,15 @@ import {
 import type { TenantContext } from "./tenant";
 import { withTenantDb } from "./tx";
 import { renderMessageText } from "./render-text";
-import { startFlowRunsForInboundMessage } from "./flows";
+import {
+  previewFlowTriggerClasses,
+  startFlowRunsForInboundMessage,
+} from "./flows";
+import {
+  triggerPayloadMatches,
+  triggerSignalOf,
+  type TriggerClass,
+} from "./trigger-priority";
 import type { GoogleDeps } from "./google-calendar";
 import { setContactConsent } from "./contacts";
 import { getOptInSettings, matchConsentKeyword } from "./optin";
@@ -37,8 +45,9 @@ import { enrollContactInSequence } from "./sequence-enroll";
  * 1. Manajemen (dipakai API dashboard): CRUD automation + riwayat
  *    automation_runs + daftar sequence_enrollments.
  * 2. Evaluasi (dipakai worker lewat job `automation.evaluate`): pesan
- *    inbound dicocokkan ke automation aktif milik tenant (pemicu tetap
- *    keyword untuk semua jenis):
+ *    inbound dicocokkan ke automation aktif milik tenant per KELAS
+ *    PEMICU (urutan prioritasnya: trigger-priority.ts — postback,
+ *    quick reply, keyword, welcome; aksi mengikuti kind aturan):
  *      - kind 'keyword'  → balasan outbound `sender_type='system'`
  *        berstatus `queued` + run `completed` + audit `automation.fired`
  *        + event outbox `message.queued` (perilaku Fase 2A).
@@ -85,6 +94,16 @@ export interface CreateAutomationInput {
   match: "exact" | "contains";
   /** Default 'keyword' (kompatibilitas request Fase 2A/2B tanpa field ini). */
   kind?: "keyword" | "sequence" | "comment";
+  /**
+   * G5 — jenis pemicu pesan: 'keyword' (bawaan warisan), 'postback',
+   * 'quick_reply', 'welcome'. Hanya bermakna untuk kind
+   * 'keyword'/'sequence'; kind 'comment' selalu triggerType 'comment'.
+   * Pemicu dan aksi ortogonal: aturan postback boleh beraksi balasan
+   * langsung (kind 'keyword') atau pendaftaran (kind 'sequence').
+   */
+  triggerType?: "keyword" | "postback" | "quick_reply" | "welcome";
+  /** G5 — wajib (≥1) untuk triggerType 'postback'/'quick_reply'. */
+  payloads?: string[];
   /** Wajib untuk kind='keyword': isi balasan langsung. */
   text?: string;
   /** Wajib untuk kind='sequence': 1–10 langkah rangkaian. */
@@ -113,6 +132,8 @@ export interface CreateAutomationInput {
 export interface UpdateAutomationInput {
   name?: string;
   keywords?: string[];
+  /** G5 — hanya bermakna untuk aturan triggerType postback/quick_reply. */
+  payloads?: string[];
   match?: "exact" | "contains";
   text?: string;
   isActive?: boolean;
@@ -141,19 +162,36 @@ export async function createAutomation(
   if (kind === "comment" && !input.channelAccountId) {
     throw new Error("Comment automation requires a channel account");
   }
+  // G5: pemicu sinyal wajib membawa payload — tanpa itu aturan tidak
+  // akan pernah bisa cocok dan hanya membingungkan pemiliknya.
+  const triggerType =
+    kind === "comment" ? "comment" : (input.triggerType ?? "keyword");
+  if (
+    (triggerType === "postback" || triggerType === "quick_reply") &&
+    (!input.payloads || input.payloads.length === 0)
+  ) {
+    throw new Error("Signal automation requires at least one payload");
+  }
+  const isSignalTrigger =
+    triggerType === "postback" || triggerType === "quick_reply";
   return withTenantDb(db, ctx.tenantId, async (tx) => {
     const [row] = await tx
       .insert(automations)
       .values({
         tenantId: ctx.tenantId,
         name: input.name,
-        triggerType: kind === "comment" ? "comment" : "keyword",
+        triggerType,
         triggerConfig: {
-          keywords: input.keywords,
+          // Aturan sinyal/welcome tidak mencocokkan teks: keywords
+          // selalu kosong agar tidak ada jalur yang menafsirkannya.
+          keywords: isSignalTrigger || triggerType === "welcome"
+            ? []
+            : input.keywords,
           match: input.match,
           ...(kind === "comment"
             ? { channelAccountId: input.channelAccountId }
             : {}),
+          ...(isSignalTrigger ? { payloads: input.payloads } : {}),
         },
         actionType: "send_message",
         actionConfig:
@@ -343,7 +381,11 @@ export async function updateAutomation(
     const patch: Partial<Automation> = { updatedAt: new Date() };
     if (input.name !== undefined) patch.name = input.name;
     if (input.isActive !== undefined) patch.isActive = input.isActive;
-    if (input.keywords !== undefined || input.match !== undefined) {
+    if (
+      input.keywords !== undefined ||
+      input.match !== undefined ||
+      input.payloads !== undefined
+    ) {
       patch.triggerConfig = {
         keywords: input.keywords ?? existing.triggerConfig.keywords,
         match: input.match ?? existing.triggerConfig.match,
@@ -352,6 +394,13 @@ export async function updateAutomation(
         ...(existing.triggerConfig.channelAccountId
           ? { channelAccountId: existing.triggerConfig.channelAccountId }
           : {}),
+        // G5: payload aturan sinyal bisa disunting; jenis lain
+        // mempertahankan payload tersimpan apa adanya (biasanya absen).
+        ...(input.payloads !== undefined
+          ? { payloads: input.payloads }
+          : existing.triggerConfig.payloads !== undefined
+            ? { payloads: existing.triggerConfig.payloads }
+            : {}),
       };
     }
     if (
@@ -503,7 +552,14 @@ export interface AutomationFiredResult {
   outboundMessageId: string | null;
   /** Enrollment yang dibuat kind='sequence'; hanya terisi untuk sequence. */
   enrollmentId?: string;
+  /**
+   * String yang cocok: keyword (aturan keyword), payload (aturan
+   * postback/quick_reply, G5), atau "" untuk aturan welcome yang
+   * tidak mencocokkan string apa pun.
+   */
   matchedKeyword: string;
+  /** G5: payload tombol yang cocok untuk aturan sinyal; null selain itu. */
+  matchedPayload: string | null;
 }
 
 export interface EvaluateInboundResult {
@@ -573,6 +629,14 @@ export interface EvaluateInboundResult {
    * worker tidak meneruskannya ke agent.
    */
   flowAppointmentResumed: number;
+  /**
+   * G5: jenis sinyal tombol yang dibawa pesan ini ('postback' /
+   * 'quick_reply'), null untuk pesan biasa / tidak dievaluasi. Worker
+   * memakai ini untuk menutup jalur agent bagi postback: payload
+   * mesin yang tidak dikenal bukan percakapan (trigger-priority.ts
+   * kelas 1) — pesan tetap `evaluated` tetapi tidak diteruskan.
+   */
+  triggerSignalKind: "postback" | "quick_reply" | null;
 }
 
 /**
@@ -580,13 +644,15 @@ export interface EvaluateInboundResult {
  * Dipanggil worker untuk job `automation.evaluate`. Aman dipanggil berulang
  * untuk pesan yang sama (idempoten — lihat catatan di kepala file).
  *
- * Urutan dalam satu evaluasi:
- * 1. Pembatalan sequence (aturan berhenti 2C-a): enrollment AKTIF di
- *    percakapan ini yang dibuat SEBELUM pesan ini (dan bukan oleh pesan
- *    ini) dibatalkan — kontak yang membalas dianggap tidak lagi ingin
- *    menerima rangkaian. Audit `sequence.cancelled_reply` per enrollment.
- * 2. Pencocokan keyword ke semua automation aktif; kind 'keyword'
- *    menembakkan balasan langsung, kind 'sequence' mendaftarkan kontak.
+ * Urutan dalam satu evaluasi — SUMBER KEBENARANNYA trigger-priority.ts
+ * (jangan ditulis ulang di sini): lapisan keselamatan (aturan berhenti
+ * sequence 2C-a + tangkapan consent 13C + resume parkir & gerbang
+ * opt-out di fase flow) → postback → quick reply → keyword/sequence →
+ * flow per kelas → welcome → (worker) agent. Aturan berhenti 2C-a:
+ * enrollment AKTIF di percakapan ini yang dibuat SEBELUM pesan ini
+ * (dan bukan oleh pesan ini) dibatalkan — kontak yang membalas
+ * dianggap tidak lagi ingin menerima rangkaian; audit
+ * `sequence.cancelled_reply` per enrollment.
  */
 export async function evaluateInboundMessageForAutomations(
   db: Database,
@@ -634,16 +700,50 @@ export async function evaluateInboundMessageForAutomations(
         ),
       )
       .limit(1);
+    // G5: evaluator memuat SEMUA automation pemicu PESAN aktif
+    // (keyword/postback/quick_reply/welcome) — fase-fase di bawah
+    // memilahnya per kelas prioritas (trigger-priority.ts). Aturan
+    // 'comment' tidak pernah lewat sini (jalur komentar tersendiri).
     const active = await tx
       .select()
       .from(automations)
       .where(
         and(
           eq(automations.tenantId, tenantId),
-          eq(automations.triggerType, "keyword"),
+          inArray(automations.triggerType, [
+            "keyword",
+            "postback",
+            "quick_reply",
+            "welcome",
+          ]),
           eq(automations.isActive, true),
         ),
       );
+
+    // G5: "pesan pertama" untuk pemicu welcome = tidak ada pesan
+    // MASUK lain di percakapan ini yang lebih dulu (atau sezaman —
+    // seri waktu diselesaikan demi keamanan: pesan sezaman lain
+    // membuat pesan ini BUKAN yang pertama). Penjaga sekali-per-kontak
+    // per aturan tetap riwayat run, bukan cek ini.
+    const [earlierInbound] = await tx
+      .select({ id: messages.id })
+      .from(messages)
+      .where(
+        and(
+          eq(messages.tenantId, tenantId),
+          eq(messages.conversationId, conversationId),
+          eq(messages.direction, "inbound"),
+          or(
+            lt(messages.createdAt, message.createdAt),
+            and(
+              eq(messages.createdAt, message.createdAt),
+              sql`${messages.id} <> ${message.id}`,
+            ),
+          ),
+        ),
+      )
+      .limit(1);
+    const isFirstInboundMessage = !earlierInbound;
 
     // --- Aturan berhenti 2C-a: pesan masuk membatalkan enrollment aktif ---
     const activeEnrollments = await tx
@@ -687,7 +787,14 @@ export async function evaluateInboundMessageForAutomations(
       cancelledEnrollments += 1;
     }
 
-    return { message, conversation, contact, active, cancelledEnrollments };
+    return {
+      message,
+      conversation,
+      contact,
+      active,
+      cancelledEnrollments,
+      isFirstInboundMessage,
+    };
   });
 
   if (!context)
@@ -704,6 +811,7 @@ export async function evaluateInboundMessageForAutomations(
       flowCatalogResumed: 0,
       flowAppointmentResumed: 0,
       consentAction: null,
+      triggerSignalKind: null,
     };
   // Percakapan channel (Fase 6A.2): dievaluasi = tidak — tidak ada
   // tembakan automation dan (karena `evaluated` false) worker juga tidak
@@ -722,8 +830,13 @@ export async function evaluateInboundMessageForAutomations(
       flowCatalogResumed: 0,
       flowAppointmentResumed: 0,
       consentAction: null,
+      triggerSignalKind: null,
     };
   const text = context.message.contentText ?? "";
+  // G5: sinyal tombol pesan ini (dari parser channel lewat
+  // messages.trigger_signal) — penentu kelas prioritas fase-fase di
+  // bawah (trigger-priority.ts). Teks biasa: null.
+  const signal = triggerSignalOf(context.message);
 
   // --- Fase 13C: penangkapan consent tingkat sistem ----------------
   // Dievaluasi SEBELUM automation keyword & flow (dan, lewat flag
@@ -802,6 +915,7 @@ export async function evaluateInboundMessageForAutomations(
       flowCatalogResumed: 0,
       flowAppointmentResumed: 0,
           consentAction: consentMatch,
+          triggerSignalKind: signal?.kind ?? null,
         };
       }
     }
@@ -810,11 +924,23 @@ export async function evaluateInboundMessageForAutomations(
   const fired: AutomationFiredResult[] = [];
   let skippedDuplicates = 0;
 
-  for (const automation of context.active) {
-    const matchedKeyword = automation.triggerConfig.keywords.find((kw) =>
-      keywordMatches(text, kw, automation.triggerConfig.match),
-    );
-    if (!matchedKeyword) continue;
+  // ------------------------------------------------------------------
+  // G5: fase-fase kelas pemicu (urutan = trigger-priority.ts, sumber
+  // kebenaran tunggalnya): postback → quick reply → keyword → flow →
+  // welcome automation → (worker: agent). Lapisan keselamatan (aturan
+  // berhenti sequence + tangkapan consent) SUDAH berjalan di atas.
+  // Badan tembakan SATU aturan diekstrak ke `fireRule` agar semua
+  // kelas memakai jalur idempotensi/audit/outbox yang sama persis;
+  // yang berbeda antar kelas hanyalah pencocok & labelnya.
+  // ------------------------------------------------------------------
+  type RuleMatch = { matchedKeyword: string; matchedPayload: string | null };
+  const fireRule = async (automation: Automation, match: RuleMatch) => {
+    const matchedKeyword = match.matchedKeyword;
+    // Detail run: bentuk warisan { matchedKeyword } untuk aturan
+    // teks; aturan sinyal menambahkan matchedPayload-nya.
+    const matchDetail: Record<string, unknown> = match.matchedPayload
+      ? { matchedKeyword, matchedPayload: match.matchedPayload }
+      : { matchedKeyword };
 
     const outcome = await withTenantDb(db, tenantId, async (tx) => {
       // Penjaga idempotensi: run untuk (automation, pesan pemicu) ini sudah ada?
@@ -843,8 +969,8 @@ export async function evaluateInboundMessageForAutomations(
           contactId: context.conversation.contactId,
           conversationId,
           triggerMessageId: messageId,
-          runDetailExtra: { matchedKeyword },
-          auditMetaExtra: { matchedKeyword },
+          runDetailExtra: matchDetail,
+          auditMetaExtra: matchDetail,
           recordNoStepsRun: true,
         });
         if (result.kind === "enrolled") {
@@ -876,7 +1002,7 @@ export async function evaluateInboundMessageForAutomations(
           conversationId,
           triggerMessageId: messageId,
           status: "completed",
-          detail: { matchedKeyword },
+          detail: matchDetail,
         })
         .returning();
 
@@ -905,7 +1031,7 @@ export async function evaluateInboundMessageForAutomations(
       await tx
         .update(automationRuns)
         .set({
-          detail: { matchedKeyword, outboundMessageId: outbound.id },
+          detail: { ...matchDetail, outboundMessageId: outbound.id },
         })
         .where(eq(automationRuns.id, run.id));
 
@@ -920,6 +1046,10 @@ export async function evaluateInboundMessageForAutomations(
           triggerMessageId: messageId,
           outboundMessageId: outbound.id,
           matchedKeyword,
+          ...(match.matchedPayload
+            ? { matchedPayload: match.matchedPayload }
+            : {}),
+          triggerType: automation.triggerType,
           conversationId,
         },
       });
@@ -957,44 +1087,70 @@ export async function evaluateInboundMessageForAutomations(
       throw err;
     });
 
+    return outcome;
+  };
+
+  /** Menyerap outcome fireRule ke akumulasi hasil; true = pesan tertangani aturan ini. */
+  const absorbOutcome = (
+    automation: Automation,
+    match: RuleMatch,
+    outcome: Awaited<ReturnType<typeof fireRule>>,
+  ): boolean => {
     if (outcome.kind === "duplicate" || outcome.kind === "skipped") {
       skippedDuplicates += 1;
-    } else if (outcome.kind === "enrolled") {
+      return true;
+    }
+    if (outcome.kind === "enrolled") {
       fired.push({
         automationId: automation.id,
         runId: outcome.runId,
         outboundMessageId: null,
         enrollmentId: outcome.enrollmentId,
         matchedKeyword: outcome.matchedKeyword,
+        matchedPayload: match.matchedPayload,
       });
-    } else {
-      fired.push({
-        automationId: automation.id,
-        runId: outcome.runId,
-        outboundMessageId: outcome.outboundMessageId,
-        matchedKeyword: outcome.matchedKeyword,
-      });
+      return true;
     }
-  }
+    fired.push({
+      automationId: automation.id,
+      runId: outcome.runId,
+      outboundMessageId: outcome.outboundMessageId,
+      matchedKeyword: outcome.matchedKeyword,
+      matchedPayload: match.matchedPayload,
+    });
+    return true;
+  };
 
-  // --- Fase 8A: flow engine — dievaluasi SETELAH automation keyword/
-  // sequence (urutan keyword → flow → agent). Flow aktif yang
-  // trigger-nya cocok memulai run; kontak opt-out tidak memulai run
-  // dan run `waiting`-nya di percakapan ini dibatalkan di sana.
-  const flowOutcome = await startFlowRunsForInboundMessage(
-    db,
-    {
-      tenantId,
-      conversationId,
-      messageId,
-      messageText: text,
-      contact: context.contact ?? null,
-      conversation: context.conversation,
-    },
-    { googleDeps: opts?.googleDeps },
-  );
+  /**
+   * Menjalankan SATU fase kelas pemicu: semua aturan jenis itu yang
+   * lolos `matcher` ditembakkan (multi-fire seperti perilaku warisan).
+   * Mengembalikan jumlah aturan yang tertangani (menembak/duplikat) —
+   * bahan keputusan penekanan kelas di bawahnya.
+   */
+  const runAutomationPhase = async (
+    triggerType: Automation["triggerType"],
+    matcher: (automation: Automation) => RuleMatch | null,
+  ): Promise<number> => {
+    let handled = 0;
+    for (const automation of context.active) {
+      if (automation.triggerType !== triggerType) continue;
+      const match = matcher(automation);
+      if (!match) continue;
+      const outcome = await fireRule(automation, match);
+      if (absorbOutcome(automation, match, outcome)) handled += 1;
+    }
+    return handled;
+  };
 
-  return {
+  const signalMatcher = (automation: Automation): RuleMatch | null =>
+    signal &&
+    triggerPayloadMatches(automation.triggerConfig.payloads, signal.payload)
+      ? { matchedKeyword: signal.payload, matchedPayload: signal.payload }
+      : null;
+
+  const buildResult = (
+    flowOutcome: Awaited<ReturnType<typeof startFlowRunsForInboundMessage>>,
+  ): EvaluateInboundResult => ({
     evaluated: true,
     fired,
     skippedDuplicates,
@@ -1007,7 +1163,139 @@ export async function evaluateInboundMessageForAutomations(
     flowCatalogResumed: flowOutcome.catalogResumedRunIds.length,
     flowAppointmentResumed: flowOutcome.appointmentResumedRunIds.length,
     consentAction: null,
-  };
+    triggerSignalKind: signal?.kind ?? null,
+  });
+
+  // --- Kelas 1: POSTBACK — pesan bersinyal postback HANYA dicocokkan
+  // ke pemicu postback, lalu evaluasi selesai (kelas teks & agent
+  // tidak pernah melihat payload mesin; lihat trigger-priority.ts).
+  if (signal?.kind === "postback") {
+    await runAutomationPhase("postback", signalMatcher);
+    const flowOutcome = await startFlowRunsForInboundMessage(
+      db,
+      {
+        tenantId,
+        conversationId,
+        messageId,
+        messageText: text,
+        contact: context.contact ?? null,
+        conversation: context.conversation,
+        triggerSignal: signal,
+        isFirstInboundMessage: context.isFirstInboundMessage,
+        suppressKeywordTriggers: true,
+        suppressWelcomeTriggers: true,
+      },
+      { googleDeps: opts?.googleDeps },
+    );
+    return buildResult(flowOutcome);
+  }
+
+  // --- Kelas 2: QUICK REPLY — automation QR lebih dulu; kecocokannya
+  // (di automation ATAU flow, lewat pra-pindai) menekan kelas keyword.
+  let quickReplyHandled = 0;
+  let flowPreviewClasses: TriggerClass[] = [];
+  if (signal?.kind === "quick_reply") {
+    quickReplyHandled = await runAutomationPhase(
+      "quick_reply",
+      signalMatcher,
+    );
+    flowPreviewClasses = await previewFlowTriggerClasses(db, {
+      tenantId,
+      messageText: text,
+      signal,
+      isFirstInboundMessage: context.isFirstInboundMessage,
+    });
+  }
+  const quickReplyMatched =
+    quickReplyHandled > 0 || flowPreviewClasses.includes("quick_reply");
+
+  // --- Kelas 3: KEYWORD / SEQUENCE automation (multi-fire warisan).
+  let keywordHandled = 0;
+  if (!quickReplyMatched) {
+    keywordHandled = await runAutomationPhase("keyword", (automation) => {
+      const matchedKeyword = automation.triggerConfig.keywords.find((kw) =>
+        keywordMatches(text, kw, automation.triggerConfig.match),
+      );
+      return matchedKeyword
+        ? { matchedKeyword, matchedPayload: null }
+        : null;
+    });
+  }
+
+  // --- Fase flow (Fase 8A + G5): pemicu flow per kelas — postback/
+  // quick reply/keyword/welcome/any_message — dengan penekanan yang
+  // dihitung dari fase automation di atas (QR automation menekan
+  // keyword flow; keyword/QR menekan welcome flow). Resume run parkir
+  // & gerbang opt-out tetap di dalam, selalu berjalan (lapisan
+  // keselamatan trigger-priority.ts). Kontak opt-out tidak memulai
+  // run dan run `waiting`-nya di percakapan ini dibatalkan di sana.
+  const flowOutcome = await startFlowRunsForInboundMessage(
+    db,
+    {
+      tenantId,
+      conversationId,
+      messageId,
+      messageText: text,
+      contact: context.contact ?? null,
+      conversation: context.conversation,
+      triggerSignal: signal,
+      isFirstInboundMessage: context.isFirstInboundMessage,
+      suppressKeywordTriggers: quickReplyHandled > 0,
+      suppressWelcomeTriggers: quickReplyMatched || keywordHandled > 0,
+    },
+    { googleDeps: opts?.googleDeps },
+  );
+
+  // --- Kelas 4: WELCOME automation — hanya pesan pertama percakapan,
+  // hanya bila TIDAK ada kelas di atasnya (sinyal/keyword, automation
+  // maupun flow) yang menembak untuk pesan ini, dan hanya SEKALI per
+  // kontak per aturan: riwayat run/enrollment aturan ini untuk kontak
+  // ini adalah penjaganya (kontak yang membuka percakapan BARU tidak
+  // disambut dua kali oleh aturan yang sama). Aturan yang sudah
+  // pernah menyambut kontak ini dilewati DIAM-DIAM — bukan duplikat:
+  // pesan percakapan baru yang sah tetap boleh jatuh ke agent.
+  const higherClassFired =
+    quickReplyMatched ||
+    keywordHandled > 0 ||
+    flowOutcome.matchedTriggerClasses.some(
+      (cls) =>
+        cls === "postback" || cls === "quick_reply" || cls === "keyword",
+    );
+  if (context.isFirstInboundMessage && !higherClassFired) {
+    for (const automation of context.active) {
+      if (automation.triggerType !== "welcome") continue;
+      const alreadyWelcomed = await withTenantDb(db, tenantId, async (tx) => {
+        const [run] = await tx
+          .select({ id: automationRuns.id })
+          .from(automationRuns)
+          .where(
+            and(
+              eq(automationRuns.automationId, automation.id),
+              eq(automationRuns.contactId, context.conversation.contactId),
+            ),
+          )
+          .limit(1);
+        if (run) return true;
+        const [enrollment] = await tx
+          .select({ id: sequenceEnrollments.id })
+          .from(sequenceEnrollments)
+          .where(
+            and(
+              eq(sequenceEnrollments.automationId, automation.id),
+              eq(sequenceEnrollments.contactId, context.conversation.contactId),
+            ),
+          )
+          .limit(1);
+        return !!enrollment;
+      });
+      if (alreadyWelcomed) continue;
+      const match: RuleMatch = { matchedKeyword: "", matchedPayload: null };
+      const outcome = await fireRule(automation, match);
+      absorbOutcome(automation, match, outcome);
+    }
+  }
+
+  return buildResult(flowOutcome);
 }
 
 // ---------------------------------------------------------------------------

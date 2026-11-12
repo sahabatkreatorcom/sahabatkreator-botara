@@ -10,6 +10,7 @@ import {
   type ChannelAccount,
   type Database,
   type Message,
+  type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb } from "./tx";
@@ -343,6 +344,12 @@ export interface RecordWhatsAppInboundInput {
     mimeType: string | null;
     fileName: string | null;
   } | null;
+  /**
+   * Sinyal pemicu (G5): balasan tombol/daftar interaktif WhatsApp
+   * dinormalkan parser menjadi sinyal quick_reply (payload = id
+   * tombol/baris). Ditulis ke messages.trigger_signal apa adanya.
+   */
+  triggerSignal?: MessageTriggerSignal | null;
 }
 
 /**
@@ -493,6 +500,7 @@ export async function recordWhatsAppInboundMessage(
         providerMediaFileName: input.media?.fileName ?? null,
         providerMessageId: compositeId,
         replyToMessageId,
+        triggerSignal: input.triggerSignal ?? null,
         status: "received",
       })
       .onConflictDoNothing()

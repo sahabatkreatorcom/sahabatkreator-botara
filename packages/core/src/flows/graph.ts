@@ -257,6 +257,12 @@ export interface AppointmentRunState {
 /** Bentuk `flow_runs.context` yang dibaca eksekutor (defensif). */
 export interface FlowRunContextData {
   triggerText?: string;
+  /**
+   * Sinyal tombol pesan pemicu (G5) — hanya untuk run yang dimulai
+   * ketukan postback/quick reply: { kind, payload } sebagaimana
+   * tercatat di messages.trigger_signal pesan pemicunya.
+   */
+  triggerSignal?: { kind: "postback" | "quick_reply"; payload: string };
   /** Kedalaman rantai goto_flow (0/absen = run dari pesan masuk). */
   gotoDepth?: number;
   /** Pesan pemicu run akar — untuk run yang lahir dari goto_flow. */

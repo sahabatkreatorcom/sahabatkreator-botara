@@ -203,6 +203,12 @@ export {
   type InstantiateAutomationTemplateResult,
 } from "./automations";
 export {
+  TRIGGER_CLASS_PRIORITY,
+  triggerSignalOf,
+  triggerPayloadMatches,
+  type TriggerClass,
+} from "./trigger-priority";
+export {
   createSequenceTemplate,
   listSequenceTemplates,
   getSequenceTemplate,

@@ -1,6 +1,8 @@
 /**
  * Pemicu flow: evaluasi satu pesan masuk (dipanggil automations.ts
- * SETELAH pencocokan automation keyword/sequence).
+ * di TENGAH rantai prioritasnya — lihat trigger-priority.ts, sumber
+ * kebenaran urutan kelas pemicu: keselamatan → postback → quick reply
+ * → keyword → welcome → any_message → AI).
  *
  * Modul ini juga memegang mesin PARKIR run — `wait_reply`,
  * `questionnaire`, `show_catalog`, `book_appointment` — karena semuanya
@@ -35,7 +37,12 @@ import {
   type Conversation,
   type Database,
   type FlowRun,
+  type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
+import {
+  triggerPayloadMatches,
+  type TriggerClass,
+} from "../trigger-priority";
 import {
   withTenantDb,
   type DbTx,
@@ -121,20 +128,81 @@ function flowKeywordMatches(
   return match === "exact" ? text === kw : text.includes(kw);
 }
 
-function flowTriggerMatches(
+/** Konteks pengklasifikasi pemicu flow untuk SATU pesan masuk (G5). */
+export interface FlowTriggerMatchContext {
+  messageText: string;
+  /** Sinyal tombol pada pesan (messages.trigger_signal); null = teks biasa. */
+  signal: MessageTriggerSignal | null;
+  /** Pesan ini pesan masuk pertama di percakapannya (syarat welcome). */
+  isFirstInboundMessage: boolean;
+}
+
+/**
+ * Mengklasifikasikan node pemicu flow terhadap satu pesan: kelas
+ * pemicu yang cocok (lihat trigger-priority.ts) atau null. Aturan
+ * kelas ditegakkan DI SINI untuk sisi flow:
+ * - Pesan bersinyal POSTBACK hanya bisa cocok dengan pemicu postback
+ *   (payload PERSIS) — keyword/welcome/any_message tidak melihatnya.
+ * - Pemicu quick reply hanya cocok pada sinyal quick reply dengan
+ *   payload PERSIS. (Penekanan keyword BILA ada QR yang cocok adalah
+ *   keputusan lintas-mesin — diterapkan pemanggil loop & automations.)
+ * - Pemicu welcome hanya cocok pada pesan pertama percakapan.
+ * - Pemicu keyword TIDAK cocok pada pesan bersinyal apa pun di sini:
+ *   untuk quick reply, penurun-kelasan ke teks (bila tak ada QR yang
+ *   cocok di mana pun) diputuskan pemanggil; untuk postback tidak
+ *   pernah.
+ */
+export function classifyFlowTrigger(
   node: FlowGraphNode,
-  messageText: string,
-): boolean {
+  ctx: FlowTriggerMatchContext,
+): TriggerClass | null {
   const c = node.config;
-  if (c.kind === "any_message") return true;
+  const signal = ctx.signal;
+  if (signal?.kind === "postback") {
+    if (c.kind !== "postback") return null;
+    const payloads = Array.isArray(c.payloads)
+      ? c.payloads.filter(isNonEmptyString)
+      : [];
+    return triggerPayloadMatches(payloads, signal.payload)
+      ? "postback"
+      : null;
+  }
+  if (c.kind === "postback") return null;
+  if (c.kind === "quick_reply") {
+    if (signal?.kind !== "quick_reply") return null;
+    const payloads = Array.isArray(c.payloads)
+      ? c.payloads.filter(isNonEmptyString)
+      : [];
+    return triggerPayloadMatches(payloads, signal.payload)
+      ? "quick_reply"
+      : null;
+  }
+  if (signal) {
+    // Sinyal quick reply yang tidak cocok dengan pemicu quick reply
+    // mana pun di flow INI: dari sudut flow ini pesannya teks biasa —
+    // tetapi penurunan kelas global (bolehkah keyword menyala)
+    // diputuskan pemanggil sesudah seluruh QR diketahui.
+    if (c.kind === "welcome") {
+      return ctx.isFirstInboundMessage ? "welcome" : null;
+    }
+    if (c.kind === "keyword") return "keyword";
+    if (c.kind === "any_message") return "any_message";
+    return null;
+  }
   if (c.kind === "keyword") {
     const keywords = Array.isArray(c.keywords)
       ? c.keywords.filter(isNonEmptyString)
       : [];
     const match = c.match === "exact" ? "exact" : "contains";
-    return keywords.some((kw) => flowKeywordMatches(messageText, kw, match));
+    return keywords.some((kw) => flowKeywordMatches(ctx.messageText, kw, match))
+      ? "keyword"
+      : null;
   }
-  return false;
+  if (c.kind === "welcome") {
+    return ctx.isFirstInboundMessage ? "welcome" : null;
+  }
+  if (c.kind === "any_message") return "any_message";
+  return null;
 }
 
 export interface FlowEvaluationOutcome {
@@ -142,6 +210,15 @@ export interface FlowEvaluationOutcome {
   startedRunIds: string[];
   /** Flow cocok yang tidak memulai run baru (run untuk pesan ini sudah ada). */
   duplicateStarts: number;
+  /**
+   * G5: kelas pemicu yang COCOK dan benar-benar dieksekusi pada pesan
+   * ini (run dimulai atau duplikat) — sesudah aturan penekanan antar
+   * kelas diterapkan. Dipakai evaluator automation untuk menekan
+   * kelas welcome (kelas di atasnya yang menembak membatalkannya).
+   */
+  matchedTriggerClasses: TriggerClass[];
+  /** G5: kelas pemicu dari run yang BARU dimulai pesan ini. */
+  startedTriggerClasses: TriggerClass[];
   /** Run waiting yang dibatalkan karena kontak opt-out. */
   cancelledRunIds: string[];
   /** Run wait_reply parkir yang dilanjutkan pesan ini (branch replied). */
@@ -1594,12 +1671,62 @@ async function cancelWaitingFlowRuns(
 }
 
 /**
+ * Pra-pindai TANPA efek samping (G5): kelas pemicu flow aktif mana
+ * saja yang cocok dengan pesan ini. Dipakai evaluator automation
+ * untuk keputusan penekanan lintas-mesin (pemicu quick reply flow
+ * yang cocok menekan automation keyword) SEBELUM fase automation
+ * berjalan — semantik pencocokannya tetap satu-satunya
+ * `classifyFlowTrigger` di modul ini.
+ */
+export async function previewFlowTriggerClasses(
+  db: Database,
+  input: {
+    tenantId: string;
+    messageText: string;
+    signal: MessageTriggerSignal | null;
+    isFirstInboundMessage: boolean;
+  },
+): Promise<TriggerClass[]> {
+  const activeFlows = await withTenantDb(db, input.tenantId, (tx) =>
+    tx
+      .select()
+      .from(flows)
+      .where(
+        and(eq(flows.tenantId, input.tenantId), eq(flows.status, "active")),
+      )
+      .orderBy(asc(flows.createdAt)),
+  );
+  const classes = new Set<TriggerClass>();
+  for (const flow of activeFlows) {
+    const trigger = triggerOf(normalizeFlowGraph(flow.graph));
+    if (!trigger) continue;
+    const cls = classifyFlowTrigger(trigger, {
+      messageText: input.messageText,
+      signal: input.signal,
+      isFirstInboundMessage: input.isFirstInboundMessage,
+    });
+    if (cls) classes.add(cls);
+  }
+  return [...classes];
+}
+
+/**
  * Memulai run untuk semua flow AKTIF yang trigger-nya cocok dengan
  * pesan masuk ini. Dipanggil `evaluateInboundMessageForAutomations`
- * SETELAH pencocokan automation (keyword → flow → agent). Satu
+ * di tengah rantai prioritasnya (trigger-priority.ts). Satu
  * transaksi per flow agar kegagalan satu flow tidak menggagalkan yang
  * lain; pelanggaran unik (run sudah ada untuk pesan ini) diperlakukan
  * sebagai duplikat, BUKAN kegagalan.
+ *
+ * G5 — penekanan antar kelas di dalam fase flow:
+ * - `suppressKeywordTriggers`: automation quick reply SUDAH cocok di
+ *   fase automation → pemicu keyword flow ikut ditekan.
+ * - `suppressWelcomeTriggers`: kelas di atas welcome (keyword/QR
+ *   automation) sudah menembak → pemicu welcome flow ditekan.
+ * - Pemicu quick reply flow yang cocok juga menekan keyword flow
+ *   (dihitung dari kandidat fase ini sendiri), dan keyword flow yang
+ *   cocok menekan welcome flow. Welcome per flow hanya menyala SEKALI
+ *   per kontak: riwayat flow_runs flow+kontak adalah penjaganya.
  */
 export async function startFlowRunsForInboundMessage(
   db: Database,
@@ -1610,6 +1737,14 @@ export async function startFlowRunsForInboundMessage(
     messageText: string;
     contact: Contact | null;
     conversation: Conversation;
+    /** Sinyal tombol pesan ini (G5); absen/null = pesan teks biasa. */
+    triggerSignal?: MessageTriggerSignal | null;
+    /** Pesan masuk pertama di percakapannya (syarat welcome, G5). */
+    isFirstInboundMessage?: boolean;
+    /** Automation quick reply cocok → tekan pemicu keyword flow (G5). */
+    suppressKeywordTriggers?: boolean;
+    /** Kelas di atas welcome sudah menembak di fase automation (G5). */
+    suppressWelcomeTriggers?: boolean;
   },
   opts?: { googleDeps?: GoogleDeps },
 ): Promise<FlowEvaluationOutcome> {
@@ -1617,6 +1752,8 @@ export async function startFlowRunsForInboundMessage(
   const outcome: FlowEvaluationOutcome = {
     startedRunIds: [],
     duplicateStarts: 0,
+    matchedTriggerClasses: [],
+    startedTriggerClasses: [],
     cancelledRunIds: [],
     resumedRunIds: [],
     questionnaireResumedRunIds: [],
@@ -1666,11 +1803,41 @@ export async function startFlowRunsForInboundMessage(
       .orderBy(asc(flows.createdAt)),
   );
 
+  // G5 — LULUS 1: klasifikasikan semua pemicu flow aktif terhadap
+  // pesan ini (tanpa efek samping), lalu terapkan aturan penekanan
+  // antar kelas trigger-priority.ts sebelum ada run yang dimulai.
+  const signal = input.triggerSignal ?? null;
+  const matchCtx: FlowTriggerMatchContext = {
+    messageText: input.messageText,
+    signal,
+    isFirstInboundMessage: input.isFirstInboundMessage ?? false,
+  };
+  const candidates: Array<{
+    flow: (typeof activeFlows)[number];
+    graph: FlowGraphData;
+    cls: TriggerClass;
+  }> = [];
   for (const flow of activeFlows) {
     const graph = normalizeFlowGraph(flow.graph);
     const trigger = triggerOf(graph);
     if (!trigger) continue;
-    if (!flowTriggerMatches(trigger, input.messageText)) continue;
+    const cls = classifyFlowTrigger(trigger, matchCtx);
+    if (cls) candidates.push({ flow, graph, cls });
+  }
+  const quickReplyMatched =
+    candidates.some((c) => c.cls === "quick_reply") ||
+    (input.suppressKeywordTriggers ?? false);
+  const keywordMatched =
+    !quickReplyMatched && candidates.some((c) => c.cls === "keyword");
+  const welcomeSuppressed =
+    quickReplyMatched ||
+    keywordMatched ||
+    (input.suppressWelcomeTriggers ?? false);
+
+  // LULUS 2: mulai run untuk kandidat yang lolos penekanan.
+  for (const { flow, graph, cls } of candidates) {
+    if (cls === "keyword" && quickReplyMatched) continue;
+    if (cls === "welcome" && welcomeSuppressed) continue;
 
     const started = await withTenantDb(db, tenantId, async (tx) => {
       const [existing] = await tx
@@ -1684,6 +1851,24 @@ export async function startFlowRunsForInboundMessage(
         )
         .limit(1);
       if (existing) return { kind: "duplicate" as const };
+
+      // G5: welcome hanya SEKALI per kontak per flow — kontak yang
+      // membuka percakapan baru tidak memulai sambutan yang sama dua
+      // kali. Riwayat run flow ini untuk kontak ini adalah penjaganya
+      // (run pesan ini sendiri belum ada — cek duplikat di atas).
+      if (cls === "welcome") {
+        const [prior] = await tx
+          .select({ id: flowRuns.id })
+          .from(flowRuns)
+          .where(
+            and(
+              eq(flowRuns.flowId, flow.id),
+              eq(flowRuns.contactId, input.contact!.id),
+            ),
+          )
+          .limit(1);
+        if (prior) return { kind: "already_welcomed" as const };
+      }
 
       const firstNodeId = firstNodeAfterTrigger(graph);
       const now = new Date();
@@ -1705,7 +1890,19 @@ export async function startFlowRunsForInboundMessage(
           currentNodeId: firstNodeId,
           nextStepSeq: 1,
           stepCount: 0,
-          context: { triggerText: input.messageText },
+          context: {
+            triggerText: input.messageText,
+            // G5: run dari ketukan tombol membawa sinyalnya agar
+            // jejak run jujur soal apa yang memicunya.
+            ...(signal
+              ? {
+                  triggerSignal: {
+                    kind: signal.kind,
+                    payload: signal.payload,
+                  },
+                }
+              : {}),
+          },
           completedAt: firstNodeId ? null : now,
         })
         .returning();
@@ -1753,10 +1950,21 @@ export async function startFlowRunsForInboundMessage(
       throw err;
     });
 
+    if (started.kind === "already_welcomed") {
+      // Sambutan flow ini sudah pernah menyala untuk kontak ini —
+      // no-op yang disengaja (bukan duplikat pesan, bukan kegagalan).
+      continue;
+    }
+    if (!outcome.matchedTriggerClasses.includes(cls)) {
+      outcome.matchedTriggerClasses.push(cls);
+    }
     if (started.kind === "duplicate") {
       outcome.duplicateStarts += 1;
     } else {
       outcome.startedRunIds.push(started.runId);
+      if (!outcome.startedTriggerClasses.includes(cls)) {
+        outcome.startedTriggerClasses.push(cls);
+      }
     }
   }
   return outcome;

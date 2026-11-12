@@ -239,7 +239,10 @@ export {
 } from "./runs";
 export {
   startFlowRunsForInboundMessage,
+  previewFlowTriggerClasses,
+  classifyFlowTrigger,
   type FlowEvaluationOutcome,
+  type FlowTriggerMatchContext,
 } from "./evaluate";
 export {
   executeFlowStep,

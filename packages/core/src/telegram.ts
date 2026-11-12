@@ -10,6 +10,7 @@ import {
   type ChannelAccount,
   type Database,
   type Message,
+  type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
@@ -230,6 +231,13 @@ export interface RecordTelegramInboundInput {
     contentPreview: string | null;
   } | null;
   text: string;
+  /**
+   * Sinyal pemicu (G5): ketukan tombol inline (callback_query)
+   * dicatat lewat fungsi ini juga — sebagai pesan masuk bersinyal
+   * postback dengan providerMessageId sintetis dari id callback.
+   * Ditulis ke messages.trigger_signal apa adanya.
+   */
+  triggerSignal?: MessageTriggerSignal | null;
 }
 
 /**
@@ -414,6 +422,7 @@ export async function recordTelegramInboundMessage(
         providerMessageId: input.providerMessageId,
         replyToMessageId,
         replyToSnapshot: normalizeReplyToSnapshot(input.replyToSnapshot),
+        triggerSignal: input.triggerSignal ?? null,
         status: "received",
       })
       .onConflictDoNothing()
