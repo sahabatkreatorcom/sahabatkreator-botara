@@ -58,6 +58,8 @@ export const NODE_ICON_PATHS: Record<FlowNodeType, string> = {
     "M4 6.5A1.5 1.5 0 0 1 5.5 5h13A1.5 1.5 0 0 1 20 6.5v11A1.5 1.5 0 0 1 18.5 19h-13A1.5 1.5 0 0 1 4 17.5v-11zM8 9.5h8M8 13h5M17.2 16.8 19 18.6M18.4 14.6a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6z",
   cart_summary:
     "M3.5 5h2l2.3 11.2a1.5 1.5 0 0 0 1.5 1.2h7.9a1.5 1.5 0 0 0 1.5-1.2L20.5 8H6M9.8 20.5a.9.9 0 1 0 0 .01M17 20.5a.9.9 0 1 0 0 .01",
+  send_dynamic_image:
+    "M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v13a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-13zM4 16.5l3.5-3.5 2.5 2.5 3-3L17 16.5M15.8 9.2a1.2 1.2 0 1 0 0 .01M7.5 8.5h4",
 };
 
 /** Warna label chip cabang: positif hijau, timeout kuning (bila ada cabang ketiga), selainnya merah. */

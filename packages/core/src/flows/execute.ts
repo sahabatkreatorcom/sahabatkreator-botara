@@ -84,6 +84,9 @@ import {
 } from "../appointments";
 import { GoogleDeps } from "../google-calendar";
 import { appendGoogleSheetRow } from "../google-sheets";
+import { renderDynamicCardPng } from "../dynamic-image";
+import { storeUploadedMedia } from "../media";
+import type { MediaObjectStore } from "../media-storage";
 
 import {
   isNonEmptyString,
@@ -135,6 +138,7 @@ import {
   exitParkedCatalog,
   exitParkedQuestionnaire,
   normalizeText,
+  queueFlowOutboundImage,
   queueFlowOutboundInteractive,
   queueFlowOutboundText,
   resolveParkedWaitReply,
@@ -176,6 +180,13 @@ export interface FlowStepDeps {
    * tenant 'simulation' (provider sungguhan → provider_error jujur).
    */
   payments?: PaymentDeps;
+  /**
+   * Object store media untuk node `send_dynamic_image` (G17) —
+   * worker meneruskan store disk yang sama dengan jalur media lain.
+   * Tanpa store, node tercatat `skipped/media_store_unavailable`
+   * dan run tetap lanjut (pola ai_response tanpa resolver).
+   */
+  mediaStore?: MediaObjectStore;
 }
 
 export interface ExecuteFlowStepResult {
@@ -2109,6 +2120,129 @@ export async function executeFlowStep(
           stepsExecuted,
         };
       }
+      stepsExecuted += 1;
+      if (applied.status === "waiting" || isTerminalStatus(applied.status!)) {
+        return {
+          executed: true,
+          status: applied.status,
+          conversationId: run.conversationId,
+          outboundMessageId: lastOutboundMessageId,
+          stepsExecuted,
+        };
+      }
+      continue;
+    }
+
+    // Node send_dynamic_image (G17): kartu PNG dirender + disimpan
+    // ke object store DI LUAR transaksi langkah (penulisan berkas
+    // bukan kerja transaksi DB — pola book_appointment/store media).
+    // Render murni Node (font bitmap tertanam, tanpa dependensi
+    // raster); templat memakai renderMessageText yang sama seperti
+    // send_message. Kegagalan render/store dan store yang absen
+    // TIDAK menggagalkan run: tercatat sebagai hasil langkah dan
+    // alur lanjut (pola node eksternal).
+    if (node.type === "send_dynamic_image") {
+      const c = node.config;
+      const contact = ctxState.contact;
+      const vars = { name: contact?.name };
+      const title = renderMessageText(
+        typeof c.titleTemplate === "string" ? c.titleTemplate : "",
+        vars,
+      );
+      const body =
+        typeof c.bodyTemplate === "string" && c.bodyTemplate
+          ? renderMessageText(c.bodyTemplate, vars)
+          : null;
+      const caption =
+        typeof c.captionTemplate === "string" && c.captionTemplate
+          ? renderMessageText(c.captionTemplate, vars)
+          : null;
+      let mediaId: string | null = null;
+      let bytes = 0;
+      let code: string | null = null;
+      if (!deps.mediaStore) {
+        code = "media_store_unavailable";
+      } else {
+        try {
+          const png = renderDynamicCardPng({
+            title,
+            lines: body ? [body] : [],
+            backgroundColor:
+              typeof c.backgroundColor === "string"
+                ? c.backgroundColor
+                : undefined,
+            accentColor:
+              typeof c.accentColor === "string" ? c.accentColor : undefined,
+          });
+          const stored = await storeUploadedMedia(
+            db,
+            { tenantId },
+            {
+              data: png,
+              fileName: "kartu-flow.png",
+              mimeType: "image/png",
+              store: deps.mediaStore,
+            },
+          );
+          mediaId = stored.mediaId;
+          bytes = stored.sizeBytes;
+        } catch {
+          code = "image_render_failed";
+        }
+      }
+      const detail: Record<string, unknown> = {
+        outcome: mediaId
+          ? "image_sent"
+          : code === "media_store_unavailable"
+            ? "skipped"
+            : "image_error",
+        title,
+        caption,
+        mediaId,
+        bytes,
+        ...(code ? { code } : {}),
+      };
+      let queuedMessageId: string | undefined;
+      const applied: AdvanceResult = await withTenantDb(
+        db,
+        tenantId,
+        async (tx) => {
+          const [fresh] = await tx
+            .select()
+            .from(flowRuns)
+            .where(and(eq(flowRuns.tenantId, tenantId), eq(flowRuns.id, runId)))
+            .limit(1);
+          if (!fresh || isTerminalStatus(fresh.status)) {
+            return { applied: false, reason: "run_terminal" as const };
+          }
+          if (fresh.nextStepSeq !== run.nextStepSeq) {
+            return { applied: false, reason: "stale_step" as const };
+          }
+          if (mediaId && ctxState.conversation) {
+            queuedMessageId = await queueFlowOutboundImage(
+              tx,
+              tenantId,
+              fresh,
+              ctxState.conversation,
+              { mediaId, caption },
+            );
+          }
+          const adv = await advanceRun(tx, tenantId, fresh, graph, node, {
+            detail,
+          });
+          return { applied: true, status: adv.status };
+        },
+      );
+      if (!applied.applied) {
+        return {
+          executed: stepsExecuted > 0,
+          reason:
+            applied.reason === "stale_step" ? "stale_step" : "run_terminal",
+          conversationId: run.conversationId,
+          stepsExecuted,
+        };
+      }
+      if (queuedMessageId) lastOutboundMessageId = queuedMessageId;
       stepsExecuted += 1;
       if (applied.status === "waiting" || isTerminalStatus(applied.status!)) {
         return {

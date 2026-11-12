@@ -874,6 +874,106 @@ export function NodeConfigPanel({
         </>
       ) : null}
 
+      {type === "send_dynamic_image" ? (
+        <>
+          <p className="text-xs text-muted">{t("flows.dynamicImageNote")}</p>
+          <div>
+            <label className={labelClass} htmlFor="cfg-dynimg-title">
+              {t("flows.dynamicImageTitleLabel")}
+            </label>
+            <input
+              id="cfg-dynimg-title"
+              className={inputClass}
+              maxLength={200}
+              disabled={readOnly}
+              placeholder={t("flows.dynamicImageTitlePlaceholder")}
+              value={str(config.titleTemplate)}
+              onChange={(e) => set({ titleTemplate: e.target.value })}
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-dynimg-body">
+              {t("flows.dynamicImageBodyLabel")}
+            </label>
+            <textarea
+              id="cfg-dynimg-body"
+              className={inputClass}
+              rows={3}
+              maxLength={1000}
+              disabled={readOnly}
+              placeholder={t("flows.dynamicImageBodyPlaceholder")}
+              value={str(config.bodyTemplate)}
+              onChange={(e) =>
+                set({
+                  bodyTemplate: e.target.value ? e.target.value : undefined,
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-dynimg-caption">
+              {t("flows.dynamicImageCaptionLabel")}
+            </label>
+            <textarea
+              id="cfg-dynimg-caption"
+              className={inputClass}
+              rows={2}
+              maxLength={1000}
+              disabled={readOnly}
+              value={str(config.captionTemplate)}
+              onChange={(e) =>
+                set({
+                  captionTemplate: e.target.value
+                    ? e.target.value
+                    : undefined,
+                })
+              }
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={labelClass} htmlFor="cfg-dynimg-bg">
+                {t("flows.dynamicImageBgLabel")}
+              </label>
+              <input
+                id="cfg-dynimg-bg"
+                className={inputClass}
+                maxLength={7}
+                disabled={readOnly}
+                placeholder="#261E42"
+                value={str(config.backgroundColor)}
+                onChange={(e) =>
+                  set({
+                    backgroundColor: e.target.value
+                      ? e.target.value
+                      : undefined,
+                  })
+                }
+              />
+            </div>
+            <div>
+              <label className={labelClass} htmlFor="cfg-dynimg-accent">
+                {t("flows.dynamicImageAccentLabel")}
+              </label>
+              <input
+                id="cfg-dynimg-accent"
+                className={inputClass}
+                maxLength={7}
+                disabled={readOnly}
+                placeholder="#F5C542"
+                value={str(config.accentColor)}
+                onChange={(e) =>
+                  set({
+                    accentColor: e.target.value ? e.target.value : undefined,
+                  })
+                }
+              />
+            </div>
+          </div>
+          <p className="text-xs text-muted">{t("flows.dynamicImageLimits")}</p>
+        </>
+      ) : null}
+
       {type === "append_sheet_row" ? (
         <>
           <p className="text-xs text-muted">{t("flows.sheetNote")}</p>

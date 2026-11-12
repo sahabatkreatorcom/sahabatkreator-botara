@@ -117,6 +117,7 @@ export type FlowSimEffectKind =
   | "appointment_offer"
   | "ad_conversion"
   | "sheet_append"
+  | "dynamic_image"
   | "park";
 
 export interface FlowSimEffect {
@@ -643,6 +644,33 @@ export function simulateFlowRun(
           ),
           values,
         });
+        return { type: "advance" };
+      }
+
+      case "send_dynamic_image": {
+        const titleTemplate =
+          typeof c.titleTemplate === "string" ? c.titleTemplate : "";
+        if (!titleTemplate) {
+          throw new SimNodeError(
+            "send_dynamic_image tanpa config.titleTemplate",
+          );
+        }
+        // PNG TIDAK dirender di simulator — judul/caption yang AKAN
+        // digambar dirender dengan substitusi pesan yang sama
+        // seperti eksekutor dan dicatat sebagai efek "recorded".
+        const vars = { name: contactLike().name };
+        const title = renderMessageText(titleTemplate, vars);
+        const caption =
+          typeof c.captionTemplate === "string" && c.captionTemplate
+            ? renderMessageText(c.captionTemplate, vars)
+            : null;
+        pushStep(node, {
+          outcome: "simulated",
+          reason: "dynamic_image_not_rendered",
+          title,
+          caption,
+        });
+        pushEffect("dynamic_image", node, "recorded", { title, caption });
         return { type: "advance" };
       }
 

@@ -381,6 +381,50 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
       }
       break;
     }
+    case "send_dynamic_image": {
+      if (
+        typeof c.titleTemplate !== "string" ||
+        c.titleTemplate.trim().length === 0 ||
+        c.titleTemplate.length > 200
+      ) {
+        err(
+          "DYNAMIC_IMAGE_TITLE_REQUIRED",
+          "Node send_dynamic_image membutuhkan config.titleTemplate non-kosong (maks 200 karakter)",
+        );
+      }
+      if (
+        c.bodyTemplate !== undefined &&
+        (typeof c.bodyTemplate !== "string" || c.bodyTemplate.length > 1000)
+      ) {
+        err(
+          "DYNAMIC_IMAGE_BODY_INVALID",
+          "Node send_dynamic_image: config.bodyTemplate harus string maks 1000 karakter bila diisi",
+        );
+      }
+      if (
+        c.captionTemplate !== undefined &&
+        (typeof c.captionTemplate !== "string" ||
+          c.captionTemplate.length > 1000)
+      ) {
+        err(
+          "DYNAMIC_IMAGE_CAPTION_INVALID",
+          "Node send_dynamic_image: config.captionTemplate harus string maks 1000 karakter bila diisi",
+        );
+      }
+      for (const key of ["backgroundColor", "accentColor"] as const) {
+        const v = c[key];
+        if (
+          v !== undefined &&
+          (typeof v !== "string" || !/^#?[0-9a-fA-F]{6}$/.test(v.trim()))
+        ) {
+          err(
+            "DYNAMIC_IMAGE_COLOR_INVALID",
+            `Node send_dynamic_image: config.${key} harus warna #RRGGBB bila diisi`,
+          );
+        }
+      }
+      break;
+    }
     case "set_field": {
       const field = c.field;
       const customKey =

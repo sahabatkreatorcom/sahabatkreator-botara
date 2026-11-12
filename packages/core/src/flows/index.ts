@@ -272,3 +272,4 @@ export {
   type BuiltCatalogMessage,
   type CatalogMessageFormat,
 } from "./catalog-native";
+export { queueFlowOutboundImage } from "./evaluate";

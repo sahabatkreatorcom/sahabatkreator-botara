@@ -1028,8 +1028,10 @@ pemilik platform, sekali:
 5. Tenant lalu menghubungkan akun Google-nya dari **Saluran →
    Google → Google Sheets**; spreadsheet tujuan harus bisa diakses
    (dimiliki/dibagikan ke) akun yang memberi consent itu.
-3. **Pesan katalog natif + rangkuman keranjang (G17 butir 3)** —
-   **tanpa tindakan pemilik baru**: node "Kirim katalog (natif)" dan
+
+### Butir 3 — Pesan katalog natif + rangkuman keranjang (tanpa tindakan pemilik baru)
+
+Node "Kirim katalog (natif)" dan
    "Rangkuman keranjang" memakai katalog commerce + keranjang per
    kontak yang sudah ada dan token kanal yang sudah terhubung.
    Perilaku per kanal yang perlu diketahui pemilik (bukan bug):
@@ -1047,6 +1049,25 @@ pemilik platform, sekali:
    Rangkuman keranjang hanya membaca keranjang aktif kontak; checkout
    tetap lewat node Checkout keranjang yang sudah ada.
 
+### Butir 4 — Gambar dinamis (tanpa tindakan pemilik baru)
+
+Node "Kirim gambar dinamis" merender kartu PNG 1200×630
+   berisi teks dari konteks run (judul/isi/caption adalah templat
+   pesan biasa) memakai encoder PNG + font bitmap yang tertanam di
+   core — SENGAJA tanpa dependensi raster baru — lalu menyimpan ke
+   penyimpanan media yang sama dan mengirimnya sebagai pesan gambar.
+   Batas yang perlu diketahui pemilik (dinyatakan juga di panel
+   builder): font bitmap sederhana satu ketebalan — hanya huruf
+   Latin dasar & angka (tampil kapital; diakritik dilucuti; karakter
+   lain termasuk emoji menjadi '?'), tata letak tetap (judul + isi +
+   garis aksen, warna latar/aksen bisa dipilih), tanpa gambar
+   latar/logo. Gambar terkirim sebagai foto pada kanal yang poller
+   pengirimannya mendukung lampiran media (WhatsApp/Meta); di kanal
+   teks-murni (Telegram) pesan gambar tidak terkirim sebagai foto —
+   riwayat langkah tetap mencatat render-nya. Bila kelak dibutuhkan
+   tipografi penuh (font TTF, emoji, logo), jalurnya adalah menambah
+   pustaka render (satori/resvg/sharp) sebagai keputusan terpisah.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -1061,7 +1082,7 @@ platform: developer token Google Ads + proyek OAuth Ads; tindakan
 tenant: dataset + token Meta / akun + aksi konversi Google Ads) +
 Gelombang G17 (ekstensi flow — butir 1 pemicu webhook tanpa tindakan
 pemilik; butir 2 Sheets: tindakan platform proyek Cloud Sheets +
-proyek/consent tenant; butir 3 katalog natif tanpa tindakan pemilik
-baru, hanya catatan perilaku; butir 4 menyusul di bagian G17 yang sama).
+proyek/consent tenant; butir 3 katalog natif + butir 4 gambar dinamis
+tanpa tindakan pemilik baru, hanya catatan perilaku/batas).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._

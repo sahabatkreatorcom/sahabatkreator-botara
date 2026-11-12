@@ -773,6 +773,9 @@ const bullWorker = new Worker<MainJobData>(
           publicBaseUrl: env.BETTER_AUTH_URL,
           google: googleDeps,
           payments: paymentDeps,
+          // G17: node send_dynamic_image menyimpan kartu PNG ke
+          // store yang sama dengan jalur media lain.
+          mediaStore,
         },
       );
       // Pesan `queued` yang dibuat langkah ini → nudge pengiriman.

@@ -100,6 +100,7 @@ export const NODE_TYPES = new Set([
   "append_sheet_row",
   "send_catalog",
   "cart_summary",
+  "send_dynamic_image",
 ]);
 
 /**

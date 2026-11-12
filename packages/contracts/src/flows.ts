@@ -374,6 +374,9 @@ export const FlowNodeTypeSchema = z.enum([
   "send_catalog",
   // G17 — rangkuman keranjang aktif kontak + cabang has_items/empty.
   "cart_summary",
+  // G17 — gambar dinamis: kartu PNG berisi teks dari konteks run,
+  // dirender tanpa dependensi raster (font bitmap tertanam di core).
+  "send_dynamic_image",
 ]);
 export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
 
@@ -597,6 +600,16 @@ export const FlowNodeConfigSchema = z.union([
       )
       .min(1)
       .max(50),
+  }),
+  // G17 — send_dynamic_image: templat PESAN renderMessageText
+  // ({name} + spintax — keluarga variabel yang sama dengan
+  // send_message); warna #RRGGBB divalidasi rinci di core.
+  z.object({
+    titleTemplate: z.string().min(1).max(200),
+    bodyTemplate: z.string().min(1).max(1000).optional(),
+    captionTemplate: z.string().min(1).max(1000).optional(),
+    backgroundColor: z.string().min(4).max(7).optional(),
+    accentColor: z.string().min(4).max(7).optional(),
   }),
   // ai_response / handoff / end: config kosong.
   z.object({}),
@@ -1050,6 +1063,7 @@ export const FlowSimulateEffectKindSchema = z.enum([
   // G17: node append_sheet_row — hanya dicatat (tidak ada panggilan
   // Sheets API dari simulator), fidelity "recorded".
   "sheet_append",
+  "dynamic_image",
   "park",
 ]);
 export type FlowSimulateEffectKind = z.infer<

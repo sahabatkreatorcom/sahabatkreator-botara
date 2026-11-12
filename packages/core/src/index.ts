@@ -118,6 +118,12 @@ export {
   type PendingMediaIngestion,
 } from "./media";
 export {
+  DYNAMIC_CARD_HEIGHT,
+  DYNAMIC_CARD_WIDTH,
+  renderDynamicCardPng,
+  type DynamicCardSpec,
+} from "./dynamic-image";
+export {
   createContact,
   listContacts,
   getContact,
@@ -1103,6 +1109,7 @@ export {
   catalogProductIdFromSignal,
   type BuiltCatalogMessage,
   type CatalogMessageFormat,
+  queueFlowOutboundImage,
   FLOW_WEBHOOK_PAYLOAD_MAX_BYTES,
   deleteFlowWebhookEndpoint,
   getFlowWebhookEndpoint,

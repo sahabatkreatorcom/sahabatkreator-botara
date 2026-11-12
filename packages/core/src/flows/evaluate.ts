@@ -391,6 +391,54 @@ export async function queueFlowOutboundInteractive(
 }
 
 /**
+ * Varian antre pesan GAMBAR (G17, node send_dynamic_image): baris
+ * media sudah tersimpan di object store oleh eksekutor (di luar
+ * transaksi langkah); di sini hanya baris pesan type "image" +
+ * media_id + caption yang ditulis dalam transaksi langkah, sama
+ * seperti varian teks/interaktif. Poller pengiriman membaca byte
+ * dari media_id seperti lampiran lain (Fase 18B).
+ */
+export async function queueFlowOutboundImage(
+  tx: DbTx,
+  tenantId: string,
+  run: FlowRun,
+  conversation: Conversation,
+  input: { mediaId: string; caption: string | null },
+): Promise<string> {
+  const [outbound] = await tx
+    .insert(messages)
+    .values({
+      tenantId,
+      conversationId: run.conversationId,
+      direction: "outbound",
+      senderType: "system",
+      type: "image",
+      contentText: input.caption,
+      mediaId: input.mediaId,
+      status: "queued",
+    })
+    .returning();
+  const now = new Date();
+  await tx
+    .update(conversations)
+    .set({ lastMessageAt: now, updatedAt: now })
+    .where(eq(conversations.id, run.conversationId));
+  await tx.insert(outboxEvents).values({
+    tenantId,
+    type: "message.queued",
+    payload: {
+      provider: conversation.provider,
+      conversationId: run.conversationId,
+      messageId: outbound.id,
+      via: "flow",
+      flowId: run.flowId,
+      runId: run.id,
+    },
+  });
+  return outbound.id;
+}
+
+/**
  * Menulis jawaban sah ke field target kontak (pola set_field: kolom
  * standar atau custom_fields yang digabung). Mengembalikan nilai yang
  * BENAR-BENAR tersimpan (target standar menerima bentuk string dari
