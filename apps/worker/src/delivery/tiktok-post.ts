@@ -51,14 +51,23 @@ import {
  *   pada post_info foto (parameter resmi, hanya DIRECT_POST) —
  *   permintaan pemilik; TikTok menambahkan musik rekomendasi dan
  *   hasil terbit mencatatnya di log integrasi.
- * - GERBANG AUDIT: level privasi berasal dari konfigurasi platform
- *   (env TIKTOK_PRIVACY_LEVEL, bawaan `SELF_ONLY` — satu-satunya
- *   level yang diizinkan sebelum aplikasi pemilik lolos audit
- *   TikTok). Klien memvalidasinya terhadap `privacy_level_options`
- *   akun sebelum unggah; hasil terbit mencatat level privasinya di
- *   log integrasi, dan providerMessageId jatuh ke `publish_id` bila
+ * - PILIHAN KREATOR PER POSTINGAN (gelombang Pilihan Privasi &
+ *   AI): level privasi = pilihan pengguna pada postingan
+ *   (Content Sharing Guidelines mewajibkan kreator memilihnya
+ *   sendiri; penjadwalan dari formulir menolak tanpa pilihan).
+ *   Postingan TANPA pilihan (lama/non-formulir) memakai bawaan
+ *   platform (Panel Admin → env, bawaan `SELF_ONLY` — level yang
+ *   diizinkan sebelum aplikasi lolos audit) dan kejadian itu
+ *   dicatat apa adanya di log integrasi ("privacy source default").
+ *   Apa pun sumbernya, klien memvalidasi level terhadap
+ *   `privacy_level_options` akun sebelum unggah dan TIDAK pernah
+ *   menurunkannya diam-diam; hasil terbit mencatat levelnya di log
+ *   integrasi, dan providerMessageId jatuh ke `publish_id` bila
  *   postingan tidak punya id publik (kasus SELF_ONLY) — postingan
  *   privat TIDAK pernah dicatat atau diklaim sebagai publik.
+ *   Toggle interaksi, pengungkapan komersial, dan `is_aigc` juga
+ *   dari opsi postingan (bawaan mati/tidak dinyatakan bila absen —
+ *   sesuai guidelines, bukan pernyataan karangan).
  * - Access token OAuth pada akun channel berumur ±24 jam; sejak
  *   gelombang Semua OAuth, connect menyimpan refresh token
  *   terenkripsi dan worker lifecycle (src/tiktok-token-lifecycle.ts)
@@ -147,7 +156,13 @@ export async function publishTikTokPost(
     }
   }
 
-  const privacyLevel = (opts.tiktokPrivacyLevel ??
+  // Resolusi privasi berlapis: pilihan postingan → bawaan platform
+  // (resolver panel→env di worker). `privacyFromDefault` dicatat di
+  // log hasil terbit agar lapis yang dipakai tidak pernah tersamar.
+  const postOptions = payload.publishOptions;
+  const privacyFromDefault = !postOptions?.tiktokPrivacyLevel;
+  const privacyLevel = (postOptions?.tiktokPrivacyLevel ??
+    opts.tiktokPrivacyLevel ??
     "SELF_ONLY") as TikTokPrivacyLevel;
   const client = new TikTokClient({ baseUrl: opts.tiktokApiBase });
 
@@ -163,6 +178,10 @@ export async function publishTikTokPost(
           // Auto music: permintaan pemilik, dinyalakan eksplisit
           // di sini dan dicatat pada summary log di bawah.
           autoAddMusic: true,
+          allowComment: postOptions?.tiktokAllowComment,
+          brandOrganic: postOptions?.tiktokBrandOrganic,
+          brandContent: postOptions?.tiktokBrandContent,
+          isAigc: postOptions?.aiGenerated,
           pollIntervalMs: opts.tiktokStatusPollIntervalMs,
           maxPolls: opts.tiktokStatusMaxPolls,
         })
@@ -180,7 +199,9 @@ export async function publishTikTokPost(
       outcome: "sent",
       summary:
         `channel post ${input.postId} published ` +
-        `(privacy ${result.privacyLevel}, status ${result.finalStatus}` +
+        `(privacy ${result.privacyLevel}` +
+        (privacyFromDefault ? " dari bawaan platform" : "") +
+        `, status ${result.finalStatus}` +
         (photoUrls
           ? `, photos ${photoUrls.length}, auto music on`
           : ", video") +
@@ -234,6 +255,12 @@ export async function publishTikTokPost(
       privacyLevel,
       data,
       contentType,
+      allowComment: postOptions?.tiktokAllowComment,
+      allowDuet: postOptions?.tiktokAllowDuet,
+      allowStitch: postOptions?.tiktokAllowStitch,
+      brandOrganic: postOptions?.tiktokBrandOrganic,
+      brandContent: postOptions?.tiktokBrandContent,
+      isAigc: postOptions?.aiGenerated,
       pollIntervalMs: opts.tiktokStatusPollIntervalMs,
       maxPolls: opts.tiktokStatusMaxPolls,
     });

@@ -37,10 +37,17 @@ import type {
  *   penjadwalan; pemeriksaan di sini pertahanan terakhir). Biner
  *   dibaca dari object store privat lalu diunggah resumable — YouTube
  *   tidak menuntut URL publik seperti API container IG/Threads.
- * - `privacyStatus` dari konfigurasi platform (env
- *   YOUTUBE_PRIVACY_STATUS, bawaan `private`): aplikasi Google yang
- *   belum terverifikasi dikunci Google ke private, dan bawaan aman
- *   yang sama dipakai sampai pemilik menaikkannya dengan sadar.
+ * - Pilihan penerbitan dari OPSI POSTINGAN (gelombang Pilihan
+ *   Privasi & AI): privasi = pilihan pengguna pada postingan, atau
+ *   BAWAAN platform (Panel Admin → env, `opts.youtubePrivacyStatus`)
+ *   bila postingan tidak memilih — YouTube tidak melarang
+ *   preseleksi dan pemilik mempertahankan bawaan panel;
+ *   `containsSyntheticMedia` = pernyataan AI pengguna (postingan
+ *   terjadwal pasca-gelombang selalu membawanya — core menolak
+ *   penjadwalan tanpa itu; postingan LAMA tanpa pernyataan gagal
+ *   aman `youtube_publish_options_missing`, karena mengarang
+ *   pernyataan isi atas nama kreator tidak pernah boleh);
+ *   `madeForKids` diteruskan hanya bila pengguna menetapkannya.
  * - Kuota `videos.insert` (1600/10.000 unit per proyek per hari)
  *   dipetakan ke kode khusus `youtube_quota_exceeded` oleh paket
  *   channel — operator harus bisa membedakan "kuota proyek habis"
@@ -108,16 +115,29 @@ export async function publishYouTubePost(
   const data = new Uint8Array(object.data);
   const contentType = media.mimeType ?? object.contentType ?? "video/mp4";
 
+  // Pernyataan AI adalah syarat publish, diperiksa SEBELUM token
+  // ditukar — postingan lama (terjadwal sebelum gelombang opsi per
+  // postingan) yang tidak membawanya gagal aman di sini, bukan
+  // diterbitkan dengan pernyataan karangan.
+  if (typeof payload.publishOptions?.aiGenerated !== "boolean") {
+    return fail("youtube_publish_options_missing");
+  }
+
   const access = await getYouTubePublishAccess(db, input.tenantId, opts.google);
   if (access.kind === "not_connected") return fail("youtube_not_connected");
   if (access.kind === "scope_missing") return fail("youtube_scope_missing");
 
-  const privacyStatus = (opts.youtubePrivacyStatus ??
+  // Resolusi privasi berlapis: pilihan postingan → bawaan platform
+  // (resolver panel→env di worker, `private` bila tak terkonfigurasi).
+  const privacyStatus = (payload.publishOptions.youtubePrivacyStatus ??
+    opts.youtubePrivacyStatus ??
     "private") as YouTubePrivacyStatus;
   const metadata = buildYouTubeVideoMetadata({
     title: payload.title,
     caption: payload.caption,
     privacyStatus,
+    containsSyntheticMedia: payload.publishOptions.aiGenerated,
+    madeForKids: payload.publishOptions.madeForKids,
   });
   const client = new YouTubeClient({
     baseUrl: opts.google.bases?.apiBase,

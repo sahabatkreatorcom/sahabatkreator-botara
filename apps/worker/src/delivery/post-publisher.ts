@@ -66,9 +66,11 @@ export interface PostPublisherOptions {
    */
   google?: GoogleDeps | undefined;
   /**
-   * Status privasi video YouTube (env YOUTUBE_PRIVACY_STATUS;
-   * bawaan `private` — satu-satunya status yang dijamin untuk
-   * aplikasi Google yang belum terverifikasi).
+   * Bawaan platform untuk status privasi video YouTube (resolver
+   * Panel Admin → env YOUTUBE_PRIVACY_STATUS; bawaan `private`).
+   * Sejak gelombang Pilihan Privasi & AI ini hanya LAPIS BAWAAN:
+   * pilihan pengguna pada postingan (`publishOptions`) menimpanya;
+   * bawaan berlaku untuk postingan yang tidak memilih.
    */
   youtubePrivacyStatus?: string | undefined;
   /** Base URL LinkedIn API (env LINKEDIN_API_BASE; default api.linkedin.com). */
@@ -85,10 +87,14 @@ export interface PostPublisherOptions {
   /** Base URL TikTok API (env TIKTOK_API_BASE; default open.tiktokapis.com). */
   tiktokApiBase?: string | undefined;
   /**
-   * Level privasi direct post TikTok (env TIKTOK_PRIVACY_LEVEL;
-   * bawaan `SELF_ONLY` — satu-satunya level yang diizinkan sebelum
-   * aplikasi pemilik lolos audit Content Posting API TikTok; lihat
-   * OWNER-ACTIONS roadmap content schedule).
+   * Bawaan platform untuk level privasi direct post TikTok
+   * (resolver Panel Admin → env TIKTOK_PRIVACY_LEVEL; bawaan
+   * `SELF_ONLY`). Sejak gelombang Pilihan Privasi & AI ini hanya
+   * LAPIS BAWAAN untuk postingan TANPA pilihan (lama/non-formulir):
+   * pilihan pengguna pada postingan menimpanya, dan penjadwalan
+   * dari formulir mewajibkan pilihan eksplisit (guidelines TikTok
+   * melarang nilai terpilih duluan). Apa pun sumbernya, level tetap
+   * divalidasi adapter terhadap `privacy_level_options` akun.
    */
   tiktokPrivacyLevel?: string | undefined;
   /** Jeda polling status publikasi TikTok; default 3000 ms. */

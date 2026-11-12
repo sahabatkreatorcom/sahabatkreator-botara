@@ -362,6 +362,11 @@ async function resolveWorkerEmbeddingProvider(): Promise<EmbeddingProvider | nul
  * worker. Kegagalan resolusi TIDAK boleh mematikan publikasi (pola
  * resolver embedding di atas): jatuh ke nilai env proses ini, yang
  * juga membawa bawaan aman config bila env kosong.
+ *
+ * Sejak gelombang Pilihan Privasi & AI per Postingan, dua level
+ * privasi di sini berperan sebagai NILAI BAWAAN platform: pilihan
+ * pengguna pada postingan (payload `publishOptions`) menimpanya di
+ * adapter; bawaan hanya berlaku untuk postingan tanpa pilihan.
  */
 async function resolvePostPublishSettings(): Promise<{
   publicMediaBaseUrl?: string;
