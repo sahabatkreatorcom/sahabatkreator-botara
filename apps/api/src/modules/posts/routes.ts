@@ -1,19 +1,25 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  ApprovePostRequestSchema,
   CreatePostGroupRequestSchema,
   CreatePostRequestSchema,
+  PostApprovalHistoryResponseSchema,
+  PostApprovalSettingsSchema,
   PostGroupResponseSchema,
   PostListQuerySchema,
   PostListResponseSchema,
   PostSchema,
   PostTargetListResponseSchema,
+  RejectPostRequestSchema,
   SchedulePostRequestSchema,
+  UpdatePostApprovalSettingsRequestSchema,
   UpdatePostRequestSchema,
   type PostResponse,
 } from "@sahabat-kreator/contracts";
 import {
   PostDomainError,
+  approvePost,
   cancelPost,
   createPost,
   createPostGroup,
@@ -22,12 +28,18 @@ import {
   duplicatePost,
   getChannelAccount,
   getPost,
+  getPostApprovalSettings,
+  listPostApprovalHistory,
   listPostTargets,
   listPosts,
+  rejectPost,
   releaseStuckPost,
+  requestPostChanges,
   retryPost,
   schedulePost,
+  submitPostForReview,
   updatePost,
+  updatePostApprovalSettings,
   type PostErrorCode,
   type PostRecord,
 } from "@sahabat-kreator/core";
@@ -54,6 +66,20 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   POST   /tenants/:tenantId/posts/:id/duplicate  duplikat menjadi draft baru
  *   POST   /tenants/:tenantId/posts/:id/cancel     batalkan
  *
+ * Persetujuan (Fase Susulan S1):
+ *   GET    /tenants/:tenantId/posts/settings             sakelar persetujuan wajib (semua member)
+ *   PATCH  /tenants/:tenantId/posts/settings             ubah sakelar (owner/admin)
+ *   POST   /tenants/:tenantId/posts/:id/submit-review    ajukan ke tinjauan (owner/admin)
+ *   POST   /tenants/:tenantId/posts/:id/approve          setujui (owner/admin peninjau)
+ *   POST   /tenants/:tenantId/posts/:id/reject           tolak, catatan wajib (owner/admin peninjau)
+ *   POST   /tenants/:tenantId/posts/:id/request-changes  minta revisi, catatan wajib (owner/admin peninjau)
+ *   GET    /tenants/:tenantId/posts/:id/approval-history riwayat keputusan dari audit (semua member)
+ *
+ * Keputusan persetujuan berlaku pada UNIT grup multi-target (core
+ * yang mensinkronkan anggota); route hanya meneruskan post jangkar.
+ * Aturan anti-setuju-sendiri + pengecualian tenant solo ditegakkan
+ * core (POST_APPROVAL_SELF_REVIEW), bukan di sini.
+ *
  * Penerbitan BUKAN di sini: `schedule` menulis event outbox
  * `post.publish_due`; relay worker mengubahnya menjadi job tertunda
  * `post.publish`, dan publisher di worker yang memanggil Bot API.
@@ -75,6 +101,17 @@ function serializePost(post: PostRecord): PostResponse {
     providerMessageId: post.providerMessageId,
     errorCode: post.errorCode,
     publishOptions: post.publishOptions,
+    createdByUserId: post.createdByUserId,
+    approvalStatus: post.approvalStatus,
+    approvalNote: post.approvalNote,
+    approvalSubmittedByUserId: post.approvalSubmittedByUserId,
+    approvalSubmittedAt: post.approvalSubmittedAt
+      ? post.approvalSubmittedAt.toISOString()
+      : null,
+    approvalReviewedByUserId: post.approvalReviewedByUserId,
+    approvalReviewedAt: post.approvalReviewedAt
+      ? post.approvalReviewedAt.toISOString()
+      : null,
     target: {
       channelAccountId: post.target.channelAccountId,
       conversationId: post.target.conversationId,
@@ -90,7 +127,7 @@ function serializePost(post: PostRecord): PostResponse {
 }
 
 /** Kode domain → status HTTP. Satu tabel, supaya tidak tersebar di tiap route. */
-const ERROR_STATUS: Record<PostErrorCode, 400 | 404 | 409 | 422> = {
+const ERROR_STATUS: Record<PostErrorCode, 400 | 403 | 404 | 409 | 422> = {
   POST_NOT_FOUND: 404,
   POST_TARGET_NOT_FOUND: 422,
   POST_TARGET_NOT_CONNECTED: 409,
@@ -109,6 +146,9 @@ const ERROR_STATUS: Record<PostErrorCode, 400 | 404 | 409 | 422> = {
   POST_MEDIA_KIND_UNSUPPORTED: 422,
   POST_PUBLISH_OPTIONS_REQUIRED: 422,
   POST_PUBLISH_OPTIONS_INVALID: 422,
+  POST_APPROVAL_INVALID_STATE: 409,
+  POST_APPROVAL_NOTE_REQUIRED: 422,
+  POST_APPROVAL_SELF_REVIEW: 403,
 };
 
 function domainError(c: AppContext, err: unknown) {
@@ -144,6 +184,8 @@ export function createPostsRoutes(
     app.post(base, unavailable);
     app.post(`${base}/group`, unavailable);
     app.get(`${base}/targets`, unavailable);
+    app.get(`${base}/settings`, unavailable);
+    app.patch(`${base}/settings`, unavailable);
     app.get(`${base}/:id`, unavailable);
     app.patch(`${base}/:id`, unavailable);
     app.delete(`${base}/:id`, unavailable);
@@ -152,6 +194,11 @@ export function createPostsRoutes(
     app.post(`${base}/:id/release-stuck`, unavailable);
     app.post(`${base}/:id/duplicate`, unavailable);
     app.post(`${base}/:id/cancel`, unavailable);
+    app.post(`${base}/:id/submit-review`, unavailable);
+    app.post(`${base}/:id/approve`, unavailable);
+    app.post(`${base}/:id/reject`, unavailable);
+    app.post(`${base}/:id/request-changes`, unavailable);
+    app.get(`${base}/:id/approval-history`, unavailable);
     return app;
   }
 
@@ -278,6 +325,37 @@ export function createPostsRoutes(
     );
   });
 
+  // ---- Pengaturan persetujuan tenant (sebelum :id) -------------------------
+  app.get(`${base}/settings`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const settings = await getPostApprovalSettings(bundle.db, {
+      tenantId: g.tenant.id,
+    });
+    return c.json(PostApprovalSettingsSchema.parse(settings));
+  });
+
+  app.patch(`${base}/settings`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid JSON body");
+    }
+    const parsed = UpdatePostApprovalSettingsRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid settings payload");
+    }
+    const settings = await updatePostApprovalSettings(bundle.db, {
+      tenantId: g.tenant.id,
+      userId: g.appUser.id,
+      approvalRequired: parsed.data.approvalRequired,
+    });
+    return c.json(PostApprovalSettingsSchema.parse(settings));
+  });
+
   // ---- Daftar -------------------------------------------------------------
   app.get(base, async (c) => {
     const g = await guard(c, { ownerAdmin: false });
@@ -289,6 +367,7 @@ export function createPostsRoutes(
     const items = await listPosts(bundle.db, {
       tenantId: g.tenant.id,
       status: parsed.data.status,
+      approvalStatus: parsed.data.approvalStatus,
       limit: parsed.data.limit,
     });
     return c.json(
@@ -570,6 +649,126 @@ export function createPostsRoutes(
         postId,
       });
       return c.json(PostSchema.parse(serializePost(post)));
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Persetujuan: ajukan ke tinjauan -------------------------------------
+  app.post(`${base}/:id/submit-review`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    try {
+      const post = await submitPostForReview(bundle.db, {
+        tenantId: g.tenant.id,
+        userId: g.appUser.id,
+        postId,
+      });
+      return c.json(PostSchema.parse(serializePost(post)));
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Persetujuan: setujui (catatan opsional; body boleh kosong) ----------
+  app.post(`${base}/:id/approve`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    let json: unknown = {};
+    try {
+      const text = await c.req.text();
+      json = text.trim().length > 0 ? JSON.parse(text) : {};
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid JSON body");
+    }
+    const parsed = ApprovePostRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid approve payload");
+    }
+    try {
+      const post = await approvePost(bundle.db, {
+        tenantId: g.tenant.id,
+        userId: g.appUser.id,
+        postId,
+        note: parsed.data.note ?? null,
+      });
+      return c.json(PostSchema.parse(serializePost(post)));
+    } catch (err) {
+      return domainError(c, err);
+    }
+  });
+
+  // ---- Persetujuan: tolak / minta revisi (catatan wajib) --------------------
+  // Dua route, satu bentuk: keputusan + catatan wajib. Kekosongan
+  // catatan ditolak skema (400) DAN core (422 POST_APPROVAL_NOTE_REQUIRED)
+  // — lapisan ganda yang disengaja, karena core juga dipanggil jalur lain.
+  const decideWithNote =
+    (
+      decide: typeof rejectPost,
+    ): ((c: AppContext) => Promise<Response>) =>
+    async (c) => {
+      const g = await guard(c, { ownerAdmin: true });
+      if ("error" in g) return g.error;
+      const postId = parsePostId(c);
+      if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+      let json: unknown;
+      try {
+        json = await c.req.json();
+      } catch {
+        return apiError(c, 400, "VALIDATION_ERROR", "Invalid JSON body");
+      }
+      const parsed = RejectPostRequestSchema.safeParse(json);
+      if (!parsed.success) {
+        return apiError(
+          c,
+          400,
+          "VALIDATION_ERROR",
+          "A reviewer note is required for this decision",
+        );
+      }
+      try {
+        const post = await decide(bundle.db, {
+          tenantId: g.tenant.id,
+          userId: g.appUser.id,
+          postId,
+          note: parsed.data.note,
+        });
+        return c.json(PostSchema.parse(serializePost(post)));
+      } catch (err) {
+        return domainError(c, err);
+      }
+    };
+  app.post(`${base}/:id/reject`, decideWithNote(rejectPost));
+  app.post(`${base}/:id/request-changes`, decideWithNote(requestPostChanges));
+
+  // ---- Persetujuan: riwayat keputusan (dari audit) ---------------------------
+  app.get(`${base}/:id/approval-history`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    try {
+      const items = await listPostApprovalHistory(bundle.db, {
+        tenantId: g.tenant.id,
+        postId,
+      });
+      return c.json(
+        PostApprovalHistoryResponseSchema.parse({
+          items: items.map((item) => ({
+            id: item.id,
+            action: item.action,
+            actorType: item.actorType,
+            actorId: item.actorId,
+            actorLabel: item.actorLabel,
+            postId: item.postId,
+            createdAt: item.createdAt.toISOString(),
+          })),
+        }),
+      );
     } catch (err) {
       return domainError(c, err);
     }

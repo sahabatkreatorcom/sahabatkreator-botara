@@ -4,6 +4,8 @@ import {
   getPostProviderCapability,
   type PinterestBoard,
   type PinterestBoardPrivacy,
+  type PostApprovalHistoryEntry,
+  type PostApprovalStatus,
   type PostPublishOptions,
   type PostResponse,
   type PostStatus,
@@ -93,6 +95,33 @@ const STATUS_KEY: Record<PostStatus, Parameters<Translate>[0]> = {
   published: "posts.statusPublished",
   failed: "posts.statusFailed",
   cancelled: "posts.statusCancelled",
+};
+
+// Lencana persetujuan (Fase Susulan S1) — mesin status kedua di
+// samping status publikasi: "sudah boleh tayang atau belum".
+const APPROVAL_STYLE: Record<PostApprovalStatus, string> = {
+  draft: "bg-elevated text-muted",
+  pending_review: "bg-accent/15 text-accent",
+  approved: "bg-success/15 text-success",
+  rejected: "bg-danger/15 text-danger",
+  changes_requested: "bg-warning/15 text-warning",
+};
+
+const APPROVAL_KEY: Record<PostApprovalStatus, Parameters<Translate>[0]> = {
+  draft: "posts.approvalDraft",
+  pending_review: "posts.approvalPending",
+  approved: "posts.approvalApproved",
+  rejected: "posts.approvalRejected",
+  changes_requested: "posts.approvalChanges",
+};
+
+/** Label riwayat keputusan dari aksi audit (S1). */
+const APPROVAL_HISTORY_KEY: Record<string, Parameters<Translate>[0]> = {
+  "post.approval_submitted": "posts.approvalHistorySubmitted",
+  "post.approval_approved": "posts.approvalHistoryApproved",
+  "post.approval_rejected": "posts.approvalHistoryRejected",
+  "post.approval_changes_requested": "posts.approvalHistoryChanges",
+  "post.publish_blocked_approval": "posts.approvalHistoryBlocked",
 };
 
 // ---------------------------------------------------------------------------
@@ -185,6 +214,11 @@ export function PostsPage({ t, locale }: PostsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [view, setView] = useState<ViewMode>("month");
+  // Persetujuan (S1): sakelar tenant + saringan antrean tinjauan.
+  // Sakelar mati (bawaan) → seluruh permukaan persetujuan halaman ini
+  // tidak digambar, perilaku halaman persis seperti sebelum S1.
+  const [approvalRequired, setApprovalRequired] = useState(false);
+  const [reviewOnly, setReviewOnly] = useState(false);
 
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [title, setTitle] = useState("");
@@ -323,10 +357,16 @@ export function PostsPage({ t, locale }: PostsPageProps) {
     setLoading(true);
     setError(null);
     try {
-      const [list, targetList] = await Promise.all([
+      const [list, targetList, approvalSettings] = await Promise.all([
         api.posts.list(tenantId),
         api.posts.targets(tenantId),
+        // Pengaturan persetujuan gagal dimuat TIDAK boleh menjatuhkan
+        // halaman jadwal: halaman jatuh ke perilaku tanpa gerbang.
+        api.posts.getApprovalSettings(tenantId).catch(() => null),
       ]);
+      if (approvalSettings) {
+        setApprovalRequired(approvalSettings.approvalRequired);
+      }
       setPosts(list.items);
       setTargets(targetList.items);
       setSelectedTargets((current) =>
@@ -557,6 +597,16 @@ export function PostsPage({ t, locale }: PostsPageProps) {
       (post.status === "draft" || post.status === "failed") && !post.scheduledAt,
   ).length;
 
+  // Antrean tinjauan (S1): saringan tampilan Daftar ke postingan yang
+  // menunggu keputusan. Hitungan selalu dari daftar penuh yang sudah
+  // dimuat — bukan panggilan API kedua.
+  const pendingReviewCount = posts.filter(
+    (post) => post.approvalStatus === "pending_review",
+  ).length;
+  const visiblePosts = reviewOnly
+    ? posts.filter((post) => post.approvalStatus === "pending_review")
+    : posts;
+
   /** Pindah jadwal lewat drag: tanggal baru, jam tayang lama (zona tenant). */
   const movePostToDay = (post: PostResponse, day: DayTuple) => {
     if (!tenantId) return;
@@ -590,7 +640,12 @@ export function PostsPage({ t, locale }: PostsPageProps) {
     <button
       key={mode}
       type="button"
-      onClick={() => setView(mode)}
+      onClick={() => {
+        setView(mode);
+        // Saringan antrean tinjauan adalah modus tampilan Daftar;
+        // berpindah ke kalender membersihkannya agar tidak membingungkan.
+        if (mode !== "list") setReviewOnly(false);
+      }}
       className={`rounded-md px-3 py-1.5 text-xs font-medium ${
         view === mode
           ? "bg-accent text-white"
@@ -795,6 +850,22 @@ export function PostsPage({ t, locale }: PostsPageProps) {
             {viewButton("month", t("posts.viewCalendar"))}
             {viewButton("week", t("posts.viewWeek"))}
             {viewButton("list", t("posts.viewList"))}
+            {approvalRequired && (
+              <button
+                type="button"
+                onClick={() => {
+                  setReviewOnly((current) => !current);
+                  setView("list");
+                }}
+                className={`rounded-md px-3 py-1.5 text-xs font-medium ${
+                  reviewOnly
+                    ? "bg-accent text-white"
+                    : "border border-line bg-surface text-ink"
+                }`}
+              >
+                {t("posts.approvalQueue", { count: pendingReviewCount })}
+              </button>
+            )}
             {view !== "list" && (
               <>
                 <span className="mx-1 text-sm font-medium text-ink">
@@ -856,13 +927,13 @@ export function PostsPage({ t, locale }: PostsPageProps) {
           {loading && posts.length === 0 ? (
             <p className="text-sm text-muted">…</p>
           ) : view === "list" ? (
-            posts.length === 0 ? (
+            visiblePosts.length === 0 ? (
               <div className="rounded-xl border border-dashed border-line p-8 text-center text-sm text-muted">
-                {t("posts.empty")}
+                {reviewOnly ? t("posts.approvalQueueEmpty") : t("posts.empty")}
               </div>
             ) : (
               <ul className="space-y-3">
-                {posts.map((post) => (
+                {visiblePosts.map((post) => (
                   <PostCard
                     key={post.id}
                     post={post}
@@ -874,6 +945,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                     toIso={toIso}
                     run={run}
                     tenantId={tenantId}
+                    approvalRequired={approvalRequired}
                     onEdit={openEdit}
                   />
                 ))}
@@ -1106,6 +1178,11 @@ function CalendarGrid({
                           {t("posts.groupBadge")}
                         </span>
                       )}
+                      {post.approvalStatus === "pending_review" && (
+                        <span className="ml-1 rounded bg-surface/60 px-1">
+                          {t("posts.approvalPendingShort")}
+                        </span>
+                      )}
                     </div>
                   );
                 })}
@@ -1138,6 +1215,8 @@ interface PostCardProps {
   canManage: boolean;
   busy: boolean;
   tenantId: string | null;
+  /** Sakelar persetujuan wajib tenant (S1) — mati = permukaan persetujuan disembunyikan. */
+  approvalRequired: boolean;
   toIso: (local: string) => string | null;
   run: (action: () => Promise<unknown>) => Promise<boolean>;
   onEdit: (post: PostResponse) => void;
@@ -1151,6 +1230,7 @@ function PostCard({
   canManage,
   busy,
   tenantId,
+  approvalRequired,
   toIso,
   run,
   onEdit,
@@ -1160,6 +1240,68 @@ function PostCard({
   const [moveAt, setMoveAt] = useState("");
   const movable =
     post.status === "draft" || post.status === "scheduled" || post.status === "failed";
+
+  // -- Persetujuan (S1) -------------------------------------------------------
+  const [decisionMode, setDecisionMode] = useState<"reject" | "changes" | null>(
+    null,
+  );
+  const [decisionNote, setDecisionNote] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyItems, setHistoryItems] = useState<
+    PostApprovalHistoryEntry[] | null
+  >(null);
+  const [historyLoading, setHistoryLoading] = useState(false);
+
+  const actionablePost =
+    post.status === "draft" ||
+    post.status === "scheduled" ||
+    post.status === "failed";
+  const showApprovalBadge =
+    approvalRequired || post.approvalStatus !== "draft";
+  const canSubmitReview =
+    approvalRequired &&
+    actionablePost &&
+    (post.approvalStatus === "draft" ||
+      post.approvalStatus === "rejected" ||
+      post.approvalStatus === "changes_requested");
+  // Keputusan tetap ditawarkan untuk postingan yang telanjur menunggu
+  // walau sakelar tenant kemudian dimatikan — keadaannya harus bisa
+  // diselesaikan, bukan menggantung.
+  const canReview = post.approvalStatus === "pending_review";
+  const showHistory =
+    post.approvalStatus !== "draft" ||
+    post.errorCode === "post_approval_required";
+
+  const toggleHistory = () => {
+    const next = !historyOpen;
+    setHistoryOpen(next);
+    if (next && tenantId && historyItems === null) {
+      setHistoryLoading(true);
+      api.posts
+        .approvalHistory(tenantId, post.id)
+        .then((data) => setHistoryItems(data.items))
+        .catch(() => setHistoryItems([]))
+        .finally(() => setHistoryLoading(false));
+    }
+  };
+
+  const sendDecision = () => {
+    if (!tenantId || !decisionMode) return;
+    const note = decisionNote.trim();
+    if (note.length === 0) return;
+    const mode = decisionMode;
+    void run(async () => {
+      if (mode === "reject") {
+        await api.posts.reject(tenantId, post.id, note);
+      } else {
+        await api.posts.requestChanges(tenantId, post.id, note);
+      }
+      setDecisionMode(null);
+      setDecisionNote("");
+      // Riwayat berubah oleh keputusan ini — muat ulang saat dibuka lagi.
+      setHistoryItems(null);
+    });
+  };
 
   return (
     <li className="rounded-xl border border-line bg-surface p-4">
@@ -1174,6 +1316,13 @@ function PostCard({
             {post.groupId && (
               <span className="rounded-full bg-accent/15 px-2 py-0.5 text-xs font-medium text-accent">
                 {t("posts.groupBadge")}
+              </span>
+            )}
+            {showApprovalBadge && (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium ${APPROVAL_STYLE[post.approvalStatus]}`}
+              >
+                {t(APPROVAL_KEY[post.approvalStatus])}
               </span>
             )}
             <span className="truncate text-sm font-medium text-ink">
@@ -1207,10 +1356,88 @@ function PostCard({
               {t("posts.outcomeUnknownHint")}
             </p>
           )}
+          {post.errorCode === "post_approval_required" && (
+            <p className="mt-1 text-xs text-warning">
+              {t("posts.approvalBlockedHint")}
+            </p>
+          )}
+          {post.approvalStatus === "pending_review" &&
+            post.approvalSubmittedAt && (
+              <p className="mt-1 text-xs text-muted">
+                {t("posts.approvalSubmittedInfo", {
+                  when: formatDateTime(
+                    post.approvalSubmittedAt,
+                    locale,
+                    timezone,
+                  ),
+                })}
+              </p>
+            )}
+          {(post.approvalStatus === "rejected" ||
+            post.approvalStatus === "changes_requested") &&
+            post.approvalNote && (
+              <p
+                className={`mt-1 text-xs ${
+                  post.approvalStatus === "rejected"
+                    ? "text-danger"
+                    : "text-warning"
+                }`}
+              >
+                {t("posts.approvalNoteShown", { note: post.approvalNote })}
+              </p>
+            )}
         </div>
 
         {canManage && tenantId && (
           <div className="flex shrink-0 flex-col items-end gap-2">
+            {canSubmitReview && (
+              <button
+                type="button"
+                className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+                disabled={busy}
+                onClick={() =>
+                  void run(() => api.posts.submitReview(tenantId, post.id))
+                }
+              >
+                {t("posts.approvalSubmit")}
+              </button>
+            )}
+            {canReview && (
+              <>
+                <button
+                  type="button"
+                  className="rounded-md bg-success px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() =>
+                    void run(() => api.posts.approve(tenantId, post.id))
+                  }
+                >
+                  {t("posts.approvalApprove")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-danger/40 bg-surface px-2 py-1 text-xs font-medium text-danger disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => {
+                    setDecisionMode("reject");
+                    setDecisionNote("");
+                  }}
+                >
+                  {t("posts.approvalReject")}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink disabled:opacity-40"
+                  disabled={busy}
+                  onClick={() => {
+                    setDecisionMode("changes");
+                    setDecisionNote("");
+                  }}
+                >
+                  {t("posts.approvalRequestChanges")}
+                </button>
+              </>
+            )}
             {post.status === "draft" && (
               <button
                 type="button"
@@ -1330,6 +1557,87 @@ function PostCard({
           </div>
         )}
       </div>
+
+      {decisionMode && canManage && tenantId && (
+        <div className="mt-3 rounded-lg border border-line bg-elevated/50 p-3">
+          <label className="block">
+            <span className="text-xs font-medium text-muted">
+              {decisionMode === "reject"
+                ? t("posts.approvalReject")
+                : t("posts.approvalRequestChanges")}{" "}
+              — {t("posts.approvalNoteLabel")}
+            </span>
+            <textarea
+              className="mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink"
+              rows={3}
+              maxLength={2000}
+              value={decisionNote}
+              placeholder={t("posts.approvalNotePlaceholder")}
+              onChange={(event) => setDecisionNote(event.target.value)}
+            />
+          </label>
+          {post.groupId && (
+            <p className="mt-1 text-xs text-muted">
+              {t("posts.approvalGroupHint")}
+            </p>
+          )}
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+              disabled={busy || decisionNote.trim().length === 0}
+              onClick={sendDecision}
+            >
+              {t("posts.approvalSendDecision")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+              onClick={() => setDecisionMode(null)}
+            >
+              {t("posts.approvalCancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showHistory && (
+        <div className="mt-3 border-t border-line pt-2">
+          <button
+            type="button"
+            className="text-xs font-medium text-accent"
+            onClick={toggleHistory}
+          >
+            {t("posts.approvalHistoryTitle")}
+          </button>
+          {historyOpen &&
+            (historyLoading ? (
+              <p className="mt-1 text-xs text-muted">…</p>
+            ) : !historyItems || historyItems.length === 0 ? (
+              <p className="mt-1 text-xs text-muted">
+                {t("posts.approvalHistoryEmpty")}
+              </p>
+            ) : (
+              <ul className="mt-1 space-y-1">
+                {historyItems.map((item) => (
+                  <li key={item.id} className="text-xs text-muted">
+                    <span className="font-medium text-ink">
+                      {t(
+                        APPROVAL_HISTORY_KEY[item.action] ??
+                          "posts.approvalHistoryTitle",
+                      )}
+                    </span>
+                    {item.actorLabel
+                      ? ` ${t("posts.approvalByActor", { actor: item.actorLabel })}`
+                      : ""}
+                    {" · "}
+                    {formatDateTime(item.createdAt, locale, timezone)}
+                  </li>
+                ))}
+              </ul>
+            ))}
+        </div>
+      )}
     </li>
   );
 }

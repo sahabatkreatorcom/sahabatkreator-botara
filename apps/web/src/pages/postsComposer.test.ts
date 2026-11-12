@@ -71,6 +71,13 @@ function draftPost(overrides: Partial<PostResponse> = {}): PostResponse {
     providerMessageId: null,
     errorCode: null,
     publishOptions: { aiGenerated: false, tiktokPrivacyLevel: "SELF_ONLY" },
+    createdByUserId: "55555555-5555-4555-8555-555555555555",
+    approvalStatus: "draft",
+    approvalNote: null,
+    approvalSubmittedByUserId: null,
+    approvalSubmittedAt: null,
+    approvalReviewedByUserId: null,
+    approvalReviewedAt: null,
     target: {
       channelAccountId: "22222222-2222-4222-8222-222222222222",
       conversationId: "conv-9",

@@ -676,6 +676,15 @@ export function SettingsPage({ t, locale }: SettingsPageProps) {
         />
       ) : null}
 
+      {/* S1: seksi Persetujuan postingan — sakelar wajib setujui sebelum terbit */}
+      {tenantId ? (
+        <PostApprovalSettingsSection
+          t={t}
+          tenantId={tenantId}
+          canManage={canManage}
+        />
+      ) : null}
+
       {formOpen && tenantId ? (
         <CreateApiKeyModal
           t={t}
@@ -1920,6 +1929,110 @@ function SlaSettingsSection({
               {saved ? (
                 <span className="text-sm text-success">
                   {t("settings.sla.savedLabel")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// Persetujuan postingan (Fase Susulan S1) — satu sakelar tenant:
+// postingan Jadwal Konten hanya boleh terbit sesudah disetujui.
+// Menyalakan/mematikan tidak menyentuh postingan yang sudah terbit.
+function PostApprovalSettingsSection({
+  t,
+  tenantId,
+  canManage,
+}: {
+  t: Translate;
+  tenantId: string;
+  canManage: boolean;
+}) {
+  const [required, setRequired] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await api.posts.getApprovalSettings(tenantId);
+        if (!cancelled) setRequired(settings.approvalRequired);
+      } catch (err) {
+        if (!cancelled) setError(translateApiError(t, err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, t]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      const updated = await api.posts.updateApprovalSettings(tenantId, {
+        approvalRequired: required,
+      });
+      setRequired(updated.approvalRequired);
+      setSaved(true);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-base font-semibold text-ink">
+        {t("settings.postApproval.title")}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        {t("settings.postApproval.body")}
+      </p>
+      {!canManage ? (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+          {t("settings.postApproval.managerNote")}
+        </p>
+      ) : null}
+      <FieldError message={error} />
+      {loading ? (
+        <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
+      ) : (
+        <div className="mt-4 max-w-2xl rounded-xl bg-surface p-4">
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={required}
+              onChange={(e) => setRequired(e.target.checked)}
+              disabled={!canManage || saving}
+            />
+            <span>{t("settings.postApproval.toggleLabel")}</span>
+          </label>
+          {canManage ? (
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {saving
+                  ? t("settings.postApproval.saving")
+                  : t("settings.postApproval.saveButton")}
+              </button>
+              {saved ? (
+                <span className="text-sm text-success">
+                  {t("settings.postApproval.savedLabel")}
                 </span>
               ) : null}
             </div>

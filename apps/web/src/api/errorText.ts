@@ -113,6 +113,13 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.POST_PUBLISH_OPTIONS_REQUIRED");
     case "POST_PUBLISH_OPTIONS_INVALID":
       return t("errors.POST_PUBLISH_OPTIONS_INVALID");
+    // S1: alur persetujuan postingan.
+    case "POST_APPROVAL_INVALID_STATE":
+      return t("errors.POST_APPROVAL_INVALID_STATE");
+    case "POST_APPROVAL_NOTE_REQUIRED":
+      return t("errors.POST_APPROVAL_NOTE_REQUIRED");
+    case "POST_APPROVAL_SELF_REVIEW":
+      return t("errors.POST_APPROVAL_SELF_REVIEW");
     case "CHANNEL_DELETE_CONFIRMATION_MISMATCH":
       return t("errors.CHANNEL_DELETE_CONFIRMATION_MISMATCH");
     case "CHANNEL_ALREADY_TRASHED":

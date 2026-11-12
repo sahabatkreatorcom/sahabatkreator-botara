@@ -66,11 +66,15 @@ import type {
   CreateBroadcastRequest,
   CreatePostGroupRequest,
   CreatePostRequest,
+  PostApprovalHistoryResponse,
+  PostApprovalSettings,
+  PostApprovalStatus,
   PostGroupResponse,
   PostListResponse,
   PostResponse,
   PostStatus,
   PostTargetListResponse,
+  UpdatePostApprovalSettingsRequest,
   UpdatePostRequest,
   ScheduleBroadcastRequest,
   UpdateBroadcastRequest,
@@ -2637,11 +2641,86 @@ export const api = {
     },
     async list(
       tenantId: string,
-      params: { status?: PostStatus } = {},
+      params: { status?: PostStatus; approvalStatus?: PostApprovalStatus } = {},
     ): Promise<PostListResponse> {
-      const qs = params.status ? `?status=${params.status}` : "";
+      const search = new URLSearchParams();
+      if (params.status) search.set("status", params.status);
+      if (params.approvalStatus) {
+        search.set("approvalStatus", params.approvalStatus);
+      }
+      const qs = search.toString();
       return request<PostListResponse>(
-        `/api/tenants/${tenantId}/posts${qs}`,
+        `/api/tenants/${tenantId}/posts${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+    /** Pengaturan persetujuan wajib tenant (S1) — baca untuk semua member. */
+    getApprovalSettings(tenantId: string): Promise<PostApprovalSettings> {
+      return request<PostApprovalSettings>(
+        `/api/tenants/${tenantId}/posts/settings`,
+        { method: "GET" },
+      );
+    },
+    /** Ubah sakelar persetujuan wajib (owner/admin). */
+    updateApprovalSettings(
+      tenantId: string,
+      input: UpdatePostApprovalSettingsRequest,
+    ): Promise<PostApprovalSettings> {
+      return request<PostApprovalSettings>(
+        `/api/tenants/${tenantId}/posts/settings`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** Ajukan postingan (atau grupnya) ke tinjauan (S1). */
+    submitReview(tenantId: string, postId: string): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/submit-review`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** Setujui postingan yang menunggu tinjauan (catatan opsional). */
+    approve(
+      tenantId: string,
+      postId: string,
+      note?: string,
+    ): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/approve`,
+        {
+          method: "POST",
+          body: JSON.stringify(note ? { note } : {}),
+        },
+      );
+    },
+    /** Tolak postingan yang menunggu tinjauan (catatan wajib). */
+    reject(
+      tenantId: string,
+      postId: string,
+      note: string,
+    ): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/reject`,
+        { method: "POST", body: JSON.stringify({ note }) },
+      );
+    },
+    /** Minta revisi atas postingan yang menunggu tinjauan (catatan wajib). */
+    requestChanges(
+      tenantId: string,
+      postId: string,
+      note: string,
+    ): Promise<PostResponse> {
+      return request<PostResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/request-changes`,
+        { method: "POST", body: JSON.stringify({ note }) },
+      );
+    },
+    /** Riwayat keputusan persetujuan dari audit (S1). */
+    approvalHistory(
+      tenantId: string,
+      postId: string,
+    ): Promise<PostApprovalHistoryResponse> {
+      return request<PostApprovalHistoryResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/approval-history`,
         { method: "GET" },
       );
     },
