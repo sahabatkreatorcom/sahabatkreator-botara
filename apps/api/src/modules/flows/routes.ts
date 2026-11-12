@@ -12,6 +12,8 @@ import {
   FlowRunListResponseSchema,
   FlowRunStepListQuerySchema,
   FlowRunStepListResponseSchema,
+  FlowSimulateRequestSchema,
+  FlowSimulateResponseSchema,
   FlowTemplateListResponseSchema,
   FlowValidationResponseSchema,
   FlowVersionListResponseSchema,
@@ -30,6 +32,7 @@ import {
   deleteFlow,
   getFlow,
   getFlowExperimentResults,
+  getFlowVersion,
   instantiateFlowTemplate,
   listFlowRunSteps,
   listFlowRuns,
@@ -38,6 +41,7 @@ import {
   normalizeFlowGraph,
   restoreFlowVersion,
   setFlowArchived,
+  simulateFlow,
   updateFlow,
   validateFlowGraph,
   type FlowGraphIssue,
@@ -70,6 +74,9 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   GET    /tenants/:tenantId/flows/:id/versions       riwayat versi (G3)
  *   POST   /tenants/:tenantId/flows/:id/versions/:version/restore
  *                                                      pulihkan versi → versi baru (G3)
+ *   POST   /tenants/:tenantId/flows/:id/simulate       simulasi kering (G4) —
+ *                                                      jejak + efek sebagai data,
+ *                                                      tanpa satu pun tulisan
  *
  * Eksekusi BUKAN di sini: pesan masuk dievaluasi worker
  * (keyword → flow → agent); run berjalan sebagai job `flow.step`.
@@ -155,6 +162,7 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
     app.get(`${base}/:id/experiments`, unavailable);
     app.get(`${base}/:id/versions`, unavailable);
     app.post(`${base}/:id/versions/:version/restore`, unavailable);
+    app.post(`${base}/:id/simulate`, unavailable);
     return app;
   }
 
@@ -459,6 +467,112 @@ export function createFlowsRoutes(bundle: AuthBundle | null) {
       { selfFlowId: id },
     );
     return c.json(FlowValidationResponseSchema.parse(graphIssuesBody(issues)));
+  });
+
+  // ---- Simulasi kering (G4) -------------------------------------------------------
+  // Menjalankan interpreter kering core atas graf DRAF kiriman
+  // (`graph`), SNAPSHOT versi tersimpan (`version`), atau graf
+  // tersimpan flow — dengan kontak mock + teks pemicu dari body.
+  // `graph` dan `version` saling eksklusif. Hasil validator graf yang
+  // ada ikut dikembalikan (error TIDAK memblokir simulasi — panel uji
+  // justru untuk melihat perilaku graf yang belum sah). Jalur ini
+  // TIDAK menulis apa pun: tidak ada run/pesan/outbox/audit, tidak
+  // ada panggilan LLM/jaringan dari node mana pun. Baca = semua
+  // member (selaras validate).
+  app.post(`${base}/:id/simulate`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const id = parseUuidParam(c, "id");
+    if (!id) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+    const json = await readJson(c);
+    if (typeof json === "object" && json !== null && "error" in json) {
+      return (json as { error: Response }).error;
+    }
+    const parsed = FlowSimulateRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid simulate payload");
+    }
+    const body = parsed.data;
+    if (body.graph !== undefined && body.version !== undefined) {
+      return apiError(
+        c,
+        400,
+        "VALIDATION_ERROR",
+        "Provide either graph or version, not both",
+      );
+    }
+    const flow = await getFlow(bundle.db, {
+      tenantId: g.tenant.id,
+      flowId: id,
+    });
+    if (!flow) return apiError(c, 404, "NOT_FOUND", "Flow not found");
+
+    let graph: FlowGraph;
+    let source: { kind: "draft" | "stored" | "version"; version: number | null };
+    if (body.graph !== undefined) {
+      graph = body.graph;
+      source = { kind: "draft", version: null };
+    } else if (body.version !== undefined) {
+      const row = await getFlowVersion(bundle.db, {
+        tenantId: g.tenant.id,
+        flowId: id,
+        version: body.version,
+      });
+      if (!row) {
+        return apiError(c, 404, "NOT_FOUND", "Flow version not found");
+      }
+      graph = normalizeFlowGraph(row.graph) as FlowGraph;
+      source = { kind: "version", version: row.version };
+    } else {
+      graph = normalizeFlowGraph(flow.graph) as FlowGraph;
+      source = { kind: "stored", version: null };
+    }
+
+    const issues = await validateFlowGraph(
+      bundle.db,
+      g.tenant.id,
+      normalizeFlowGraph(graph),
+      { selfFlowId: id },
+    );
+    const contact = body.contact ?? {};
+    const result = await simulateFlow(bundle.db, {
+      tenantId: g.tenant.id,
+      flowId: id,
+      graph: normalizeFlowGraph(graph),
+      triggerText: body.triggerText ?? "",
+      contact: {
+        id: contact.id,
+        name: contact.name,
+        phone: contact.phone,
+        email: contact.email,
+        tags: contact.tags,
+        pipelineStage: contact.stage,
+        customFields: contact.customFields,
+        cartItemCount: contact.cartItemCount,
+      },
+      replyText: body.replyText,
+      splitChoices: body.splitChoices,
+    });
+    const responseBody = FlowSimulateResponseSchema.parse({
+      source,
+      triggerMatched: result.triggerMatched,
+      status: result.status,
+      parkedNodeId: result.parkedNodeId,
+      parkReason: result.parkReason,
+      failReason: result.failReason,
+      steps: result.steps,
+      effects: result.effects,
+      contact: {
+        name: result.contact.name,
+        phone: result.contact.phone,
+        email: result.contact.email,
+        tags: result.contact.tags,
+        stage: result.contact.pipelineStage,
+        customFields: result.contact.customFields,
+      },
+      issues: graphIssuesBody(issues).issues,
+    });
+    return c.json(responseBody);
   });
 
   // ---- Aktifkan ------------------------------------------------------------------
