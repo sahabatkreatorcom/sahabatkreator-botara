@@ -18,6 +18,7 @@ import { useWorkspace } from "../workspace/WorkspaceProvider";
 import { FlowExperimentsPanel } from "./flowBuilder/FlowExperimentsPanel";
 import { NODE_TYPES } from "./flowBuilder/FlowNodeCard";
 import { FlowRunsPanel } from "./flowBuilder/FlowRunsPanel";
+import { FlowVersionsPanel } from "./flowBuilder/FlowVersionsPanel";
 import { NodeConfigPanel, type TenantMeta } from "./flowBuilder/NodeConfigPanel";
 import { NODE_ICON_PATHS, branchEdgeLabelProps, graphToRf, rfToGraph } from "./flowBuilder/graph";
 import { BuilderCtx, type BuilderShared, type FlowRfEdge, type FlowRfNode, type Translate } from "./flowBuilder/types";
@@ -47,7 +48,7 @@ function BuilderInner({
   const [name, setName] = useState(flow.name);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowRfNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowRfEdge>([]);
-  const [tab, setTab] = useState<"canvas" | "runs">("canvas");
+  const [tab, setTab] = useState<"canvas" | "runs" | "versions">("canvas");
   const [issues, setIssues] = useState<FlowGraphIssue[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -538,6 +539,7 @@ function BuilderInner({
             [
               ["canvas", "flows.tabCanvas"],
               ["runs", "flows.tabRuns"],
+              ["versions", "flows.tabVersions"],
             ] as const
           ).map(([value, key]) => (
             <button
@@ -635,6 +637,22 @@ function BuilderInner({
             tenantId={tenantId}
             flowId={flow.id}
             graph={currentGraph}
+          />
+        </div>
+      ) : tab === "versions" ? (
+        <div className="mt-4 rounded-xl border border-line bg-surface p-4">
+          <FlowVersionsPanel
+            t={t}
+            locale={locale}
+            tenantId={tenantId}
+            flowId={flow.id}
+            canManage={canManage}
+            onRestored={(next) => {
+              // Graf server berubah (isi snapshot yang dipulihkan):
+              // paksa efek pemuatan kanvas membaca ulang flow ini.
+              initializedForRef.current = null;
+              onFlowChange(next);
+            }}
           />
         </div>
       ) : (

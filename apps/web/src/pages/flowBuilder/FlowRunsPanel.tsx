@@ -297,6 +297,12 @@ export function FlowRunsPanel({ t, locale, tenantId, flowId, graph }: FlowRunsPa
                     {formatDateTime(run.startedAt, locale)}
                     {" · "}
                     {t("flows.runStepsCount", { count: run.stepCount })}
+                    {" · "}
+                    {run.flowVersion !== null
+                      ? t("flows.versionRunPinned", {
+                          version: run.flowVersion,
+                        })
+                      : t("flows.versionRunLegacy")}
                     {run.errorCode
                       ? ` · ${t("flows.runErrorLabel")}: ${run.errorCode}`
                       : ""}

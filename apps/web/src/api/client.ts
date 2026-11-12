@@ -94,6 +94,8 @@ import type {
   FlowTemplateListResponse,
   InstantiateFlowTemplateRequest,
   FlowValidationResponse,
+  FlowVersionListResponse,
+  FlowVersionRestoreResponse,
   CreateKbDocumentRequest,
   CreatePaymentLinkRequest,
   CreateProductRequest,
@@ -2380,14 +2382,52 @@ export const api = {
      * POST /api/tenants/:tenantId/flows/:id/activate — aktifkan graf
      * tersimpan. Gagal validasi → 422 FLOW_GRAPH_INVALID dengan
      * `details.issues` (dibaca pemanggil lewat ApiClientError.details);
-     * sukses → {flow, warnings}.
+     * sukses → {flow, warnings, version} (version = nomor snapshot
+     * versi yang ditulis aktivasi ini, G3).
      */
     activate(
       tenantId: string,
       flowId: string,
-    ): Promise<{ flow: FlowResponse; warnings: FlowGraphIssue[] }> {
-      return request<{ flow: FlowResponse; warnings: FlowGraphIssue[] }>(
-        `/api/tenants/${tenantId}/flows/${flowId}/activate`,
+    ): Promise<{
+      flow: FlowResponse;
+      warnings: FlowGraphIssue[];
+      version: number;
+    }> {
+      return request<{
+        flow: FlowResponse;
+        warnings: FlowGraphIssue[];
+        version: number;
+      }>(`/api/tenants/${tenantId}/flows/${flowId}/activate`, {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+    },
+    /**
+     * GET /api/tenants/:tenantId/flows/:id/versions — riwayat versi
+     * flow (G3): satu ringkasan snapshot per aktivasi, terbaru dulu.
+     */
+    listVersions(
+      tenantId: string,
+      flowId: string,
+    ): Promise<FlowVersionListResponse> {
+      return request<FlowVersionListResponse>(
+        `/api/tenants/${tenantId}/flows/${flowId}/versions`,
+        { method: "GET" },
+      );
+    },
+    /**
+     * POST .../flows/:id/versions/:version/restore — pulihkan isi
+     * snapshot lama sebagai versi BARU (owner/admin). Draft kotor →
+     * 409 FLOW_RESTORE_DIRTY_DRAFT; snapshot tak lagi sah → 422
+     * FLOW_GRAPH_INVALID.
+     */
+    restoreVersion(
+      tenantId: string,
+      flowId: string,
+      version: number,
+    ): Promise<FlowVersionRestoreResponse> {
+      return request<FlowVersionRestoreResponse>(
+        `/api/tenants/${tenantId}/flows/${flowId}/versions/${version}/restore`,
         { method: "POST", body: JSON.stringify({}) },
       );
     },

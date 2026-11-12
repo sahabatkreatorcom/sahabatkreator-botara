@@ -136,6 +136,8 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.FLOW_GRAPH_INVALID");
     case "FLOW_TEMPLATE_NOT_FOUND":
       return t("errors.FLOW_TEMPLATE_NOT_FOUND");
+    case "FLOW_RESTORE_DIRTY_DRAFT":
+      return t("errors.FLOW_RESTORE_DIRTY_DRAFT");
     case "AUTOMATION_TEMPLATE_NOT_FOUND":
       return t("errors.AUTOMATION_TEMPLATE_NOT_FOUND");
     case "KB_DOCUMENT_NO_TEXT":
