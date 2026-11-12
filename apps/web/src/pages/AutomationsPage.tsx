@@ -780,8 +780,13 @@ function CommentsPanel({
   const [moderatingId, setModeratingId] = useState<string | null>(null);
   const seq = useRef(0);
 
-  const metaChannels = channels.filter(
-    (ch) => ch.provider === "instagram" || ch.provider === "messenger",
+  // G7: panel komentar melayani Meta + Threads (tabel comments yang
+  // sama); filter akun memuat ketiga provider berkomentar.
+  const commentCapableChannels = channels.filter(
+    (ch) =>
+      ch.provider === "instagram" ||
+      ch.provider === "messenger" ||
+      ch.provider === "threads",
   );
 
   const loadComments = useCallback(async () => {
@@ -846,7 +851,7 @@ function CommentsPanel({
             aria-label={t("comments.filterAllAccounts")}
           >
             <option value="">{t("comments.filterAllAccounts")}</option>
-            {metaChannels.map((ch) => (
+            {commentCapableChannels.map((ch) => (
               <option key={ch.id} value={ch.id}>
                 {ch.displayName}
               </option>
@@ -908,7 +913,9 @@ function CommentsPanel({
                     {" · "}
                     {comment.provider === "instagram"
                       ? "Instagram"
-                      : "Messenger"}
+                      : comment.provider === "threads"
+                        ? "Threads"
+                        : "Messenger"}
                     {" · "}
                     {formatDateTime(
                       comment.providerCreatedAt ?? comment.createdAt,
@@ -955,7 +962,10 @@ function CommentsPanel({
                     {comment.actions.dm.status === "queued"
                       ? t("comments.actionDmQueued")
                       : comment.actions.dm.status === "skipped"
-                        ? t("comments.actionDmSkipped")
+                        ? comment.actions.dm.reason ===
+                          "threads_dm_not_supported"
+                          ? t("comments.actionDmThreadsUnsupported")
+                          : t("comments.actionDmSkipped")
                         : t("comments.actionDmFailed")}
                   </span>
                 ) : null}
@@ -1146,7 +1156,9 @@ function AutomationFormModal({
         if (cancelled) return;
         const eligible = list.filter(
           (ch) =>
-            (ch.provider === "instagram" || ch.provider === "messenger") &&
+            (ch.provider === "instagram" ||
+              ch.provider === "messenger" ||
+              ch.provider === "threads") &&
             ch.status === "connected",
         );
         setCommentChannels(eligible);
@@ -1162,6 +1174,18 @@ function AutomationFormModal({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isCommentForm, tenantId]);
+
+  // G7 — akun komentar terpilih/terikat dan kemampuan platformnya:
+  // Threads mendukung balasan publik + sembunyikan, tetapi TIDAK punya
+  // API DM sama sekali — untuk akun Threads aksi DM dimatikan paksa di
+  // formulir (dengan catatan jujur di bawah checkbox-nya) agar aturan
+  // yang lahir tidak menjanjikan jalur yang tidak ada.
+  const selectedCommentChannel = commentChannels.find(
+    (ch) => ch.id === (automation?.channelAccountId ?? channelAccountId),
+  );
+  const isThreadsCommentAccount =
+    selectedCommentChannel?.provider === "threads";
+  const effectiveSendDm = isThreadsCommentAccount ? false : sendDm;
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -1191,18 +1215,18 @@ function AutomationFormModal({
           // Edit aturan komentar: akun terikat tidak berubah; yang
           // diubah nama/keyword/match + kombinasi aksinya.
           const replyText = publicReplyEnabled ? publicReplyText.trim() : "";
-          if (!sendDm && !replyText && !hideComment)
+          if (!effectiveSendDm && !replyText && !hideComment)
             return setError(t("automations.commentActionsRequired"));
-          if (sendDm && !text.trim())
+          if (effectiveSendDm && !text.trim())
             return setError(t("automations.commentDmTextRequired"));
           const saved = await api.automations.update(tenantId, automation.id, {
             name: trimmedName,
             keywords: parsedKeywords,
             match,
-            sendDm,
+            sendDm: effectiveSendDm,
             publicReplyText: replyText ? replyText : null,
             hideComment,
-            ...(sendDm ? { text: text.trim() } : {}),
+            ...(effectiveSendDm ? { text: text.trim() } : {}),
           });
           onSaved(saved);
           return;
@@ -1232,9 +1256,9 @@ function AutomationFormModal({
         if (!channelAccountId)
           return setError(t("automations.commentAccountNone"));
         const replyText = publicReplyEnabled ? publicReplyText.trim() : "";
-        if (!sendDm && !replyText && !hideComment)
+        if (!effectiveSendDm && !replyText && !hideComment)
           return setError(t("automations.commentActionsRequired"));
-        if (sendDm && !text.trim())
+        if (effectiveSendDm && !text.trim())
           return setError(t("automations.commentDmTextRequired"));
         const saved = await api.automations.create(tenantId, {
           kind: "comment",
@@ -1242,8 +1266,8 @@ function AutomationFormModal({
           keywords: parsedKeywords,
           match,
           channelAccountId,
-          sendDm,
-          ...(sendDm ? { dmText: text.trim() } : {}),
+          sendDm: effectiveSendDm,
+          ...(effectiveSendDm ? { dmText: text.trim() } : {}),
           publicReplyText: replyText ? replyText : null,
           hideComment,
         });
@@ -1612,23 +1636,42 @@ function AutomationFormModal({
                   </span>
                 </label>
               )}
+              {isThreadsCommentAccount ? (
+                <p className="rounded-lg border border-line bg-elevated p-3 text-xs text-muted">
+                  {t("automations.commentThreadsCapabilities")}
+                </p>
+              ) : null}
               <fieldset>
                 <legend className="mb-1 text-xs font-medium text-muted">
                   {t("automations.commentActionsLabel")}
                 </legend>
                 <div className="space-y-2">
-                  <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-line bg-surface p-3">
+                  <label
+                    className={`flex items-start gap-2 rounded-lg border border-line bg-surface p-3 ${
+                      isThreadsCommentAccount
+                        ? "cursor-not-allowed opacity-70"
+                        : "cursor-pointer"
+                    }`}
+                  >
                     <input
                       type="checkbox"
-                      checked={sendDm}
+                      checked={effectiveSendDm}
+                      disabled={isThreadsCommentAccount}
                       onChange={(e) => setSendDm(e.target.checked)}
                       className="mt-0.5"
                     />
-                    <span className="block flex-1 text-sm font-medium text-ink">
-                      {t("automations.commentSendDm")}
+                    <span className="flex-1">
+                      <span className="block text-sm font-medium text-ink">
+                        {t("automations.commentSendDm")}
+                      </span>
+                      {isThreadsCommentAccount ? (
+                        <span className="mt-0.5 block text-xs text-muted">
+                          {t("automations.commentThreadsDmUnsupported")}
+                        </span>
+                      ) : null}
                     </span>
                   </label>
-                  {sendDm ? (
+                  {effectiveSendDm ? (
                     <label className="block pl-6">
                       <span className="mb-1 block text-xs font-medium text-muted">
                         {t("automations.commentDmTextLabel")} *
