@@ -124,7 +124,7 @@ hanya bisa diajukan dari akun pemilik:
    (`verify:threads-oauth`, `verify:threads-token-lifecycle`). Yang
    TERSISA untuk pemilik: (a) membuat aplikasi Threads di portal
    Meta/Threads dan mengisi App ID + App Secret-nya di Panel Admin;
-   (b) menempel Redirect URI `https://botara.my.id/api/threads/oauth/callback`
+   (b) menempel Redirect URI `https://botara.my.id/api/oauth/threads/callback`
    persis di pengaturan aplikasi Threads (URI yang sama juga tampil
    di langkah Hubungkan Threads halaman Channels); (c) mengajukan
    App Review izin `threads_content_publish` agar akun di luar
@@ -513,9 +513,43 @@ Tindakan pemilik yang dianjurkan (billing bersih):
    masing-masing) agar token diterbitkan oleh proyek yang benar;
    koneksi hasil penyemaian tetap berfungsi sampai itu dilakukan.
 
+## Penyeragaman URL Kanonis + Webhook TikTok/Threads (2026-11-12)
+
+Seluruh callback OAuth dan webhook platform kini memakai SATU pola
+URL kanonis. Keputusan pemilik: path lama DICABUT TOTAL — tidak ada
+alias/redirect, jadi URL lama yang sudah terdaftar di portal platform
+mana pun BERHENTI bekerja sejak paket ini ter-deploy. Pemilik WAJIB
+mendaftarkan ulang URL di bawah ini persis seperti tertulis (URL yang
+sama juga tampil di blok info Channels / Panel Admin) SEBELUM
+menguji connect lagi. Akun yang sudah terhubung + tokennya tidak
+terpengaruh.
+
+**Redirect URI OAuth (daftarkan di portal tiap platform):**
+
+| Platform | Redirect URI kanonis |
+| --- | --- |
+| Meta (Facebook/Instagram) | `https://botara.my.id/api/oauth/meta/callback` |
+| Threads | `https://botara.my.id/api/oauth/threads/callback` |
+| TikTok | `https://botara.my.id/api/oauth/tiktok/callback` |
+| LinkedIn | `https://botara.my.id/api/oauth/linkedin/callback` |
+| Pinterest | `https://botara.my.id/api/oauth/pinterest/callback` |
+| Google Calendar | `https://botara.my.id/api/oauth/google_calendar/callback` |
+| YouTube | `https://botara.my.id/api/oauth/youtube/callback` |
+| Google Business | `https://botara.my.id/api/oauth/google_business/callback` |
+
+**URL Webhook (daftarkan di pengaturan webhook tiap aplikasi):**
+
+| Peruntukan | URL kanonis | Catatan pemilik |
+| --- | --- | --- |
+| Meta (Messenger + Instagram) | `https://botara.my.id/api/webhooks/meta` | Callback URL + Verify Token tetap dari blok info Meta di Channels (token: Panel Admin `meta_webhook_verify_token`, fallback env); subscribe field `messages` seperti sebelumnya. |
+| WhatsApp | `https://botara.my.id/api/webhooks/whatsapp` | Handler Meta yang sama, didaftarkan sebagai URL webhook aplikasi WhatsApp. |
+| Penghapusan data Meta | `https://botara.my.id/api/webhooks/meta/data-deletion` | Isi ke kolom "Data Deletion Request URL" di pengaturan aplikasi Meta; balasan otomatis berformat `{url, confirmation_code}` resmi Meta. |
+| TikTok | `https://botara.my.id/api/webhooks/tiktok` | BARU dibangun: daftarkan di TikTok Developer Console → Webhooks. Signature diverifikasi otomatis dari Client Secret (`tiktok_client_secret` Panel Admin); aktifkan event pencabutan otorisasi agar akun yang dicabut pengguna otomatis terputus di sini. |
+| Threads | `https://botara.my.id/api/webhooks/threads` | BARU dibangun: daftarkan di pengaturan webhook aplikasi Threads. Aplikasi Threads punya token verifikasinya sendiri: tentukan nilai bebas di Panel Admin (grup Threads, kunci `threads_webhook_verify_token`; fallback env `THREADS_WEBHOOK_VERIFY_TOKEN`) lalu tempel nilai yang sama ke pengaturan webhook aplikasi Threads. |
+
 ---
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
-content schedule) + gelombang Semua OAuth + Pemisahan Google.
-Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
-luar roadmap._
+content schedule) + gelombang Semua OAuth + Pemisahan Google +
+penyeragaman URL kanonis. Entri baru hanya ditambahkan bila ada
+pengembangan lanjutan di luar roadmap._

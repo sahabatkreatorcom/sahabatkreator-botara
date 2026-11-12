@@ -179,7 +179,7 @@ const EnvSchema = z.object({
   TIKTOK_CLIENT_SECRET: z.string().min(1).optional(),
   /**
    * Secret Meta App milik PLATFORM (Fase 7A): memverifikasi tanda tangan
-   * `X-Hub-Signature-256` pada webhook /api/meta/webhook. Hanya di env
+   * `X-Hub-Signature-256` pada webhook /api/webhooks/meta. Hanya di env
    * server — tidak pernah masuk repo/log. Belum diset = webhook Meta
    * menjawab 503 META_NOT_CONFIGURED (fail-closed). Nilai staging saat
    * ini PLACEHOLDER dan WAJIB diganti secret Meta App asli sebelum

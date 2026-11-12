@@ -28,7 +28,9 @@ biasa.
 
 ## §2 Verifikasi webhook
 
-- Satu endpoint untuk Messenger + Instagram: `POST /meta/webhook`.
+- Satu endpoint untuk Messenger + Instagram: `POST /api/webhooks/meta`
+  (path kanonis sejak penyeragaman URL 2026-11-12; path lama tidak
+  lagi terdaftar).
 - Handshake `GET` memakai `META_WEBHOOK_VERIFY_TOKEN`.
 - Payload diverifikasi HMAC-SHA256 dengan **App Secret**. Tanpa secret,
   endpoint menjawab `503 META_NOT_CONFIGURED` (fail closed) — bukan
@@ -43,7 +45,7 @@ App Secret dan identifier publik dikelola di Panel Admin
 - App lama "Botara Dev" (`2356364001779420`) sudah dihapus — jangan
   dipakai lagi.
 - Redirect URI OAuth bersifat tunggal dan ditampilkan read-only di panel:
-  `${BETTER_AUTH_URL}/api/meta/oauth/callback`.
+  `${BETTER_AUTH_URL}/api/oauth/meta/callback`.
 
 ## §4 Checklist pengajuan
 

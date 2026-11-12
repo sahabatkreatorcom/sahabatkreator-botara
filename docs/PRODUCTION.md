@@ -54,13 +54,13 @@ menolak jalan. Dua yang paling mudah terlewat:
   (`meta_webhook_verify_token`, grup Meta); env `META_WEBHOOK_VERIFY_TOKEN`
   hanya fallback (sejak instruksi pemilik 2026-11-12 semua kredensial
   platform lewat panel). Tanpa nilai efektif di mana pun
-  `GET /api/meta/webhook` menjawab 503. Nilainya kita yang menentukan
+  `GET /api/webhooks/meta` menjawab 503. Nilainya kita yang menentukan
   (`openssl rand -hex 24` cukup), lalu ditempel ke Meta App Dashboard →
   Webhooks → Verify token. Owner/admin bisa membacanya lagi lewat
   `GET /channels/meta-webhook-info` (yang juga menyelesaikan panel → env).
 - `META_APP_SECRET` — boleh env, tetapi **lebih baik lewat Panel Admin**
   (`meta_app_secret`), karena resolver panel → env dibaca ulang per
-  request. Tanpa ini `POST /api/meta/webhook` menjawab 503; dengan ini
+  request. Tanpa ini `POST /api/webhooks/meta` menjawab 503; dengan ini
   tapi tanda tangan salah, jawabannya 401 `META_SIGNATURE_INVALID` —
   bedakan keduanya saat mendiagnosis.
 
@@ -551,7 +551,7 @@ SELECT m.created_at, c.id AS conversation_id, left(m.content_text, 60) AS isi
 ### Kalau channel Meta tidak menerima pesan
 
 Channel tampil "terhubung", token valid, dan webhook aplikasi benar — tetapi
-tidak ada satu pun `POST /api/meta/webhook` di log nginx. Untuk WhatsApp ada
+tidak ada satu pun `POST /api/webhooks/meta` di log nginx. Untuk WhatsApp ada
 **dua** syarat yang keduanya harus benar-benar terpenuhi, dan keduanya tidak
 terlihat dari halaman Channel:
 

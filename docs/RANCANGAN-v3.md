@@ -117,7 +117,7 @@ dibuatkan paket kosong.
   ditentukan kunci, bukan URL), scope per kunci.
 - `/tenants/:tenantId/*` — dashboard, sesi Better Auth + membership.
 - `/webchat/*`, `/pay/:code`, `/go/:slug` — publik tanpa sesi.
-- `/meta/webhook`, `/telegram/webhook/:id`, `/payments/webhook/*` —
+- `/webhooks/meta`, `/telegram/webhook/:id`, `/payments/webhook/*` —
   webhook provider, diverifikasi kriptografis.
 - `/admin/*` — panel admin platform (allowlist email, non-admin 404).
 
