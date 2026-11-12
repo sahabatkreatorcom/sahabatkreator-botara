@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNotNull } from "drizzle-orm";
 import {
+  channelAccounts,
+  channelIdentities,
   profilePhotos,
   type Database,
   type ProfilePhoto,
@@ -244,6 +246,139 @@ export async function listProfilePhotoOwnerIds(
         ),
       );
     return new Set(rows.map((r) => r.ownerId));
+  });
+}
+
+/**
+ * Peta contactId → channelAccountId untuk kontak yang ADALAH akun
+ * channel itu sendiri: kontak jangkar sasaran linimasa (Page/IG/
+ * Threads/Bluesky/YouTube/LinkedIn/Pinterest/Google Business/TikTok —
+ * lihat `ensureTimelineTargets` di posts.ts) dibuat dari identitas
+ * `(channel_account_id, external_id akun)`, jadi identitas kontak yang
+ * `external_user_id`-nya SAMA DENGAN `external_id` akun channel-nya
+ * adalah penanda persis "kontak ini = akun itu".
+ *
+ * Dipakai resolusi avatar efektif (inbox & kontak): baris yang mewakili
+ * akun itu sendiri boleh jatuh ke FOTO AKUN CHANNEL bila foto kontak
+ * tidak ada — tanpa menyalin byte foto ke baris kontak, dan tanpa
+ * pernah menempelkan foto akun ke kontak orang lain (identitas kontak
+ * biasa tidak akan cocok dengan uji kesamaan ini).
+ */
+export async function mapContactsToSelfChannelAccounts(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  contactIds: string[],
+): Promise<Map<string, string>> {
+  if (contactIds.length === 0) return new Map();
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const rows = await tx
+      .select({
+        contactId: channelIdentities.contactId,
+        channelAccountId: channelAccounts.id,
+      })
+      .from(channelIdentities)
+      .innerJoin(
+        channelAccounts,
+        eq(channelIdentities.channelAccountId, channelAccounts.id),
+      )
+      .where(
+        and(
+          eq(channelIdentities.tenantId, ctx.tenantId),
+          eq(channelAccounts.tenantId, ctx.tenantId),
+          inArray(channelIdentities.contactId, contactIds),
+          // Inti uji "kontak = akun itu sendiri": id eksternal pada
+          // identitas kontak sama dengan id eksternal akun channel.
+          eq(channelIdentities.externalUserId, channelAccounts.externalId),
+        ),
+      );
+    const map = new Map<string, string>();
+    for (const row of rows) {
+      // Satu kontak secara praktik hanya bisa menjadi dirinya bagi
+      // satu akun; entri pertama dipertahankan agar deterministik.
+      if (!map.has(row.contactId)) map.set(row.contactId, row.channelAccountId);
+    }
+    return map;
+  });
+}
+
+/** Provider yang secara resmi menyediakan foto profil KONTAK (DM). */
+export type ContactPhotoProvider = "telegram" | "messenger" | "instagram";
+
+export interface ContactPhotoFetchCandidate {
+  contactId: string;
+  provider: ContactPhotoProvider;
+  /** Id user kontak di provider (chat_id Telegram / PSID / IGSID). */
+  externalUserId: string;
+  channelAccountId: string;
+  /** Token akun channel TERENKRIPSI — lapisan route yang mendekripsi. */
+  accessTokenEncrypted: string;
+}
+
+/**
+ * Kandidat pengambilan foto kontak untuk backfill malas: identitas
+ * kontak-kontak yang ditanyakan pada provider yang menyediakan foto
+ * profil kontak (Telegram Bot API `getUserProfilePhotos`; Graph Meta
+ * `profile_pic`/`profile_picture_url`), menempel ke akun channel yang
+ * masih 'connected' dan membawa token tersimpan.
+ *
+ * Provider lain SENGAJA tidak masuk: WhatsApp Cloud API tidak
+ * menyediakan endpoint foto profil pengguna (webhook hanya membawa
+ * nama), dan webchat tidak punya sumber foto sama sekali — kontak
+ * provider itu tetap berinisial, itu batas platform yang jujur, bukan
+ * sesuatu yang bisa di-backfill. Pemanggil menyaring sendiri kontak
+ * yang sudah berfoto; fungsi ini murni resolusi identitas → akun.
+ */
+export async function listContactPhotoFetchCandidates(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  contactIds: string[],
+): Promise<ContactPhotoFetchCandidate[]> {
+  if (contactIds.length === 0) return [];
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const rows = await tx
+      .select({
+        contactId: channelIdentities.contactId,
+        provider: channelIdentities.provider,
+        externalUserId: channelIdentities.externalUserId,
+        channelAccountId: channelAccounts.id,
+        accessTokenEncrypted: channelAccounts.accessTokenEncrypted,
+      })
+      .from(channelIdentities)
+      .innerJoin(
+        channelAccounts,
+        eq(channelIdentities.channelAccountId, channelAccounts.id),
+      )
+      .where(
+        and(
+          eq(channelIdentities.tenantId, ctx.tenantId),
+          eq(channelAccounts.tenantId, ctx.tenantId),
+          inArray(channelIdentities.contactId, contactIds),
+          inArray(channelIdentities.provider, [
+            "telegram",
+            "messenger",
+            "instagram",
+          ]),
+          eq(channelAccounts.status, "connected"),
+          isNotNull(channelAccounts.accessTokenEncrypted),
+        ),
+      );
+    const candidates: ContactPhotoFetchCandidate[] = [];
+    const seen = new Set<string>();
+    for (const row of rows) {
+      // Satu kandidat per kontak sudah cukup untuk satu putaran
+      // backfill; identitas lain dicoba pada putaran berikutnya bila
+      // yang ini tidak menghasilkan foto (cache negatif menjarakinya).
+      if (seen.has(row.contactId) || !row.accessTokenEncrypted) continue;
+      seen.add(row.contactId);
+      candidates.push({
+        contactId: row.contactId,
+        provider: row.provider as ContactPhotoProvider,
+        externalUserId: row.externalUserId,
+        channelAccountId: row.channelAccountId,
+        accessTokenEncrypted: row.accessTokenEncrypted,
+      });
+    }
+    return candidates;
   });
 }
 
