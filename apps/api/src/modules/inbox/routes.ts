@@ -16,9 +16,11 @@ import {
 import {
   assignConversation,
   computeMessagingWindow,
+  listContactPhotoFetchCandidates,
   listConversations,
   listMessagesPage,
   listProfilePhotoOwnerIds,
+  mapContactsToSelfChannelAccounts,
   markConversationRead,
   queueMediaMessage,
   queueOutboundMessage,
@@ -30,7 +32,12 @@ import {
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { contactAvatarUrl } from "../avatars/routes";
+import {
+  pendingContactPhotoBackfillIds,
+  scheduleContactPhotoBackfills,
+  type ContactPhotoBackfillOptions,
+} from "../avatars/contact-photo-backfill";
+import { channelAvatarUrl, contactAvatarUrl } from "../avatars/routes";
 import { serializeMessage } from "../messages-serialize";
 import { resolveTenantForUser } from "../tenants/guard";
 
@@ -109,6 +116,7 @@ const ListMessagesQuerySchema = z.object({
 export function createInboxRoutes(
   bundle: AuthBundle | null,
   publisher?: RealtimePublisher | null,
+  photoBackfillOpts?: ContactPhotoBackfillOptions,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   const base = "/tenants/:tenantId/conversations";
@@ -124,6 +132,93 @@ export function createInboxRoutes(
     app.post(`${base}/:id/agent`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
   }
+
+  /**
+   * Avatar EFEKTIF per baris percakapan (perbaikan avatar inbox):
+   * foto KONTAK lebih dulu; bila tidak ada DAN kontak baris ini adalah
+   * akun channel-nya sendiri (kontak jangkar sasaran linimasa —
+   * Page/IG/Threads/dll. yang baris `kind='channel'`-nya memang
+   * mewakili akun itu), jatuh ke foto AKUN CHANNEL. Tanpa urutan ini
+   * seluruh baris channel tampil berinisial selamanya: foto akun tidak
+   * pernah dikonsultasikan serializer lama, dan kontak jangkar tidak
+   * akan pernah punya foto kontak. Kontak DM biasa TIDAK pernah
+   * mewarisi foto akun — avatar DM adalah foto orangnya; tidak adanya
+   * foto kontak di sana dijawab inisial, bukan foto bisnis kita.
+   *
+   * Sekalian menjadwalkan backfill malas foto kontak bagi kontak DM
+   * yang belum berfoto (identitas telegram/meta dengan jalur resmi) —
+   * best-effort di latar, respons tidak menunggu. Kontak akun-dirinya
+   * dikecualikan dari backfill: fotonya adalah foto akun, mengambilnya
+   * ulang sebagai "foto kontak" akan menduplikasi byte ke baris
+   * kontak sintetis.
+   */
+  const resolveConversationAvatarUrls = async (
+    tenantId: string,
+    rows: ConversationWithSummary[],
+  ): Promise<Map<string, string | null>> => {
+    const urls = new Map<string, string | null>();
+    if (rows.length === 0) return urls;
+    const contactIds = [...new Set(rows.map((row) => row.contactId))];
+    const contactPhotos = await listProfilePhotoOwnerIds(
+      bundle.db,
+      { tenantId },
+      "contact",
+      contactIds,
+    );
+    const missingContactIds = contactIds.filter(
+      (id) => !contactPhotos.has(id),
+    );
+    let selfAccounts = new Map<string, string>();
+    let channelPhotos = new Set<string>();
+    if (missingContactIds.length > 0) {
+      selfAccounts = await mapContactsToSelfChannelAccounts(
+        bundle.db,
+        { tenantId },
+        missingContactIds,
+      );
+      const selfAccountIds = [...new Set(selfAccounts.values())];
+      if (selfAccountIds.length > 0) {
+        channelPhotos = await listProfilePhotoOwnerIds(
+          bundle.db,
+          { tenantId },
+          "channel_account",
+          selfAccountIds,
+        );
+      }
+      const pending = pendingContactPhotoBackfillIds(
+        missingContactIds.filter((id) => !selfAccounts.has(id)),
+      );
+      if (pending.length > 0) {
+        const candidates = await listContactPhotoFetchCandidates(
+          bundle.db,
+          { tenantId },
+          pending,
+        );
+        scheduleContactPhotoBackfills(
+          bundle,
+          photoBackfillOpts,
+          tenantId,
+          candidates,
+        );
+      }
+    }
+    for (const row of rows) {
+      if (contactPhotos.has(row.contactId)) {
+        urls.set(row.id, contactAvatarUrl(tenantId, row.contactId));
+        continue;
+      }
+      const selfAccountId = selfAccounts.get(row.contactId);
+      urls.set(
+        row.id,
+        selfAccountId !== undefined &&
+          selfAccountId === row.channelAccountId &&
+          channelPhotos.has(selfAccountId)
+          ? channelAvatarUrl(tenantId, selfAccountId)
+          : null,
+      );
+    }
+    return urls;
+  };
 
   /**
    * Ambil ulang satu percakapan lewat jalur DAFTAR lalu serialisasi —
@@ -148,19 +243,11 @@ export function createInboxRoutes(
       // jadi bagi inbox percakapan itu tidak ada.
       return apiError(c, 404, "NOT_FOUND", "Conversation not found");
     }
-    const withPhoto = await listProfilePhotoOwnerIds(
-      bundle.db,
-      { tenantId },
-      "contact",
-      [updated.contactId],
-    );
+    const avatarUrls = await resolveConversationAvatarUrls(tenantId, [
+      updated,
+    ]);
     return c.json(
-      serializeConversation(
-        updated,
-        withPhoto.has(updated.contactId)
-          ? contactAvatarUrl(tenantId, updated.contactId)
-          : null,
-      ),
+      serializeConversation(updated, avatarUrls.get(updated.id) ?? null),
     );
   };
 
@@ -182,22 +269,14 @@ export function createInboxRoutes(
         assignmentUserId: c.get("appUser").id,
       },
     );
-    // Fase 6D: foto kontak jangkar tiap percakapan (endpoint avatar kita
-    // sendiri) — himpunan pemilik berfoto dihitung sekali per daftar.
-    const withPhoto = await listProfilePhotoOwnerIds(
-      bundle.db,
-      { tenantId: tenant.id },
-      "contact",
-      rows.map((row) => row.contactId),
-    );
+    // Avatar efektif tiap percakapan (endpoint avatar kita sendiri):
+    // foto kontak, lalu foto akun channel untuk baris yang mewakili
+    // akun itu sendiri — himpunan pemilik berfoto dihitung sekali per
+    // daftar oleh resolveConversationAvatarUrls.
+    const avatarUrls = await resolveConversationAvatarUrls(tenant.id, rows);
     const body = ConversationListResponseSchema.parse({
       conversations: rows.map((row) =>
-        serializeConversation(
-          row,
-          withPhoto.has(row.contactId)
-            ? contactAvatarUrl(tenant.id, row.contactId)
-            : null,
-        ),
+        serializeConversation(row, avatarUrls.get(row.id) ?? null),
       ),
     });
     return c.json(body);

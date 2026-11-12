@@ -390,8 +390,20 @@ routes.route("/", createDashboardRoutes(authBundle));
 // Modul tenants (Fase 1B) — route /tenants* dengan middleware sesi di dalamnya.
 routes.route("/", createTenantsRoutes(authBundle));
 // Modul contacts & inbox (Fase 1D) — route bersarang /tenants/:tenantId/...
-routes.route("/", createContactsRoutes(authBundle));
-routes.route("/", createInboxRoutes(authBundle, realtimePublisher));
+// Opsi backfill foto kontak (perbaikan avatar inbox): daftar yang dibaca
+// menjadwalkan pengambilan foto kontak lama (telegram/meta) di latar —
+// kredensial channel + base API yang sama seperti modul channels.
+const contactPhotoBackfillOpts = {
+  channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+  telegramApiBase: env.TELEGRAM_API_BASE,
+  metaApiBase: env.META_API_BASE,
+  graphApiVersion: META_GRAPH_API_VERSION,
+};
+routes.route("/", createContactsRoutes(authBundle, contactPhotoBackfillOpts));
+routes.route(
+  "/",
+  createInboxRoutes(authBundle, realtimePublisher, contactPhotoBackfillOpts),
+);
 // Modul channels (Fase 1F, telegram 6A) — manajemen channel workspace
 // /tenants/:tenantId/channels. Opsi telegram: kunci enkripsi kredensial +
 // base URL Bot API + URL publik untuk mendaftarkan webhook.
