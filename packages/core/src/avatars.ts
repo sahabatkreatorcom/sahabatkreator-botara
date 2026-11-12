@@ -7,6 +7,8 @@ import {
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb } from "./tx";
+import { resolveR2ObjectStore } from "./r2-storage";
+import type { PlatformSettingsOptions } from "./platform-settings";
 
 /**
  * Avatar asli (Fase 6D) — foto profil Telegram untuk akun channel (bot)
@@ -30,6 +32,16 @@ export type ProfilePhotoOwnerType = ProfilePhoto["ownerType"];
 
 /** Batas sisi foto profil yang disimpan (lihat keputusan ukuran di atas). */
 export const PROFILE_PHOTO_MAX_EDGE = 512;
+
+/**
+ * Awalan kunci objek R2 untuk avatar TikTok: kunci penuhnya
+ * `avatars/tiktok/<channel_account_id>.<ext>` — deterministik per
+ * akun, jadi pengambilan ulang (reconnect/backfill) MENIMPA objek
+ * yang sama, bukan menumpuk objek baru. Hanya avatar TikTok yang
+ * memakai R2 (keputusan pemilik 2026-11-12); awalan ini satu-satunya
+ * tempat string-nya ditulis agar titik panggil tidak berdrift.
+ */
+export const TIKTOK_AVATAR_R2_KEY_PREFIX = "avatars/tiktok";
 /** Batas keras ukuran unduhan foto (sanity — foto profil Telegram jauh di bawah ini). */
 const PROFILE_PHOTO_MAX_BYTES = 5 * 1024 * 1024;
 const DEFAULT_TELEGRAM_API_BASE = "https://api.telegram.org";
@@ -63,6 +75,8 @@ export async function storeProfilePhoto(
         ownerType: input.ownerType,
         ownerId: input.ownerId,
         contentType: input.contentType,
+        storage: "db",
+        objectKey: null,
         data: input.data,
         etag,
         fetchedAt: now,
@@ -75,6 +89,12 @@ export async function storeProfilePhoto(
         ],
         set: {
           contentType: input.contentType,
+          // Bentuk bytea menegakkan bentuk barisnya sendiri: bila
+          // baris sebelumnya berbentuk R2, penulisan bytea (mis.
+          // fallback sesudah R2 dinonaktifkan) mengembalikannya ke
+          // bentuk 'db' secara utuh — tidak ada baris campuran.
+          storage: "db",
+          objectKey: null,
           data: input.data,
           etag,
           fetchedAt: now,
@@ -84,6 +104,97 @@ export async function storeProfilePhoto(
       .returning();
     return row;
   });
+}
+
+/**
+ * Menyimpan/menimpa foto yang bytenya hidup sebagai OBJEK R2
+ * (pasangan `storeProfilePhoto` untuk bentuk 'r2', migrasi 0024):
+ * baris hanya mencatat penunjuk objek + content type + etag
+ * (SHA-256 byte foto, dihitung PENULIS objek sebelum PUT agar
+ * semantik ETag endpoint penyaji identik dengan bentuk bytea).
+ * Penulisan objeknya sendiri adalah urusan pemanggil lewat
+ * `resolveR2ObjectStore` — fungsi ini murni baris DB.
+ */
+export async function storeProfilePhotoObject(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  input: {
+    ownerType: ProfilePhotoOwnerType;
+    ownerId: string;
+    contentType: string;
+    /** Kunci objek R2 tempat byte foto sudah ditulis. */
+    objectKey: string;
+    /** SHA-256 hex byte foto (dihitung dari byte, bukan dari objek). */
+    etag: string;
+  },
+): Promise<ProfilePhoto> {
+  const now = new Date();
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [row] = await tx
+      .insert(profilePhotos)
+      .values({
+        tenantId: ctx.tenantId,
+        ownerType: input.ownerType,
+        ownerId: input.ownerId,
+        contentType: input.contentType,
+        storage: "r2",
+        objectKey: input.objectKey,
+        data: null,
+        etag: input.etag,
+        fetchedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: [
+          profilePhotos.tenantId,
+          profilePhotos.ownerType,
+          profilePhotos.ownerId,
+        ],
+        set: {
+          contentType: input.contentType,
+          storage: "r2",
+          objectKey: input.objectKey,
+          data: null,
+          etag: input.etag,
+          fetchedAt: now,
+          updatedAt: now,
+        },
+      })
+      .returning();
+    return row;
+  });
+}
+
+/**
+ * Byte foto untuk penyajian, apa pun bentuk barisnya: bentuk 'db'
+ * langsung dari kolom bytea; bentuk 'r2' diambil dari objek R2 di
+ * sisi server (bucket tetap privat — penyajian TIDAK bergantung pada
+ * domain publik media, dan web tidak tahu bedanya). Mengembalikan
+ * null bila foto tidak bisa dibaca (R2 belum terkonfigurasi, objek
+ * hilang, atau R2 tak terjangkau) — penyaji menjawab 404 dan web
+ * jatuh ke inisial, persis seperti foto belum ada.
+ */
+export async function fetchProfilePhotoBytes(
+  db: Database,
+  photo: ProfilePhoto,
+  platformOptions?: PlatformSettingsOptions,
+): Promise<Buffer | null> {
+  if (photo.storage === "db") {
+    return photo.data ? Buffer.from(photo.data) : null;
+  }
+  if (!photo.objectKey || !platformOptions) return null;
+  try {
+    const resolved = await resolveR2ObjectStore(db, platformOptions);
+    if (!resolved) return null;
+    const object = await resolved.store.get(photo.objectKey);
+    return object?.data ?? null;
+  } catch {
+    // Label generik saja — pesan error klien R2 tidak memuat
+    // kredensial, tetapi URL endpoint tidak perlu diedarkan ke log.
+    console.error(
+      `[avatars] pengambilan objek avatar R2 gagal (pemilik ${photo.ownerType}:${photo.ownerId})`,
+    );
+    return null;
+  }
 }
 
 /** Satu foto pemilik di tenant ini; null bila belum ada. */
@@ -177,6 +288,17 @@ export async function deleteChannelAccountProfilePhoto(
  * tidak boleh menggagalkan connect; kartu Channels jatuh ke inisial
  * dan backfill daftar channel mencoba lagi nanti. URL tidak pernah
  * masuk log (URL CDN bisa memuat tanda tangan).
+ *
+ * Opsi `r2` (KHUSUS TikTok — keputusan pemilik 2026-11-12): bila
+ * pengisi memintanya, byte yang terunduh ditulis ke Cloudflare R2
+ * lebih dulu dan baris `profile_photos` menunjuk objeknya, karena
+ * URL avatar CDN TikTok bertanda tangan & kedaluwarsa sehingga
+ * salinan berkasnya harus tinggal di penyimpanan objek platform
+ * sendiri. FALLBACK WAJIB: R2 belum terkonfigurasi (kredensial panel
+ * kosong) ATAU tulis R2 gagal → bytea basis data persis seperti tanpa
+ * opsi ini (dicatat jujur di log internal) — bentuk R2 aktif dengan
+ * sendirinya pada pengambilan berikutnya begitu kredensial R2 di
+ * Panel Admin terisi. Pemanggil non-TikTok TIDAK mengisi opsi ini.
  */
 export async function fetchAndStoreProfilePhotoFromUrl(
   db: Database,
@@ -188,6 +310,16 @@ export async function fetchAndStoreProfilePhotoFromUrl(
     pictureUrl: string | null | undefined;
     /** Batas waktu unduhan (default 5 dtk — jalur ini best-effort). */
     timeoutMs?: number;
+    /**
+     * Simpan byte ke R2 (bukan bytea) — hanya titik panggil TikTok
+     * yang mengisinya; lihat catatan `r2` pada komentar fungsi.
+     */
+    r2?: {
+      /** Resolver Panel Admin untuk identitas + kredensial R2. */
+      platformOptions: PlatformSettingsOptions;
+      /** Awalan kunci objek; kunci penuh `${keyPrefix}/${channelAccountId}.${ext}`. */
+      keyPrefix: string;
+    };
   },
 ): Promise<boolean> {
   const url = input.pictureUrl?.trim();
@@ -204,10 +336,23 @@ export async function fetchAndStoreProfilePhotoFromUrl(
     if (bytes.length === 0 || bytes.length > PROFILE_PHOTO_MAX_BYTES) {
       return false;
     }
+    const effectiveContentType = contentType || "image/jpeg";
+    if (input.r2) {
+      const storedToR2 = await tryStoreProfilePhotoToR2(db, {
+        tenantId: input.tenantId,
+        channelAccountId: input.channelAccountId,
+        contentType: effectiveContentType,
+        bytes,
+        r2: input.r2,
+      });
+      if (storedToR2) return true;
+      // Jatuh ke bytea di bawah — TANPA melempar: fallback ini adalah
+      // perilaku normal selama kredensial R2 panel belum terisi.
+    }
     await storeProfilePhoto(db, { tenantId: input.tenantId }, {
       ownerType: "channel_account",
       ownerId: input.channelAccountId,
-      contentType: contentType || "image/jpeg",
+      contentType: effectiveContentType,
       data: bytes,
     });
     return true;
@@ -215,6 +360,90 @@ export async function fetchAndStoreProfilePhotoFromUrl(
     // SENGAJA tanpa objek error/URL: cukup label generik.
     console.error(
       `[avatars] pengambilan foto profil dari URL gagal (akun ${input.channelAccountId})`,
+    );
+    return false;
+  }
+}
+
+/** Ekstensi kunci objek dari content type (avatar TikTok: jpeg/webp pada praktiknya). */
+function extensionForAvatarContentType(contentType: string): string {
+  switch (contentType) {
+    case "image/jpeg":
+      return "jpg";
+    case "image/png":
+      return "png";
+    case "image/webp":
+      return "webp";
+    case "image/gif":
+      return "gif";
+    default: {
+      const subtype = contentType
+        .split("/")[1]
+        ?.replace(/[^a-z0-9]/gi, "")
+        .toLowerCase();
+      return subtype || "bin";
+    }
+  }
+}
+
+/**
+ * Satu percobaan menulis avatar ke R2 + mencatat baris penunjuknya.
+ * Mengembalikan false untuk SEMUA kegagalan (belum terkonfigurasi,
+ * PUT ditolak, baris gagal ditulis) agar pemanggil jatuh ke bytea —
+ * alasan spesifik dicatat di sini dengan label tahap saja (kredensial
+ * dan URL tidak pernah masuk log).
+ */
+async function tryStoreProfilePhotoToR2(
+  db: Database,
+  input: {
+    tenantId: string;
+    channelAccountId: string;
+    contentType: string;
+    bytes: Buffer;
+    r2: {
+      platformOptions: PlatformSettingsOptions;
+      keyPrefix: string;
+    };
+  },
+): Promise<boolean> {
+  let resolved: Awaited<ReturnType<typeof resolveR2ObjectStore>>;
+  try {
+    resolved = await resolveR2ObjectStore(db, input.r2.platformOptions);
+  } catch {
+    console.error(
+      `[avatars] resolusi R2 gagal — avatar disimpan ke basis data (akun ${input.channelAccountId})`,
+    );
+    return false;
+  }
+  if (!resolved) {
+    // Keadaan produksi yang sah sampai pemilik mengisi kredensial R2
+    // di Panel Admin — bukan kegagalan, tetapi dicatat agar operator
+    // tahu bentuk R2 belum aktif, bukan mengira sudah.
+    console.error(
+      `[avatars] kredensial R2 belum terisi — avatar disimpan ke basis data (akun ${input.channelAccountId})`,
+    );
+    return false;
+  }
+  const objectKey =
+    `${input.r2.keyPrefix}/${input.channelAccountId}.` +
+    extensionForAvatarContentType(input.contentType);
+  try {
+    await resolved.store.put(objectKey, input.bytes, input.contentType);
+    await storeProfilePhotoObject(
+      db,
+      { tenantId: input.tenantId },
+      {
+        ownerType: "channel_account",
+        ownerId: input.channelAccountId,
+        contentType: input.contentType,
+        objectKey,
+        etag: createHash("sha256").update(input.bytes).digest("hex"),
+      },
+    );
+    return true;
+  } catch {
+    console.error(
+      `[avatars] penulisan avatar ke R2 gagal — disimpan ke basis data (akun ${input.channelAccountId})`,
     );
     return false;
   }

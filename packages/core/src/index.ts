@@ -451,13 +451,16 @@ export {
 } from "./whatsapp";
 export {
   PROFILE_PHOTO_MAX_EDGE,
+  TIKTOK_AVATAR_R2_KEY_PREFIX,
   deleteChannelAccountProfilePhoto,
   fetchAndStoreProfilePhotoFromUrl,
   fetchAndStoreTelegramProfilePhoto,
+  fetchProfilePhotoBytes,
   getProfilePhoto,
   listProfilePhotoOwnerIds,
   pickTelegramPhotoSize,
   storeProfilePhoto,
+  storeProfilePhotoObject,
   type FetchTelegramProfilePhotoInput,
   type ProfilePhotoOwnerType,
 } from "./avatars";
