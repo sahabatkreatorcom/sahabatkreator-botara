@@ -1,11 +1,17 @@
 import { and, count, eq, gte, sql } from "drizzle-orm";
 import type { Database } from "@sahabat-kreator/db";
-import type { DashboardSummaryResponse } from "@sahabat-kreator/contracts";
+import type {
+  DashboardSetup,
+  DashboardSummaryResponse,
+} from "@sahabat-kreator/contracts";
 import {
+  agents,
+  automations,
   channelAccounts,
   contacts,
   conversations,
   messages,
+  tenantMembers,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb } from "./tx";
@@ -179,6 +185,43 @@ export async function getDashboardSummary(
       messagesOut += point.outbound;
     }
 
+    // Checklist penyiapan (G13 butir 7): lima hitungan keberadaan dari
+    // data sungguhan dalam transaksi yang sama — tanpa kolom penanda
+    // "sudah selesai" di mana pun; keadaan data adalah sumbernya.
+    const [agentCountRow] = await tx
+      .select({ n: count() })
+      .from(agents)
+      .where(eq(agents.tenantId, ctx.tenantId));
+    const [conversationCountRow] = await tx
+      .select({ n: count() })
+      .from(conversations)
+      .where(eq(conversations.tenantId, ctx.tenantId));
+    const [automationCountRow] = await tx
+      .select({ n: count() })
+      .from(automations)
+      .where(eq(automations.tenantId, ctx.tenantId));
+    const [memberCountRow] = await tx
+      .select({ n: count() })
+      .from(tenantMembers)
+      .where(eq(tenantMembers.tenantId, ctx.tenantId));
+
+    const setupSteps: DashboardSetup["steps"] = [
+      {
+        key: "channel",
+        done: [...channels.values()].some((c) => c.connected > 0),
+      },
+      { key: "agent", done: Number(agentCountRow?.n ?? 0) > 0 },
+      { key: "conversation", done: Number(conversationCountRow?.n ?? 0) > 0 },
+      { key: "automation", done: Number(automationCountRow?.n ?? 0) > 0 },
+      { key: "team", done: Number(memberCountRow?.n ?? 0) >= 2 },
+    ];
+    const setup: DashboardSetup = {
+      steps: setupSteps,
+      completedCount: setupSteps.filter((s) => s.done).length,
+      totalCount: setupSteps.length,
+      allDone: setupSteps.every((s) => s.done),
+    };
+
     return {
       attention: {
         unreadConversations: Number(unreadRow?.n ?? 0),
@@ -197,6 +240,7 @@ export async function getDashboardSummary(
         newContacts: Number(newContactsRow?.n ?? 0),
         daily,
       },
+      setup,
       generatedAt: new Date().toISOString(),
     };
   });

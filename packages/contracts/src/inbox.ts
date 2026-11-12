@@ -317,6 +317,12 @@ export const TeamMemberResponseSchema = z.object({
   role: MemberRoleSchema,
   /** Baris ini adalah user sesi yang sedang melihat (UI menandai "Anda"). */
   isSelf: z.boolean(),
+  /**
+   * Detak kehadiran terakhir (G13 butir 9, users.last_seen_at); null =
+   * belum pernah tercatat. UI menurunkan statusnya: ≤2 menit "online",
+   * selebihnya "terakhir aktif <waktu relatif>".
+   */
+  lastSeenAt: z.string().datetime().nullable(),
   createdAt: z.string().datetime(),
 });
 export type TeamMemberResponse = z.infer<typeof TeamMemberResponseSchema>;
@@ -457,6 +463,36 @@ export type MessageReplyToSnapshot = z.infer<
   typeof MessageReplyToSnapshotSchema
 >;
 
+/**
+ * Detail teknis kegagalan kirim (G13 butir 6) — cermin kontrak kolom
+ * `messages.error_detail`: deskripsi resmi provider + subkode Graph +
+ * fbtrace_id untuk dukungan. Semua bidang nullable; keseluruhan null
+ * bila kegagalan tidak membawa detail provider.
+ */
+export const MessageErrorDetailSchema = z.object({
+  description: z.string().nullable(),
+  subcode: z.number().nullable(),
+  fbtraceId: z.string().nullable(),
+});
+export type MessageErrorDetail = z.infer<typeof MessageErrorDetailSchema>;
+
+/**
+ * Ringkasan reaksi pada satu pesan (G13 butir 11) — agregat per emoji
+ * dari tabel message_reactions: `count` total aktor, `mine` = sesi
+ * yang melihat termasuk yang bereaksi, `byContact`/`byTeam` penanda
+ * kelas aktor agar UI bisa memberi label asalnya.
+ */
+export const MessageReactionSummarySchema = z.object({
+  emoji: z.string(),
+  count: z.number().int().positive(),
+  mine: z.boolean(),
+  byContact: z.boolean(),
+  byTeam: z.boolean(),
+});
+export type MessageReactionSummary = z.infer<
+  typeof MessageReactionSummarySchema
+>;
+
 export const MessageResponseSchema = z.object({
   id: z.string().uuid(),
   conversationId: z.string().uuid(),
@@ -469,6 +505,16 @@ export const MessageResponseSchema = z.object({
   mediaId: z.string().uuid().nullable(),
   providerMessageId: z.string().nullable(),
   status: MessageStatusSchema,
+  /**
+   * Kode kegagalan ringkas (G13 butir 6) — `messages.error_code`;
+   * null untuk pesan tidak gagal. UI menerjemahkannya lewat katalog
+   * kontrak `message-errors` menjadi bahasa awam.
+   */
+  errorCode: z.string().nullable(),
+  /** Detail teknis kegagalan (G13 butir 6); null selain pesan gagal berdetail. */
+  errorDetail: MessageErrorDetailSchema.nullable(),
+  /** Ringkasan reaksi emoji pada pesan ini (G13 butir 11); [] bila tidak ada. */
+  reactions: z.array(MessageReactionSummarySchema),
   sentByUserId: z.string().uuid().nullable(),
   /**
    * Pesan yang dikutip pesan ini (Fase 7B.5), atau null. Null juga bila
@@ -497,6 +543,29 @@ export const MessageListResponseSchema = z.object({
   hasMore: z.boolean(),
 });
 export type MessageListResponse = z.infer<typeof MessageListResponseSchema>;
+
+/**
+ * Permintaan menetapkan reaksi sesi ini pada satu pesan (G13 butir 11):
+ * `emoji` null = hapus reaksi saya; emoji yang sama dengan yang aktif =
+ * hapus juga (semantik toggle ditegakkan core). Provider yang API-nya
+ * tidak mendukung reaksi keluar ditolak API (REACTION_NOT_SUPPORTED)
+ * sebelum apa pun ditulis.
+ */
+export const SetMessageReactionRequestSchema = z.object({
+  emoji: z.string().min(1).max(16).nullable(),
+});
+export type SetMessageReactionRequest = z.infer<
+  typeof SetMessageReactionRequestSchema
+>;
+
+/** Respons sesudah reaksi ditetapkan: ringkasan reaksi pesan itu kini. */
+export const MessageReactionResponseSchema = z.object({
+  messageId: z.string().uuid(),
+  reactions: z.array(MessageReactionSummarySchema),
+});
+export type MessageReactionResponse = z.infer<
+  typeof MessageReactionResponseSchema
+>;
 
 export const SendMessageRequestSchema = z.object({
   contentText: z.string().trim().min(1).max(4096),

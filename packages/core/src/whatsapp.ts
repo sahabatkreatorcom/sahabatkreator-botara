@@ -703,6 +703,13 @@ export interface ApplyWhatsAppMessageStatusInput {
   status: WhatsAppDeliveryStatus;
   /** Kode error numerik Graph dari statuses[].errors[0].code (status failed). */
   graphErrorCode?: number | null;
+  /**
+   * Detail teknis resmi Meta (G13 butir 6): judul + rincian error dari
+   * statuses[].errors[0] — disimpan ke `messages.error_detail` saat
+   * status failed diterapkan. Webhook status tidak membawa fbtrace_id.
+   */
+  errorTitle?: string | null;
+  errorDetails?: string | null;
 }
 
 export interface ApplyWhatsAppMessageStatusResult {
@@ -766,9 +773,17 @@ export async function applyWhatsAppMessageStatus(
         input.graphErrorCode != null
           ? `meta_graph_${input.graphErrorCode}`
           : "whatsapp_delivery_failed";
+      const errorDescription =
+        input.errorDetails?.slice(0, 500) ?? input.errorTitle?.slice(0, 500) ?? null;
       const [updated] = await tx
         .update(messages)
-        .set({ status: "failed", errorCode: errorCode.slice(0, 128) })
+        .set({
+          status: "failed",
+          errorCode: errorCode.slice(0, 128),
+          errorDetail: errorDescription
+            ? { description: errorDescription, subcode: null, fbtraceId: null }
+            : null,
+        })
         .where(eq(messages.id, message.id))
         .returning();
       await tx.insert(auditLogs).values({

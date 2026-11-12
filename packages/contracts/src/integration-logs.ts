@@ -139,6 +139,19 @@ export const FailedMessageResponseSchema = z.object({
   contentPreview: z.string().nullable(),
   /** Kode kegagalan terakhir (kolom messages.error_code), mis. `meta_graph_131047`. */
   errorCode: z.string().nullable(),
+  /**
+   * Detail teknis kegagalan (G13 butir 6, kolom messages.error_detail):
+   * deskripsi resmi provider + subkode + fbtrace_id — ditampilkan
+   * panel sebagai detail teknis di samping penjelasan bahasa awam
+   * dari kode. Null bila provider tidak memberi detail.
+   */
+  errorDetail: z
+    .object({
+      description: z.string().nullable(),
+      subcode: z.number().nullable(),
+      fbtraceId: z.string().nullable(),
+    })
+    .nullable(),
   createdAt: z.string().datetime(),
 });
 export type FailedMessageResponse = z.infer<typeof FailedMessageResponseSchema>;

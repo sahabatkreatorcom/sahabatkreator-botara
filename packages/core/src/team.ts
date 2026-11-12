@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, lt, or, sql } from "drizzle-orm";
 import {
   auditLogs,
   conversations,
@@ -92,6 +92,8 @@ export interface TeamMemberRow {
   email: string;
   name: string | null;
   role: MemberRole;
+  /** Detak kehadiran terakhir (G13 butir 9); null = belum pernah tercatat. */
+  lastSeenAt: Date | null;
   createdAt: Date;
 }
 
@@ -111,6 +113,7 @@ export async function listTeamMembers(
         createdAt: tenantMembers.createdAt,
         email: users.email,
         name: users.name,
+        lastSeenAt: users.lastSeenAt,
       })
       .from(tenantMembers)
       .innerJoin(users, eq(tenantMembers.userId, users.id))
@@ -126,6 +129,45 @@ export async function listTeamMembers(
           : 0,
     );
   });
+}
+
+// ---------------------------------------------------------------------------
+// Kehadiran tim (G13 butir 9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Jeda tulis minimum detak kehadiran: heartbeat klien boleh datang
+ * tiap ±60 detik; baris `users` hanya ditulis ulang bila stempelnya
+ * lebih tua dari ambang ini — satu UPDATE bersyarat, tanpa baca-tulis
+ * terpisah, jadi detak bersamaan tidak saling menimpa mundur.
+ */
+export const PRESENCE_HEARTBEAT_MIN_INTERVAL_MS = 45_000;
+
+/** Ambang "online" untuk tampilan: detak ≤2 menit yang lalu. */
+export const PRESENCE_ONLINE_WINDOW_MS = 2 * 60_000;
+
+/**
+ * Mencatat detak kehadiran satu user (menulis `users.last_seen_at`).
+ * Tabel users global tanpa RLS — tidak butuh konteks tenant; endpoint
+ * heartbeat tetap memintanya lewat keanggotaan tenant (gerbang sesi).
+ */
+export async function touchUserPresence(
+  db: Database,
+  userId: string,
+  now: Date = new Date(),
+): Promise<void> {
+  const staleBefore = new Date(
+    now.getTime() - PRESENCE_HEARTBEAT_MIN_INTERVAL_MS,
+  );
+  await db
+    .update(users)
+    .set({ lastSeenAt: now })
+    .where(
+      and(
+        eq(users.id, userId),
+        or(isNull(users.lastSeenAt), lt(users.lastSeenAt, staleBefore)),
+      ),
+    );
 }
 
 // ---------------------------------------------------------------------------

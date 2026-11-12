@@ -32,6 +32,7 @@ interface GraphErrorBody {
     type?: string;
     code?: number;
     error_subcode?: number;
+    fbtrace_id?: string;
   };
 }
 
@@ -60,6 +61,12 @@ export class GraphApiError extends Error {
   /** Subkode error Graph (mis. 36003 kegagalan exchange OAuth); null bila tak ada. */
   readonly graphSubcode: number | null;
   readonly description: string;
+  /**
+   * Id penelusuran Meta (fbtrace_id) untuk tiket dukungan (G13 butir
+   * 6); null bila body error tidak membawanya. Aman disimpan/ditampilkan
+   * — bukan kredensial.
+   */
+  readonly fbtraceId: string | null;
 
   constructor(
     label: string,
@@ -67,6 +74,7 @@ export class GraphApiError extends Error {
     graphCode: number | null,
     description: string,
     graphSubcode: number | null = null,
+    fbtraceId: string | null = null,
   ) {
     super(
       `${label} error (HTTP ${status}${graphCode !== null ? `, code ${graphCode}` : ""}): ${description}`,
@@ -76,6 +84,7 @@ export class GraphApiError extends Error {
     this.graphCode = graphCode;
     this.graphSubcode = graphSubcode;
     this.description = description;
+    this.fbtraceId = fbtraceId;
   }
 }
 
@@ -106,6 +115,7 @@ export abstract class GraphHttpClient {
     graphCode: number | null,
     description: string,
     graphSubcode: number | null,
+    fbtraceId?: string | null,
   ): GraphApiError;
 
   protected headers(): Record<string, string> {
@@ -131,7 +141,15 @@ export abstract class GraphHttpClient {
       typeof body.error?.message === "string"
         ? body.error.message.slice(0, 200)
         : "meta_graph_error";
-    return this.createError(response.status, graphCode, description, graphSubcode);
+    const fbtraceId =
+      typeof body.error?.fbtrace_id === "string" ? body.error.fbtrace_id : null;
+    return this.createError(
+      response.status,
+      graphCode,
+      description,
+      graphSubcode,
+      fbtraceId,
+    );
   }
 
   private url(path: string): string {

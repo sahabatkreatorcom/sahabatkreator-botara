@@ -50,8 +50,9 @@ export class MetaGraphError extends GraphApiError {
     graphCode: number | null,
     description: string,
     graphSubcode: number | null = null,
+    fbtraceId: string | null = null,
   ) {
-    super("Meta Graph API", status, graphCode, description, graphSubcode);
+    super("Meta Graph API", status, graphCode, description, graphSubcode, fbtraceId);
     this.name = "MetaGraphError";
   }
 }
@@ -199,8 +200,9 @@ export class MetaGraphClient extends GraphHttpClient {
     graphCode: number | null,
     description: string,
     graphSubcode: number | null,
+    fbtraceId: string | null = null,
   ): MetaGraphError {
-    return new MetaGraphError(status, graphCode, description, graphSubcode);
+    return new MetaGraphError(status, graphCode, description, graphSubcode, fbtraceId);
   }
 
   /**
@@ -1567,8 +1569,9 @@ export class ThreadsGraphError extends GraphApiError {
     graphCode: number | null,
     description: string,
     graphSubcode: number | null = null,
+    fbtraceId: string | null = null,
   ) {
-    super("Threads API", status, graphCode, description, graphSubcode);
+    super("Threads API", status, graphCode, description, graphSubcode, fbtraceId);
     this.name = "ThreadsGraphError";
   }
 }
@@ -1630,8 +1633,9 @@ export class ThreadsGraphClient extends GraphHttpClient {
     graphCode: number | null,
     description: string,
     graphSubcode: number | null,
+    fbtraceId: string | null = null,
   ): ThreadsGraphError {
-    return new ThreadsGraphError(status, graphCode, description, graphSubcode);
+    return new ThreadsGraphError(status, graphCode, description, graphSubcode, fbtraceId);
   }
 
   /** Buat satu container Threads (teks, gambar, video, atau karousel). */

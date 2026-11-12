@@ -37,6 +37,7 @@ export * from "./integration-logs";
 export * from "./audit";
 export * from "./analytics";
 export * from "./dashboard";
+export * from "./message-errors";
 export * from "./broadcasts";
 export * from "./outbound-webhooks";
 export * from "./deals";

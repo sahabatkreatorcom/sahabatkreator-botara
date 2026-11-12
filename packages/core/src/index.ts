@@ -187,6 +187,16 @@ export {
   DASHBOARD_ACTIVITY_DAYS,
   getDashboardSummary,
 } from "./dashboard";
+export { getReplyTimeReport, medianSeconds } from "./reply-times";
+export {
+  applyUserReaction,
+  contactActorKey,
+  recordContactReaction,
+  summarizeMessageReactions,
+  userActorKey,
+  type ApplyUserReactionResult,
+  type MessageReactionSummary,
+} from "./reactions";
 export {
   listConversations,
   MESSAGE_CONVERSATION_KINDS,
@@ -1140,6 +1150,9 @@ export {
   invitationStatus,
   isTeamManager,
   INVITATION_TTL_MS,
+  PRESENCE_HEARTBEAT_MIN_INTERVAL_MS,
+  PRESENCE_ONLINE_WINDOW_MS,
+  touchUserPresence,
   type TeamMemberRow,
   type InvitableRole,
   type InvitationStatus,

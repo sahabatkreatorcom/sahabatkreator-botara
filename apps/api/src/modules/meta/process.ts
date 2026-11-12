@@ -4,6 +4,7 @@ import {
   attributeContactToGrowthLink,
   decryptChannelSecret,
   fetchAndStoreMetaContactProfile,
+  recordContactReaction,
   recordMetaComment,
   recordMetaInboundMessage,
   recordMetaReferralContact,
@@ -12,6 +13,7 @@ import {
   resolveMetaAccountByExternalId,
   resolveWhatsAppAccountByPhoneNumberId,
   resolveWhatsAppAccountsByWabaId,
+  whatsAppProviderMessageId,
   type IntegrationLogInboundOutcome,
   type MetaAccountRef,
   type MetaProvider,
@@ -528,6 +530,7 @@ async function handleWhatsAppWebhook(
     if (
       parsed.messages.length === 0 &&
       parsed.statuses.length === 0 &&
+      parsed.reactions.length === 0 &&
       parsed.echoes.length === 0 &&
       parsed.templateStatuses.length === 0
     ) {
@@ -807,6 +810,9 @@ async function handleWhatsAppWebhook(
         providerMessageId: status.providerMessageId,
         status: status.status,
         graphErrorCode: status.errorCode,
+        // G13 butir 6: detail teknis resmi Meta ikut disimpan.
+        errorTitle: status.errorTitle,
+        errorDetails: status.errorDetails,
       });
       if (!applied) {
         await log({
@@ -842,6 +848,65 @@ async function handleWhatsAppWebhook(
         kind: applied.status === "failed" ? "message.failed" : "conversation.updated",
         tenantId: account.tenantId,
         conversationId: applied.conversationId,
+      });
+    }
+
+    // Reaksi emoji masuk (G13 butir 11): bukan pesan — dicatat sebagai
+    // baris message_reactions aktor kontak pada pesan target (dicari
+    // lewat id majemuk meta:<nomor>:<wamid>). Target tak dikenal →
+    // dicatat terlewat, tidak mengarang baris pesan.
+    for (const reaction of parsed.reactions) {
+      const account = await resolveAccount(reaction.phoneNumberId);
+      if (!account) {
+        if (scoped) continue;
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          signatureValid: true,
+          outcome: "unresolved_account",
+          summary: `reaction for unknown phone_number_id ${reaction.phoneNumberId}`,
+          payload,
+        });
+        continue;
+      }
+      if (scoped && account.tenantId !== deps.tenantScopeId) continue;
+      if (account.status !== "connected") {
+        await log({
+          direction: "in",
+          provider: "whatsapp",
+          tenantId: account.tenantId,
+          channelAccountId: account.id,
+          signatureValid: true,
+          outcome: "ignored_disconnected",
+          summary: `reaction for ${account.status} account`,
+          payload,
+        });
+        continue;
+      }
+      const recorded = await recordContactReaction(
+        deps.db,
+        { tenantId: account.tenantId },
+        {
+          targetProviderMessageId: whatsAppProviderMessageId(
+            reaction.phoneNumberId,
+            reaction.targetMessageId,
+          ),
+          senderExternalId: reaction.senderWaId,
+          emoji: reaction.emoji,
+        },
+      );
+      await log({
+        direction: "in",
+        provider: "whatsapp",
+        tenantId: account.tenantId,
+        channelAccountId: account.id,
+        signatureValid: true,
+        outcome: recorded.kind === "ok" ? "recorded" : "ignored_status_only",
+        summary:
+          recorded.kind === "ok"
+            ? `reaction ${reaction.emoji || "(removed)"} recorded`
+            : "reaction for unknown message",
+        payload,
       });
     }
 

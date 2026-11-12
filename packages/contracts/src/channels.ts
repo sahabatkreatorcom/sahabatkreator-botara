@@ -285,3 +285,37 @@ export const MetaWebhookInfoResponseSchema = z.object({
 export type MetaWebhookInfoResponse = z.infer<
   typeof MetaWebhookInfoResponseSchema
 >;
+
+/**
+ * Kesehatan nomor WhatsApp dari Graph (G13 butir 5) — snapshot LANGSUNG
+ * `GET /{phone_number_id}?fields=quality_rating,messaging_limit_tier,
+ * throughput,name_status,code_verification_status` saat kartu Saluran
+ * meminta (bukan data simpanan; `fetchedAt` adalah waktu ambilnya).
+ * Kejujuran keadaan:
+ * - `available: true`  → Meta mengembalikan objek nomor; bidang yang
+ *   tidak dikembalikan Meta untuk nomor ini tetap null ("tidak
+ *   diketahui" di UI), tidak dikarang.
+ * - `available: false` → pengambilan gagal / akun bukan WhatsApp /
+ *   belum terhubung; `errorCode` memuat kode aman (`meta_graph_<n>`,
+ *   `whatsapp_not_connected`, …) dan semua bidang data null.
+ */
+export const WhatsAppNumberHealthResponseSchema = z.object({
+  available: z.boolean(),
+  /** Rating kualitas Meta: 'GREEN' | 'YELLOW' | 'RED' | 'UNKNOWN' (apa adanya dari Graph). */
+  qualityRating: z.string().nullable(),
+  /** Tingkatan batas pesan Meta, mis. 'TIER_1K' | 'TIER_10K' | 'TIER_100K' | 'TIER_UNLIMITED'. */
+  messagingLimitTier: z.string().nullable(),
+  /** Level throughput nomor (objek Graph diringkas ke level-nya), bila dikembalikan. */
+  throughputLevel: z.string().nullable(),
+  /** Status nama tampil: 'APPROVED' | 'PENDING_REVIEW' | 'DECLINED' | …, bila dikembalikan. */
+  nameStatus: z.string().nullable(),
+  /** Status verifikasi kode dua langkah: 'VERIFIED' | 'NOT_VERIFIED', bila dikembalikan. */
+  codeVerificationStatus: z.string().nullable(),
+  /** Kode kegagalan aman saat available=false; null saat tersedia. */
+  errorCode: z.string().nullable(),
+  /** ISO waktu pengambilan snapshot ini di server. */
+  fetchedAt: z.string().datetime(),
+});
+export type WhatsAppNumberHealthResponse = z.infer<
+  typeof WhatsAppNumberHealthResponseSchema
+>;

@@ -56,3 +56,39 @@ export const AiUsageReportResponseSchema = z.object({
   }),
 });
 export type AiUsageReportResponse = z.infer<typeof AiUsageReportResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// G13 butir 8 — KPI waktu balas (median manusia vs AI, vs periode lalu)
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu keranjang waktu balas. Definisi "waktu balas" yang JUJUR dari
+ * stempel yang tersedia (messages.created_at): untuk tiap pesan MASUK,
+ * latensinya = selisih ke pesan KELUAR PERTAMA sesudahnya dalam
+ * percakapan yang sama; balasan dikreditkan ke kelas pengirim pesan
+ * keluar itu (`user` = manusia, `agent` = AI; `system` tidak dihitung).
+ * Pesan masuk tanpa balasan keluar tidak menyumbang sampel (median
+ * atas balasan yang TERJADI, bukan SLA). `medianSeconds` null bila
+ * sampel kosong — tidak ada angka karangan.
+ */
+export const ReplyTimeBucketSchema = z.object({
+  medianSeconds: z.number().nonnegative().nullable(),
+  samples: z.number().int().nonnegative(),
+});
+export type ReplyTimeBucket = z.infer<typeof ReplyTimeBucketSchema>;
+
+export const ReplyTimeSideSchema = z.object({
+  current: ReplyTimeBucketSchema,
+  previous: ReplyTimeBucketSchema,
+});
+export type ReplyTimeSide = z.infer<typeof ReplyTimeSideSchema>;
+
+export const ReplyTimeReportResponseSchema = z.object({
+  /** Lebar jendela periode berjalan (hari); periode pembanding sama lebar, tepat sebelumnya. */
+  days: z.number().int().positive(),
+  human: ReplyTimeSideSchema,
+  agent: ReplyTimeSideSchema,
+});
+export type ReplyTimeReportResponse = z.infer<
+  typeof ReplyTimeReportResponseSchema
+>;

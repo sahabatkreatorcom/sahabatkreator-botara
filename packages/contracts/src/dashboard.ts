@@ -55,10 +55,48 @@ export const DashboardActivitySchema = z.object({
 });
 export type DashboardActivity = z.infer<typeof DashboardActivitySchema>;
 
+/**
+ * Checklist penyiapan workspace (G13 butir 7) — langkah-langkah awal
+ * tenant baru, TIAP langkah diturunkan dari data sungguhan (bukan
+ * penanda "sudah dilihat" yang disimpan):
+ * - `channel`    : ≥1 akun channel berstatus connected.
+ * - `agent`      : ≥1 agen AI dibuat.
+ * - `conversation`: ≥1 percakapan ada (pelanggan pertama sudah menyapa
+ *                  lewat kanal mana pun).
+ * - `automation` : ≥1 automation dibuat (kata kunci/sequence/komentar).
+ * - `team`       : ≥2 member (pemilik tidak bekerja sendirian lagi).
+ * `allDone` benar → kartu checklist hilang permanen dari Dashboard
+ * (tidak ada status dismiss terpisah; keadaan data adalah sumbernya).
+ */
+export const DashboardSetupStepKeySchema = z.enum([
+  "channel",
+  "agent",
+  "conversation",
+  "automation",
+  "team",
+]);
+export type DashboardSetupStepKey = z.infer<typeof DashboardSetupStepKeySchema>;
+
+export const DashboardSetupStepSchema = z.object({
+  key: DashboardSetupStepKeySchema,
+  done: z.boolean(),
+});
+export type DashboardSetupStep = z.infer<typeof DashboardSetupStepSchema>;
+
+export const DashboardSetupSchema = z.object({
+  steps: z.array(DashboardSetupStepSchema),
+  completedCount: z.number().int().nonnegative(),
+  totalCount: z.number().int().positive(),
+  allDone: z.boolean(),
+});
+export type DashboardSetup = z.infer<typeof DashboardSetupSchema>;
+
 export const DashboardSummaryResponseSchema = z.object({
   attention: DashboardAttentionSchema,
   channels: z.array(DashboardChannelHealthSchema),
   activity: DashboardActivitySchema,
+  /** Checklist penyiapan dari keadaan nyata (G13 butir 7). */
+  setup: DashboardSetupSchema,
   /** ISO timestamp server saat ringkasan dihitung. */
   generatedAt: z.string(),
 });

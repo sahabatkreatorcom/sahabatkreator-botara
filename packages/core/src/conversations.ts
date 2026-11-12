@@ -13,6 +13,7 @@ import {
   type Conversation,
   type Database,
   type Message,
+  type MessageErrorDetail,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
@@ -1656,12 +1657,33 @@ export async function markOutboundMessageFailed(
   messageId: string,
   via: string,
   errorCode: string,
+  /**
+   * Detail teknis provider (G13 butir 6): deskripsi resmi + subkode +
+   * fbtrace_id dari body error Graph, disimpan ke `error_detail` agar
+   * panel pesan gagal menampilkan detail mentahnya di samping
+   * penjelasan bahasa awam. Undefined = jangan ubah kolom (pemanggil
+   * tanpa detail); null/objek = tulis apa adanya. Deskripsi dipotong
+   * 500 char di sini — satu-satunya penjaga panjang kolom jsonb ini.
+   */
+  errorDetail?: MessageErrorDetail | null,
 ): Promise<Message | null> {
   const safeCode = errorCode.slice(0, 128);
+  const safeDetail: MessageErrorDetail | null =
+    errorDetail === undefined
+      ? null
+      : {
+          description: errorDetail?.description?.slice(0, 500) ?? null,
+          subcode: errorDetail?.subcode ?? null,
+          fbtraceId: errorDetail?.fbtraceId?.slice(0, 128) ?? null,
+        };
   return withTenantDb(db, ctx.tenantId, async (tx) => {
     const [updated] = await tx
       .update(messages)
-      .set({ status: "failed", errorCode: safeCode })
+      .set({
+        status: "failed",
+        errorCode: safeCode,
+        ...(errorDetail === undefined ? {} : { errorDetail: safeDetail }),
+      })
       .where(
         and(
           eq(messages.tenantId, ctx.tenantId),
@@ -1737,6 +1759,8 @@ export interface FailedOutboundMessage {
   contactName: string | null;
   contentPreview: string | null;
   errorCode: string | null;
+  /** Detail teknis kegagalan (G13 butir 6); null bila tak ada. */
+  errorDetail: MessageErrorDetail | null;
   createdAt: Date;
 }
 
@@ -1834,6 +1858,7 @@ export async function listFailedOutboundMessages(
         contactName: contacts.name,
         contentText: messages.contentText,
         errorCode: messages.errorCode,
+        errorDetail: messages.errorDetail,
         createdAt: messages.createdAt,
       })
       .from(messages)
@@ -1864,6 +1889,7 @@ export async function listFailedOutboundMessages(
           ? r.contentText.slice(0, FAILED_CONTENT_PREVIEW_CHARS)
           : null,
         errorCode: r.errorCode,
+        errorDetail: r.errorDetail ?? null,
         createdAt: r.createdAt,
       })),
       nextCursor: hasMore
@@ -1943,7 +1969,7 @@ export async function retryFailedOutboundMessage(
     const previousErrorCode = row.message.errorCode;
     const [updated] = await tx
       .update(messages)
-      .set({ status: "queued", errorCode: null })
+      .set({ status: "queued", errorCode: null, errorDetail: null })
       .where(
         and(
           eq(messages.tenantId, ctx.tenantId),

@@ -48,8 +48,14 @@ export { DEFAULT_META_API_BASE, DEFAULT_META_GRAPH_API_VERSION };
 
 /** Error Graph API yang AMAN dicatat: status HTTP + kode Graph resmi. */
 export class WhatsAppGraphError extends GraphApiError {
-  constructor(status: number, graphCode: number | null, description: string) {
-    super("WhatsApp Graph API", status, graphCode, description);
+  constructor(
+    status: number,
+    graphCode: number | null,
+    description: string,
+    graphSubcode: number | null = null,
+    fbtraceId: string | null = null,
+  ) {
+    super("WhatsApp Graph API", status, graphCode, description, graphSubcode, fbtraceId);
     this.name = "WhatsAppGraphError";
   }
 }
@@ -74,6 +80,15 @@ export interface WhatsAppPhoneNumberProfile {
    * Graph tidak menyertakan field ini (mis. token tanpa izin baca status).
    */
   status: string | null;
+}
+
+/** Kesehatan nomor WhatsApp dari Graph (G13 butir 5) — semua nullable jujur. */
+export interface WhatsAppPhoneNumberHealth {
+  qualityRating: string | null;
+  messagingLimitTier: string | null;
+  throughputLevel: string | null;
+  nameStatus: string | null;
+  codeVerificationStatus: string | null;
 }
 
 /** Satu tombol komponen BUTTONS template (URL / QUICK_REPLY / PHONE_NUMBER / COPY_CODE …). */
@@ -213,9 +228,10 @@ export class WhatsAppCloudClient extends GraphHttpClient {
     status: number,
     graphCode: number | null,
     description: string,
-    _graphSubcode: number | null,
+    graphSubcode: number | null,
+    fbtraceId: string | null = null,
   ): WhatsAppGraphError {
-    return new WhatsAppGraphError(status, graphCode, description);
+    return new WhatsAppGraphError(status, graphCode, description, graphSubcode, fbtraceId);
   }
 
   /**
@@ -437,6 +453,72 @@ export class WhatsAppCloudClient extends GraphHttpClient {
           : null,
       status: typeof body.status === "string" ? body.status : null,
     };
+  }
+
+  /**
+   * Kesehatan nomor dari Graph (G13 butir 5):
+   * `GET /{phone_number_id}?fields=quality_rating,messaging_limit_tier,
+   * throughput,name_status,code_verification_status`. Semua bidang
+   * nullable JUJUR — Meta tidak selalu mengembalikan semuanya (nomor
+   * tanpa riwayat kirim bisa tanpa quality_rating); yang absen tetap
+   * null, bukan ditebak. Token/nomor ditolak → WhatsAppGraphError.
+   */
+  async getPhoneNumberHealth(
+    phoneNumberId: string,
+  ): Promise<WhatsAppPhoneNumberHealth> {
+    const body = await this.getJson<{
+      quality_rating?: string;
+      messaging_limit_tier?: string;
+      throughput?: { level?: string } | string;
+      name_status?: string;
+      code_verification_status?: string;
+    }>(
+      `${encodeURIComponent(phoneNumberId)}?fields=quality_rating,messaging_limit_tier,throughput,name_status,code_verification_status`,
+    );
+    const throughputLevel =
+      typeof body.throughput === "string"
+        ? body.throughput
+        : typeof body.throughput?.level === "string"
+          ? body.throughput.level
+          : null;
+    return {
+      qualityRating:
+        typeof body.quality_rating === "string" ? body.quality_rating : null,
+      messagingLimitTier:
+        typeof body.messaging_limit_tier === "string"
+          ? body.messaging_limit_tier
+          : null,
+      throughputLevel,
+      nameStatus: typeof body.name_status === "string" ? body.name_status : null,
+      codeVerificationStatus:
+        typeof body.code_verification_status === "string"
+          ? body.code_verification_status
+          : null,
+    };
+  }
+
+  /**
+   * Mengirim reaksi emoji ke satu pesan (G13 butir 11): Cloud API
+   * `type: "reaction"` — `messageId` adalah wamid pesan yang direaksi,
+   * `to` wa_id penerima (pengirim pesan asal). Emoji string KOSONG
+   * mencabut reaksi (semantik resmi Meta).
+   */
+  async sendReaction(input: {
+    phoneNumberId: string;
+    to: string;
+    messageId: string;
+    emoji: string;
+  }): Promise<void> {
+    await this.postJson(
+      `${encodeURIComponent(input.phoneNumberId)}/messages`,
+      {
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: input.to,
+        type: "reaction",
+        reaction: { message_id: input.messageId, emoji: input.emoji },
+      },
+    );
   }
 
   /**
@@ -795,12 +877,35 @@ export interface WhatsAppStatusEvent {
   status: "sent" | "delivered" | "read" | "failed";
   /** Kode error numerik Graph dari errors[0].code (status failed); null selain itu. */
   errorCode: number | null;
+  /** Judul resmi error Meta (errors[0].title) — detail teknis G13; null selain failed/berjudul. */
+  errorTitle: string | null;
+  /** Rincian resmi error Meta (errors[0].error_data.details / .message); null bila tak ada. */
+  errorDetails: string | null;
+  timestamp: number | null;
+}
+
+/**
+ * Satu reaksi emoji MASUK dari kontak (G13 butir 11) — pesan webhook
+ * bertipe `reaction`. BUKAN pesan percakapan: tidak menjadi baris
+ * `messages`, melainkan baris `message_reactions` aktor kontak pada
+ * pesan target. `emoji` string kosong = reaksi dicabut.
+ */
+export interface WhatsAppReactionEvent {
+  wabaId: string;
+  phoneNumberId: string;
+  /** wa_id kontak yang bereaksi. */
+  senderWaId: string;
+  /** Wamid pesan yang direaksi (reaction.message_id). */
+  targetMessageId: string;
+  emoji: string;
   timestamp: number | null;
 }
 
 export interface WhatsAppWebhookEvents {
   messages: WhatsAppInboundMessageEvent[];
   statuses: WhatsAppStatusEvent[];
+  /** Reaksi emoji masuk dari kontak (G13 butir 11). */
+  reactions: WhatsAppReactionEvent[];
   /**
    * Pesan yang dikirim dari aplikasi WhatsApp Business / perangkat
    * tertaut (`smb_message_echoes`, mode coexistence). Arahnya KELUAR
@@ -912,12 +1017,23 @@ interface WhatsAppWebhookPayload {
           audio?: WhatsAppMediaHolder;
           document?: WhatsAppMediaHolder;
           sticker?: WhatsAppMediaHolder;
+          /**
+           * Reaksi emoji (G13 butir 11): pesan bertipe `reaction`
+           * membawa target + emoji-nya di sini; emoji string kosong
+           * berarti reaksi dicabut.
+           */
+          reaction?: { message_id?: string; emoji?: string };
         }>;
         statuses?: Array<{
           id?: string;
           status?: string;
           timestamp?: string;
-          errors?: Array<{ code?: number; title?: string }>;
+          errors?: Array<{
+            code?: number;
+            title?: string;
+            message?: string;
+            error_data?: { details?: string };
+          }>;
         }>;
         /**
          * `smb_message_echoes`: pesan yang dikirim dari aplikasi WhatsApp
@@ -1180,6 +1296,7 @@ export function parseWhatsAppWebhookEvents(
   const result: WhatsAppWebhookEvents = {
     messages: [],
     statuses: [],
+    reactions: [],
     echoes: [],
     templateStatuses: [],
   };
@@ -1220,6 +1337,28 @@ export function parseWhatsAppWebhookEvents(
         if (typeof from !== "string" || !from) continue;
         if (typeof wamid !== "string" || !wamid) continue;
         const rawType = typeof message.type === "string" ? message.type : "";
+        // G13: reaksi emoji BUKAN pesan — pisahkan ke daftar reactions
+        // (target + emoji), jangan lahirkan baris pesan 'other' kosong.
+        if (rawType === "reaction") {
+          const targetId = message.reaction?.message_id;
+          if (typeof targetId === "string" && targetId) {
+            result.reactions.push({
+              wabaId,
+              phoneNumberId,
+              senderWaId: from,
+              targetMessageId: targetId,
+              emoji:
+                typeof message.reaction?.emoji === "string"
+                  ? message.reaction.emoji
+                  : "",
+              timestamp:
+                typeof message.timestamp === "string"
+                  ? Number(message.timestamp) || null
+                  : null,
+            });
+          }
+          continue;
+        }
         // G5: balasan tombol/daftar interaktif membawa id tombol
         // (payload) + judulnya — dinormalkan menjadi pesan teks
         // berpayload quick reply, BUKAN 'other' tanpa teks seperti
@@ -1293,6 +1432,21 @@ export function parseWhatsAppWebhookEvents(
           errorCode:
             state === "failed" && typeof firstError?.code === "number"
               ? firstError.code
+              : null,
+          errorTitle:
+            state === "failed" &&
+            typeof firstError?.title === "string" &&
+            firstError.title
+              ? firstError.title
+              : null,
+          errorDetails:
+            state === "failed"
+              ? typeof firstError?.error_data?.details === "string" &&
+                firstError.error_data.details
+                ? firstError.error_data.details
+                : typeof firstError?.message === "string" && firstError.message
+                  ? firstError.message
+                  : null
               : null,
           timestamp:
             typeof status.timestamp === "string"
