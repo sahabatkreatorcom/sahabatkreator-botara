@@ -800,6 +800,9 @@ export async function respondToInboundMessage(
         contactId: conversation.contactId,
         reason: `Batas balasan AI per percakapan tercapai (${replyCap} balasan dalam ${AGENT_CONVERSATION_REPLY_WINDOW_HOURS} jam)`,
         via: "conversation_cap",
+        // Ledakan pesan bersamaan yang menabrak cap bersama hanya
+        // boleh menghasilkan SATU handoff + ringkasan.
+        onlyIfEnabled: true,
       });
       return { responded: false, reason: "conversation_capped" };
     }

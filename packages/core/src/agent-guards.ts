@@ -298,6 +298,12 @@ export async function generateHandoffSummary(
 export interface HandoffToHumanResult {
   handedOff: boolean;
   summary: HandoffSummaryOutcome;
+  /**
+   * Bila handoff tidak terjadi: 'not_found' (percakapan tidak ada di
+   * tenant ini) atau 'already_handed_off' (khusus mode onlyIfEnabled:
+   * AI sudah mati — handoff lain sudah lebih dulu menyerahkan).
+   */
+  skipped?: "not_found" | "already_handed_off";
 }
 
 /**
@@ -323,20 +329,44 @@ export async function handoffConversationToHuman(
     contactId: string;
     reason: string;
     via: string;
+    /**
+     * Hanya serahkan bila AI masih aktif (UPDATE bersyarat
+     * agent_enabled=true). Dipakai pemicu cap: ledakan pesan yang
+     * sama-sama menabrak cap tidak boleh menghasilkan handoff +
+     * ringkasan berduplikat — yang pertama menyerahkan, sisanya
+     * melihat 'already_handed_off'. Jalur tool TIDAK memakainya
+     * (semantik lama: setiap panggilan tool tercatat sebagai handoff).
+     */
+    onlyIfEnabled?: boolean;
   },
 ): Promise<HandoffToHumanResult> {
-  const handedOff = await withTenantDb(db, input.tenantId, async (tx) => {
+  const outcome = await withTenantDb(db, input.tenantId, async (tx) => {
+    const conditions = [
+      eq(conversations.tenantId, input.tenantId),
+      eq(conversations.id, input.conversationId),
+    ];
+    if (input.onlyIfEnabled) {
+      conditions.push(eq(conversations.agentEnabled, true));
+    }
     const [row] = await tx
       .update(conversations)
       .set({ agentEnabled: false, updatedAt: new Date() })
-      .where(
-        and(
-          eq(conversations.tenantId, input.tenantId),
-          eq(conversations.id, input.conversationId),
-        ),
-      )
+      .where(and(...conditions))
       .returning({ id: conversations.id });
-    if (!row) return false;
+    if (!row) {
+      if (!input.onlyIfEnabled) return "not_found" as const;
+      const [exists] = await tx
+        .select({ id: conversations.id })
+        .from(conversations)
+        .where(
+          and(
+            eq(conversations.tenantId, input.tenantId),
+            eq(conversations.id, input.conversationId),
+          ),
+        )
+        .limit(1);
+      return exists ? ("already_handed_off" as const) : ("not_found" as const);
+    }
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
       actorType: "agent",
@@ -349,9 +379,15 @@ export async function handoffConversationToHuman(
         via: input.via,
       },
     });
-    return true;
+    return "handed_off" as const;
   });
-  if (!handedOff) return { handedOff: false, summary: { status: "skipped" } };
+  if (outcome !== "handed_off") {
+    return {
+      handedOff: false,
+      summary: { status: "skipped" },
+      skipped: outcome,
+    };
+  }
   if (!provider) return { handedOff: true, summary: { status: "skipped" } };
 
   const summary = await generateHandoffSummary(db, provider, {
