@@ -506,7 +506,14 @@ const bullWorker = new Worker<MainJobData>(
         // Fase 13C: pesan consent (kata opt-in/opt-out persis) adalah
         // perintah persetujuan yang tertangani sistem — tidak pernah
         // diteruskan ke agent sebagai pertanyaan biasa.
-        result.consentAction === null
+        result.consentAction === null &&
+        // G5: sinyal POSTBACK tidak pernah diteruskan ke agent —
+        // payload mesin (termasuk yang tidak dikenal aturan mana
+        // pun) bukan percakapan. Quick reply TIDAK diblokir di sini:
+        // tanpa pemicu QR yang cocok ia turun kelas menjadi teks
+        // biasa (judul tombolnya) dan agent boleh menjawabnya.
+        // Urutan lengkapnya: trigger-priority.ts di core.
+        result.triggerSignalKind !== "postback"
       ) {
         // Fase 9A — batching: job respond ditunda sebesar jendela
         // batch (env AGENT_BATCH_WINDOW_MS, default 5000). Job yang
