@@ -47,7 +47,13 @@ export const OrderResponseSchema = z.object({
   conversationId: z.string().uuid().nullable(),
   status: OrderStatusSchema,
   items: z.array(OrderItemResponseSchema),
-  /** Total server dari snapshot item (Rupiah penuh). */
+  /** Subtotal snapshot item SEBELUM diskon (Rupiah penuh) — G14. */
+  subtotalIdr: z.number().int().nonnegative(),
+  /** Diskon kode promo yang diterapkan (G14); 0 bila tanpa kode. */
+  discountAmountIdr: z.number().int().nonnegative(),
+  /** Snapshot teks kode diskon; null bila order tanpa kode (G14). */
+  discountCode: z.string().nullable(),
+  /** Total FINAL server sesudah diskon (Rupiah penuh). */
   totalIdr: z.number().int().nonnegative(),
   /** Tautan bayar tunggal order; null hanya untuk order warisan tanpa tautan. */
   paymentLinkId: z.string().uuid().nullable(),

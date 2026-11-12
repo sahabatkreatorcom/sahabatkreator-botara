@@ -273,6 +273,10 @@ export const ErrorCodeSchema = z.enum([
   "PIPELINE_HAS_DEALS",
   "STAGE_NOT_EMPTY",
   "PIPELINE_HAS_NO_STAGES",
+  // Gelombang G14: kode diskon — tidak ditemukan di tenant ini, atau
+  // teks kode yang sama sudah dipakai kode lain di tenant yang sama.
+  "DISCOUNT_CODE_NOT_FOUND",
+  "DISCOUNT_CODE_DUPLICATE",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

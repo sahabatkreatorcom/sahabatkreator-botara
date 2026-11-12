@@ -41,6 +41,7 @@ export * from "./message-errors";
 export * from "./broadcasts";
 export * from "./outbound-webhooks";
 export * from "./deals";
+export * from "./discount-codes";
 export * from "./whatsapp-templates";
 export * from "./flows";
 export * from "./experiments";

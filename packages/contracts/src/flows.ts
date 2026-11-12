@@ -459,8 +459,15 @@ export const FlowNodeConfigSchema = z.union([
     addedMessage: z.string().min(1).max(1000).optional(),
   }),
   // Fase 13F — cart_checkout: hanya pesan keranjang-kosong opsional.
+  // G14 menambah sumber kode diskon opsional: kode statis, ATAU nama
+  // field kustom kontak yang memuat kode dari pelanggan (mis. jawaban
+  // questionnaire bertarget custom:<field>), + pesan bila kode yang
+  // diberikan pelanggan ternyata tidak berlaku.
   z.object({
     emptyMessage: z.string().min(1).max(1000).optional(),
+    discountCode: z.string().min(1).max(64).optional(),
+    discountCodeField: z.string().min(1).max(128).optional(),
+    discountInvalidMessage: z.string().min(1).max(1000).optional(),
   }),
   // Fase 13G — book_appointment: bentuk kasar; keabsahan rinci
   // (layanan ada & aktif, rentang hari/percobaan) ditegakkan validasi
