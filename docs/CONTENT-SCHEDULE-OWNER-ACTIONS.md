@@ -158,32 +158,36 @@ hanya bisa diajukan dari akun pemilik:
 
 ## Gelombang 2 — YouTube
 
-1. **YouTube** — dibutuhkan: (a) proyek Google Cloud milik pemilik
-   dengan YouTube Data API v3 aktif dan klien OAuth yang sama dengan
-   yang dipakai Google Calendar (client ID/secret dikelola Panel
-   Admin / env platform — TIDAK perlu aplikasi kedua); (b) verifikasi
-   aplikasi OAuth Google untuk scope sensitif `youtube.upload` +
-   `youtube.readonly` (layar consent terverifikasi; selama belum
-   terverifikasi, Google membatasi consent dan video yang diunggah
-   lewat API dikunci `private`); (c) channel YouTube contoh milik
-   pemilik dan menghubungkan ulang Google dari dashboard (consent
-   inkremental menambahkan scope YouTube ke koneksi yang sudah ada —
-   callback otomatis menyinkronkan akun channel youtube dari koneksi
-   itu); (d) keputusan strategi kuota: kuota bawaan 10.000 unit/hari
-   per proyek dan `videos.insert` berharga 1.600 unit (≈ 6 video/hari
-   untuk SEMUA tenant bersama) — ajukan penambahan kuota ke Google
-   atau putuskan tenant besar membawa proyeknya sendiri (keputusan
+1. **YouTube** — dibutuhkan: (a) SEJAK pemisahan Google (lihat
+   bagian "Gelombang Pemisahan Google" di akhir): dianjurkan proyek
+   Google Cloud SENDIRI untuk YouTube dengan YouTube Data API v3
+   aktif + klien OAuth-nya sendiri, client ID/secret diisi di Panel
+   Admin grup Google bagian YouTube (pasangan bersama lama tetap
+   didukung sebagai fallback — koneksi lama tidak putus); (b)
+   verifikasi aplikasi OAuth Google (proyek YouTube) untuk scope
+   sensitif `youtube.upload` + `youtube.readonly` (layar consent
+   terverifikasi; selama belum terverifikasi, Google membatasi
+   consent dan video yang diunggah lewat API dikunci `private`);
+   (c) channel YouTube contoh milik pemilik dan menghubungkan
+   YouTube dari blok Google di Channels (tombol YouTube sendiri —
+   consent kini HANYA meminta scope youtube; callback otomatis
+   menyinkronkan akun channel youtube dari koneksi youtube itu,
+   lengkap dengan @handle + foto kanal); (d) keputusan strategi
+   kuota: kuota bawaan 10.000 unit/hari per proyek dan
+   `videos.insert` berharga 1.600 unit (≈ 6 video/hari untuk SEMUA
+   tenant bersama) — ajukan penambahan kuota ke Google atau
+   putuskan tenant besar membawa proyeknya sendiri (keputusan
    terbuka roadmap no. 2); (e) setelah verifikasi selesai, naikkan
    status privasi YouTube di Panel Admin (grup Content schedule) dari
    bawaan `private` ke `unlisted`/`public` bila video terjadwal harus
    langsung publik (env `YOUTUBE_PRIVACY_STATUS` hanya fallback).
    Untuk apa:
-   adapter menukar refresh token koneksi Google tenant menjadi access
-   token (scope diperiksa; koneksi lama menjawab
-   `youtube_scope_missing` sampai dihubungkan ulang), membaca kanal
-   dari `channels.list?mine=true` saat sinkronisasi, dan mengunggah
-   video dengan `videos.insert` resumable; kuota habis terpetakan ke
-   `youtube_quota_exceeded`. Sudah dimock: provider `youtube`
+   adapter menukar refresh token koneksi YOUTUBE tenant menjadi access
+   token (scope diperiksa; koneksi youtube tanpa scope menjawab
+   `youtube_scope_missing` sampai YouTube dihubungkan ulang),
+   membaca kanal dari `channels.list?mine=true` saat sinkronisasi,
+   dan mengunggah video dengan `videos.insert` resumable; kuota
+   habis terpetakan ke `youtube_quota_exceeded`. Sudah dimock: provider `youtube`
    ditambahkan end-to-end sebatas akun/sasaran linimasa + capability
    + adapter (migrasi 0016), scope ditambahkan ke consent Google yang
    ada, sinkronisasi akun + gerbang scope diuji di core
@@ -263,13 +267,16 @@ hanya bisa diajukan dari akun pemilik:
    selama itu publikasi nyata menjawab
    `google_business_permission_denied`; prasyarat ini sudah tercatat
    sejak Gelombang 0 dan merupakan gerbang terpanjang gelombang
-   ini; (b) verifikasi aplikasi OAuth Google mencakup scope
-   `business.manage` yang kini ikut diminta consent Google yang
-   sama; (c) akun Google pemilik yang mengelola lokasi bisnis
-   contoh, lalu menghubungkan ulang Google dari dashboard (consent
-   inkremental menambahkan scope business ke koneksi yang sudah
-   ada — callback otomatis menyinkronkan semua lokasi akun itu
-   menjadi akun lokasi `google_business`, satu sasaran per lokasi);
+   ini; SEJAK pemisahan Google, pengajuan ini sebaiknya diajukan
+   dari proyek Business SENDIRI (lihat bagian "Gelombang Pemisahan
+   Google") agar persetujuan + kuotanya tidak bercampur layanan
+   lain; (b) verifikasi aplikasi OAuth Google (proyek Business)
+   mencakup scope `business.manage` yang kini diminta oleh consent
+   layanan business sendiri; (c) akun Google pemilik yang mengelola
+   lokasi bisnis contoh, lalu menghubungkan Google Business dari
+   blok Google di Channels (tombol Google Business sendiri —
+   callback otomatis menyinkronkan semua lokasi akun itu menjadi
+   akun lokasi `google_business`, satu sasaran per lokasi);
    (d) infrastruktur URL media publik (base URL-nya diisi di Panel
    Admin grup Content schedule; env `POST_MEDIA_PUBLIC_BASE_URL`
    hanya fallback; sama seperti Instagram) bila postingan lokal
@@ -434,17 +441,69 @@ masing-masing). Yang tersisa murni tindakan pemilik per platform:
    App password tidak kedaluwarsa; cabut dari Bluesky bila tidak
    dipakai lagi (akun akan gagal terbit dan perlu dihubungkan
    ulang dengan app password baru).
-5. **Google (YouTube + Google Business)** — tidak ada OAuth baru:
-   blok Google di Channels memakai koneksi Google yang sama
-   seperti Kalender. Tindakan pemilik tetap seperti Gelombang
-   2/3: verifikasi aplikasi Google + scope sensitif
-   (youtube.upload, business.manage) agar consent tidak ditolak
-   Google, lalu hubungkan akun Google contoh dari Channels atau
-   Kalender — kanal YouTube + lokasi bisnis tersinkron otomatis
-   sebagai akun channel.
+5. **Google (YouTube + Google Business)** — TERTULIS ULANG oleh
+   gelombang Pemisahan Google di bawah: blok Google di Channels
+   kini TIGA koneksi terpisah (Calendar / YouTube / Google
+   Business), masing-masing tombol Hubungkan sendiri. Tindakan
+   pemilik: lihat bagian "Gelombang Pemisahan Google".
+
+## Gelombang Pemisahan Google — OAuth per layanan
+
+Keputusan pemilik 2026-11-12: OAuth Google DIPISAH menjadi tiga
+koneksi mandiri agar billing/kuota/persetujuan API per layanan
+tidak saling menyandera (insiden pemicu: API yang belum aktif di
+proyek bersama membuat Calendar 502 dan sinkron YouTube/GBP gagal
+bersama). Yang SUDAH dibangun & terverifikasi (verify:
+google-channels per layanan, 10 grup; migrasi 0023):
+
+- **Tiga koneksi per tenant** (`google_connections`): Calendar,
+  YouTube, Business — masing-masing consent SEMPIT (calendar:
+  calendar.events+readonly; youtube: youtube.upload+readonly;
+  business: business.manage) dan tombol Hubungkan sendiri di blok
+  Google halaman Channels; Calendar juga tetap terhubung dari
+  halaman Janji Temu. Satu callback URI yang sama untuk ketiganya:
+  `https://botara.my.id/api/google/oauth/callback`.
+- **Koneksi lama TIDAK putus**: migrasi menyemai koneksi gabungan
+  yang ada menjadi baris calendar (selalu), youtube, dan business
+  (bila scope lama mencakup) dengan token yang sama; tabel lama
+  dipertahankan sebagai arsip. Refresh selalu memakai klien
+  layanan penerbit token.
+- **Kredensial per layanan di Panel Admin** (grup Google): pasangan
+  Client ID/Secret untuk Calendar, YouTube, dan Business, di luar
+  pasangan Google bersama yang lama. Rantai resolusi per layanan:
+  panel per-layanan → pasangan bersama → env per-layanan → env
+  bersama (pasangan tidak pernah dicampur antar sumber).
+- **Avatar kanal YouTube** kini diambil saat sinkron (thumbnail +
+  @handle kanal tersimpan); akun lama dilengkapi otomatis oleh
+  backfill saat halaman Channels dibuka — tanpa reconnect.
+
+Tindakan pemilik yang dianjurkan (billing bersih):
+
+1. Buat (atau tetapkan) **tiga proyek Google Cloud terpisah** —
+   satu per layanan — aktifkan API-nya masing-masing: Calendar API
+   (proyek Calendar), YouTube Data API v3 (proyek YouTube), dan
+   Business Profile API + ajukan aksesnya (proyek Business).
+2. Di SETIAP proyek buat klien OAuth (Web application) dan
+   daftarkan redirect URI yang SAMA di ketiganya:
+   `https://botara.my.id/api/google/oauth/callback`.
+3. Isi Client ID/Secret tiap proyek ke Panel Admin grup Google
+   pada baris layanannya (Calendar / YouTube / Business). Bila
+   hanya memakai SATU proyek bersama seperti sekarang, biarkan
+   baris per-layanan kosong — pasangan Google bersama tetap dipakai
+   semua layanan sebagai fallback, dan pemisahan koneksi/consent
+   tetap berlaku penuh.
+4. Verifikasi OAuth per proyek mengikuti scope layanannya
+   (YouTube: youtube.upload; Business: business.manage) — proyek
+   yang belum terverifikasi membatasi consent pada layanannya
+   sendiri saja, tidak lagi menyandera layanan lain.
+5. Setelah kredensial per-layanan terisi, hubungkan ulang tiap
+   layanan sekali dari blok Google di Channels (tombol layanan
+   masing-masing) agar token diterbitkan oleh proyek yang benar;
+   koneksi hasil penyemaian tetap berfungsi sampai itu dilakukan.
 
 ---
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
-content schedule) + gelombang Semua OAuth. Entri baru hanya
-ditambahkan bila ada pengembangan lanjutan di luar roadmap._
+content schedule) + gelombang Semua OAuth + Pemisahan Google.
+Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
+luar roadmap._
