@@ -38,6 +38,7 @@ export type AdminCardId =
   | "google-calendar"
   | "youtube"
   | "google-business"
+  | "google-ads"
   | "google-shared"
   | "r2"
   | "openrouter"
@@ -95,6 +96,7 @@ export const OAUTH_CALLBACK_PATHS = {
   googleCalendar: "/api/oauth/google_calendar/callback",
   youtube: "/api/oauth/youtube/callback",
   googleBusiness: "/api/oauth/google_business/callback",
+  googleAds: "/api/oauth/google_ads/callback",
 } as const;
 
 /** Path webhook kanonis per platform (gelombang URL). */
@@ -192,6 +194,27 @@ export const ADMIN_CARDS: readonly AdminCardSpec[] = [
       "google_business_client_secret",
     ],
     callbackPath: OAUTH_CALLBACK_PATHS.googleBusiness,
+  },
+  {
+    // G16: layanan Google 'ads' (konversi iklan dari flow). Pasangan
+    // klien OAuth-nya mengikuti pola per-layanan (fallback pasangan
+    // bersama tetap berlaku); `google_ads_developer_token` adalah
+    // kredensial PLATFORM murni — diterbitkan Google untuk akun
+    // manager milik platform dan wajib ada di setiap panggilan Ads
+    // API; tanpanya kartu belum aktif walau pasangan klien lengkap
+    // (perhitungan statusnya ditimpa halaman, pola layanan Google).
+    id: "google-ads",
+    fields: [
+      pub("google_ads_client_id"),
+      sec("google_ads_client_secret"),
+      sec("google_ads_developer_token"),
+    ],
+    requiredKeys: [
+      "google_ads_client_id",
+      "google_ads_client_secret",
+      "google_ads_developer_token",
+    ],
+    callbackPath: OAUTH_CALLBACK_PATHS.googleAds,
   },
   {
     // Pasangan klien OAuth Google BERSAMA — fallback ketiga layanan di

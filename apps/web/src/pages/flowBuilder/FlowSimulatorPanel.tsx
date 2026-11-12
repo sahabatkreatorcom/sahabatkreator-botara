@@ -83,6 +83,7 @@ const EFFECT_KIND_KEYS: Record<string, string> = {
   catalog_message: "flows.simEffectCatalogMessage",
   checkout: "flows.simEffectCheckout",
   appointment_offer: "flows.simEffectAppointmentOffer",
+  ad_conversion: "flows.simEffectAdConversion",
   park: "flows.simEffectPark",
 };
 
@@ -242,6 +243,8 @@ export function FlowSimulatorPanel({
         return String(d.title ?? "");
       case "move_deal_stage":
         return String(d.dealStageId ?? "");
+      case "ad_conversion":
+        return `${String(d.platform ?? "")} · ${String(d.eventName ?? "")}`.trim();
       case "goto_flow":
         return String(d.targetFlowId ?? "");
       case "http_request":

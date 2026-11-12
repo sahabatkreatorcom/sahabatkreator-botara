@@ -6,7 +6,7 @@
  * memecahnya per tipe akan menyebarkan satu kontrak ke belasan berkas
  * tanpa memisahkan tanggung jawab apa pun.
  */
-import { type AppointmentServiceResponse, type AutomationResponse, type FlowResponse, type ProductResponse, type TeamMemberResponse } from "@sahabat-kreator/contracts";
+import { META_STANDARD_EVENT_NAMES, type AppointmentServiceResponse, type AutomationResponse, type FlowResponse, type ProductResponse, type TeamMemberResponse } from "@sahabat-kreator/contracts";
 import { useMemo } from "react";
 import { FLOW_NODE_LABEL_KEYS } from "../../flows/graphModel";
 import { CUSTOM_FIELD_OPTION_LABEL, KNOWN_STAGES, stageLabel } from "./graph";
@@ -707,6 +707,110 @@ export function NodeConfigPanel({
                 </option>
               ))}
             </select>
+          </div>
+        </>
+      ) : null}
+
+      {type === "send_ad_conversion" ? (
+        <>
+          <p className="text-xs text-muted">{t("flows.adConversionNote")}</p>
+          <div>
+            <label className={labelClass} htmlFor="cfg-ad-platform">
+              {t("flows.adPlatformLabel")}
+            </label>
+            <select
+              id="cfg-ad-platform"
+              className={inputClass}
+              disabled={readOnly}
+              value={str(config.platform) || "meta"}
+              onChange={(e) => set({ platform: e.target.value })}
+            >
+              <option value="meta">{t("flows.adPlatformMeta")}</option>
+              <option value="google">{t("flows.adPlatformGoogle")}</option>
+            </select>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-ad-event">
+              {str(config.platform) === "google"
+                ? t("flows.adEventNameLabelGoogle")
+                : t("flows.adEventNameLabel")}
+            </label>
+            <input
+              id="cfg-ad-event"
+              className={inputClass}
+              disabled={readOnly}
+              placeholder={t("flows.adEventNamePlaceholder")}
+              value={str(config.eventName)}
+              onChange={(e) => set({ eventName: e.target.value })}
+              list={
+                str(config.platform) === "google"
+                  ? undefined
+                  : "cfg-ad-event-suggestions"
+              }
+            />
+            {str(config.platform) === "google" ? null : (
+              <datalist id="cfg-ad-event-suggestions">
+                {META_STANDARD_EVENT_NAMES.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            )}
+            <p className="mt-1 text-xs text-muted">
+              {str(config.platform) === "google"
+                ? t("flows.adEventNameHintGoogle")
+                : t("flows.adEventNameHint")}
+            </p>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-ad-value">
+              {t("flows.adValueLabel")}
+            </label>
+            <input
+              id="cfg-ad-value"
+              className={inputClass}
+              disabled={readOnly}
+              type="number"
+              min={0}
+              step="any"
+              value={
+                typeof config.value === "number" ? String(config.value) : ""
+              }
+              onChange={(e) => {
+                const raw = e.target.value.trim();
+                const parsed = raw === "" ? undefined : Number(raw);
+                set({
+                  value:
+                    parsed !== undefined &&
+                    Number.isFinite(parsed) &&
+                    parsed >= 0
+                      ? parsed
+                      : undefined,
+                });
+              }}
+            />
+            <p className="mt-1 text-xs text-muted">
+              {t("flows.adValueHint")}
+            </p>
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-ad-currency">
+              {t("flows.adCurrencyLabel")}
+            </label>
+            <input
+              id="cfg-ad-currency"
+              className={inputClass}
+              disabled={readOnly}
+              placeholder="IDR"
+              maxLength={3}
+              value={str(config.currency)}
+              onChange={(e) =>
+                set({
+                  currency: e.target.value
+                    ? e.target.value.toUpperCase()
+                    : undefined,
+                })
+              }
+            />
           </div>
         </>
       ) : null}

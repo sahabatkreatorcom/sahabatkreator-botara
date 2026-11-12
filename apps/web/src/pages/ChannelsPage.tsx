@@ -471,7 +471,9 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
           ? "channels.googleYoutubeConnectedNotice"
           : googleService === "business"
             ? "channels.googleBusinessConnectedNotice"
-            : "channels.googleCalendarConnectedNotice";
+            : googleService === "ads"
+              ? "channels.googleAdsConnectedNotice"
+              : "channels.googleCalendarConnectedNotice";
       setOauthConnectedNotice(t(noticeKey));
       void load();
       if (tenantId) {

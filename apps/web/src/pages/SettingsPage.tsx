@@ -8,6 +8,8 @@ import {
 import {
   API_KEY_SCOPES,
   OUTBOUND_WEBHOOK_EVENT_TYPES,
+  type AdConnectionsResponse,
+  type AdConversionEventResponse,
   type ApiKeyResponse,
   type ApiKeyScope,
   type CreatedApiKeyResponse,
@@ -22,6 +24,7 @@ import {
   type PaymentProvider,
   type PaymentSettingsResponse,
   type TeamMemberResponse,
+  type UpdateAdConnectionsRequest,
   type UpdatePaymentSettingsRequest,
   type WorkSchedule,
 } from "@sahabat-kreator/contracts";
@@ -535,6 +538,16 @@ export function SettingsPage({ t, locale }: SettingsPageProps) {
         <PaymentsSection t={t} tenantId={tenantId} canManage={canManage} />
       ) : null}
 
+      {/* G16: seksi Konversi Iklan — koneksi iklan tenant untuk node flow send_ad_conversion */}
+      {tenantId ? (
+        <AdConversionsSection
+          t={t}
+          locale={locale}
+          tenantId={tenantId}
+          canManage={canManage}
+        />
+      ) : null}
+
       <section className="mt-10">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -697,6 +710,408 @@ export function SettingsPage({ t, locale }: SettingsPageProps) {
         />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Seksi Konversi Iklan (G16): koneksi iklan MILIK TENANT untuk node
+ * flow `send_ad_conversion`. Meta: dataset ID + access token CAPI
+ * (token TIDAK PERNAH ditampilkan — hanya penanda terkonfigurasi;
+ * kolom kosong saat simpan = pertahankan, tombol hapus = hapus) +
+ * test event code. Google Ads: customer ID + conversion action ID +
+ * tombol Hubungkan akun Google layanan 'ads' (consent OAuth terpisah;
+ * developer token adalah urusan platform, di sini hanya statusnya).
+ * Riwayat pengiriman konversi terbaru ditampilkan sebagai status
+ * operasional (terkirim/gagal/dilewati + alasannya).
+ */
+function AdConversionsSection({
+  t,
+  locale,
+  tenantId,
+  canManage,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  canManage: boolean;
+}) {
+  const [view, setView] = useState<AdConnectionsResponse | null>(null);
+  const [events, setEvents] = useState<AdConversionEventResponse[]>([]);
+  const [metaDatasetId, setMetaDatasetId] = useState("");
+  const [metaTestEventCode, setMetaTestEventCode] = useState("");
+  const [metaAccessToken, setMetaAccessToken] = useState("");
+  const [clearToken, setClearToken] = useState(false);
+  const [googleCustomerId, setGoogleCustomerId] = useState("");
+  const [googleConversionActionId, setGoogleConversionActionId] =
+    useState("");
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState(false);
+  const [connectError, setConnectError] = useState<string | null>(null);
+
+  const applyView = useCallback((v: AdConnectionsResponse) => {
+    setView(v);
+    setMetaDatasetId(v.meta.datasetId ?? "");
+    setMetaTestEventCode(v.meta.testEventCode ?? "");
+    setGoogleCustomerId(v.google.customerId ?? "");
+    setGoogleConversionActionId(v.google.conversionActionId ?? "");
+  }, []);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const [v, ev] = await Promise.all([
+        api.adConnections.get(tenantId),
+        api.adConnections.events(tenantId).catch(() => ({ events: [] })),
+      ]);
+      applyView(v);
+      setEvents(ev.events);
+    } catch {
+      setLoadError(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [tenantId, applyView]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const save = async (e: FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setSaved(false);
+    setSaveError(null);
+    try {
+      const input: UpdateAdConnectionsRequest = {
+        metaDatasetId,
+        metaTestEventCode,
+        googleCustomerId,
+        googleConversionActionId,
+      };
+      if (clearToken) input.metaAccessToken = "";
+      else if (metaAccessToken) input.metaAccessToken = metaAccessToken;
+      const v = await api.adConnections.update(tenantId, input);
+      applyView(v);
+      setMetaAccessToken("");
+      setClearToken(false);
+      setSaved(true);
+    } catch (err) {
+      setSaveError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const connectGoogleAds = async () => {
+    setConnecting(true);
+    setConnectError(null);
+    try {
+      const { url } = await api.appointments.googleServiceConnect(
+        tenantId,
+        "ads",
+      );
+      window.location.href = url;
+    } catch (err) {
+      setConnectError(translateApiError(t, err));
+      setConnecting(false);
+    }
+  };
+
+  const statusChip = (ready: boolean) => (
+    <span
+      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+        ready ? "bg-accent/15 text-accent" : "bg-elevated text-muted"
+      }`}
+    >
+      {ready
+        ? t("settings.adConversions.readyLabel")
+        : t("settings.adConversions.notReadyLabel")}
+    </span>
+  );
+
+  const eventStatusLabel = (ev: AdConversionEventResponse): string => {
+    switch (ev.status) {
+      case "sent":
+        return t("settings.adConversions.eventSent");
+      case "failed":
+        return t("settings.adConversions.eventFailed");
+      case "skipped":
+        return t("settings.adConversions.eventSkipped");
+      default:
+        return t("settings.adConversions.eventQueued");
+    }
+  };
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-base font-semibold text-ink">
+        {t("settings.adConversions.title")}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        {t("settings.adConversions.body")}
+      </p>
+      {!canManage ? (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+          {t("settings.adminOnlyNote")}
+        </p>
+      ) : null}
+      {loading ? (
+        <p className="mt-4 text-sm text-muted">{t("common.loading")}</p>
+      ) : loadError || !view ? (
+        <p className="mt-4 text-sm text-danger">
+          {t("settings.adConversions.loadError")}
+        </p>
+      ) : (
+        <form onSubmit={save} className="mt-4 max-w-2xl">
+          <div className="rounded-xl border border-line bg-surface p-4">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-ink">
+              {t("settings.adConversions.metaTitle")}
+              {statusChip(view.meta.ready)}
+            </h3>
+            <p className="mt-1 text-sm text-muted">
+              {t("settings.adConversions.metaBody")}
+            </p>
+            <div className="mt-3 grid gap-3">
+              <div>
+                <label
+                  htmlFor="ad-meta-dataset"
+                  className="mb-1 block text-sm font-medium text-ink"
+                >
+                  {t("settings.adConversions.metaDatasetLabel")}
+                </label>
+                <input
+                  id="ad-meta-dataset"
+                  value={metaDatasetId}
+                  onChange={(e) => setMetaDatasetId(e.target.value)}
+                  disabled={!canManage}
+                  className={inputClassName}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="ad-meta-token"
+                  className="mb-1 flex items-center gap-2 text-sm font-medium text-ink"
+                >
+                  {t("settings.adConversions.metaTokenLabel")}
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      view.meta.accessTokenConfigured && !clearToken
+                        ? "bg-accent/15 text-accent"
+                        : "bg-elevated text-muted"
+                    }`}
+                  >
+                    {view.meta.accessTokenConfigured && !clearToken
+                      ? t("settings.adConversions.configuredLabel")
+                      : t("settings.adConversions.notConfiguredLabel")}
+                  </span>
+                </label>
+                <PasswordInput
+                  t={t}
+                  id="ad-meta-token"
+                  value={metaAccessToken}
+                  onChange={(e) => {
+                    setMetaAccessToken(e.target.value);
+                    setClearToken(false);
+                  }}
+                  disabled={!canManage}
+                  placeholder={t(
+                    "settings.adConversions.metaTokenPlaceholder",
+                  )}
+                  autoComplete="off"
+                />
+                {view.meta.accessTokenConfigured && canManage ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClearToken(true);
+                      setMetaAccessToken("");
+                    }}
+                    className="mt-1 text-xs font-medium text-danger"
+                  >
+                    {t("settings.adConversions.clearTokenButton")}
+                  </button>
+                ) : null}
+                {clearToken ? (
+                  <p className="mt-1 text-xs text-danger">
+                    {t("settings.adConversions.clearTokenNote")}
+                  </p>
+                ) : null}
+              </div>
+              <div>
+                <label
+                  htmlFor="ad-meta-test-code"
+                  className="mb-1 block text-sm font-medium text-ink"
+                >
+                  {t("settings.adConversions.metaTestCodeLabel")}
+                </label>
+                <input
+                  id="ad-meta-test-code"
+                  value={metaTestEventCode}
+                  onChange={(e) => setMetaTestEventCode(e.target.value)}
+                  disabled={!canManage}
+                  className={inputClassName}
+                  autoComplete="off"
+                />
+                <p className="mt-1 text-xs text-muted">
+                  {t("settings.adConversions.metaTestCodeHint")}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-xl border border-line bg-surface p-4">
+            <h3 className="flex items-center gap-2 text-sm font-bold text-ink">
+              {t("settings.adConversions.googleTitle")}
+              {statusChip(view.google.ready)}
+            </h3>
+            <p className="mt-1 text-sm text-muted">
+              {t("settings.adConversions.googleBody")}
+            </p>
+            <div className="mt-3 grid gap-3">
+              <div>
+                <span className="mb-1 block text-sm font-medium text-ink">
+                  {t("settings.adConversions.googleAccountLabel")}
+                </span>
+                {view.google.adsAccountConnected ? (
+                  <p className="text-sm text-ink">
+                    {t("settings.adConversions.googleConnectedAs", {
+                      email: view.google.adsAccountEmail ?? "",
+                    })}
+                  </p>
+                ) : (
+                  <p className="text-sm text-muted">
+                    {t("settings.adConversions.googleNotConnected")}
+                  </p>
+                )}
+                {canManage ? (
+                  <button
+                    type="button"
+                    onClick={() => void connectGoogleAds()}
+                    disabled={connecting}
+                    className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {view.google.adsAccountConnected
+                      ? t("settings.adConversions.googleReconnectButton")
+                      : t("settings.adConversions.googleConnectButton")}
+                  </button>
+                ) : null}
+                {connectError ? (
+                  <p className="mt-2 text-sm text-danger">{connectError}</p>
+                ) : null}
+                <p className="mt-1 text-xs text-muted">
+                  {t("settings.adConversions.googleDeveloperTokenNote", {
+                    status: view.google.developerTokenConfigured
+                      ? t("settings.adConversions.configuredLabel")
+                      : t("settings.adConversions.notConfiguredLabel"),
+                  })}
+                </p>
+              </div>
+              <div>
+                <label
+                  htmlFor="ad-google-customer"
+                  className="mb-1 block text-sm font-medium text-ink"
+                >
+                  {t("settings.adConversions.googleCustomerLabel")}
+                </label>
+                <input
+                  id="ad-google-customer"
+                  value={googleCustomerId}
+                  onChange={(e) => setGoogleCustomerId(e.target.value)}
+                  disabled={!canManage}
+                  className={inputClassName}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="ad-google-action"
+                  className="mb-1 block text-sm font-medium text-ink"
+                >
+                  {t("settings.adConversions.googleActionLabel")}
+                </label>
+                <input
+                  id="ad-google-action"
+                  value={googleConversionActionId}
+                  onChange={(e) =>
+                    setGoogleConversionActionId(e.target.value)
+                  }
+                  disabled={!canManage}
+                  className={inputClassName}
+                  autoComplete="off"
+                />
+              </div>
+            </div>
+          </div>
+
+          <FieldError message={saveError} />
+          {saved ? (
+            <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-ink">
+              {t("settings.adConversions.savedLabel")}
+            </p>
+          ) : null}
+          {canManage ? (
+            <button
+              type="submit"
+              disabled={saving}
+              className="mt-4 rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {t("settings.adConversions.saveButton")}
+            </button>
+          ) : null}
+        </form>
+      )}
+
+      {events.length > 0 ? (
+        <div className="mt-6 max-w-2xl">
+          <h3 className="text-sm font-bold text-ink">
+            {t("settings.adConversions.eventsTitle")}
+          </h3>
+          <ul className="mt-2 space-y-2">
+            {events.map((ev) => (
+              <li
+                key={ev.id}
+                className="flex flex-wrap items-center gap-2 rounded-xl bg-surface px-3 py-2 text-sm"
+              >
+                <span className="font-semibold text-ink">
+                  {ev.platform === "meta" ? "Meta" : "Google Ads"}
+                </span>
+                <span className="text-ink">{ev.eventName}</span>
+                <span
+                  className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                    ev.status === "sent"
+                      ? "bg-accent/15 text-accent"
+                      : ev.status === "queued"
+                        ? "bg-elevated text-muted"
+                        : "bg-elevated text-danger"
+                  }`}
+                >
+                  {eventStatusLabel(ev)}
+                </span>
+                {ev.value !== null ? (
+                  <span className="text-muted">
+                    {ev.value} {ev.currency ?? ""}
+                  </span>
+                ) : null}
+                {ev.errorCode ? (
+                  <span className="font-mono text-xs text-danger">
+                    {ev.errorCode}
+                  </span>
+                ) : null}
+                <span className="text-xs text-muted">
+                  {formatDateTime(ev.createdAt, locale)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
   );
 }
 

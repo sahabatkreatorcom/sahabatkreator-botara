@@ -227,6 +227,9 @@ import type {
   ProductListResponse,
   ProductResponse,
   PublicPaymentResponse,
+  AdConnectionsResponse,
+  AdConversionEventListResponse,
+  UpdateAdConnectionsRequest,
   PaymentSettingsResponse,
   PaymentSettingsTestResponse,
   UpdatePaymentSettingsRequest,
@@ -3410,6 +3413,32 @@ export const api = {
       return request<PaymentSettingsTestResponse>(
         `/api/tenants/${tenantId}/payment-settings/test`,
         { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+  },
+  adConnections: {
+    /** GET /api/tenants/:tenantId/ad-connections → status koneksi iklan (tanpa nilai token). */
+    get(tenantId: string): Promise<AdConnectionsResponse> {
+      return request<AdConnectionsResponse>(
+        `/api/tenants/${tenantId}/ad-connections`,
+        { method: "GET" },
+      );
+    },
+    /** PUT /api/tenants/:tenantId/ad-connections → simpan (token dienkripsi server). */
+    update(
+      tenantId: string,
+      input: UpdateAdConnectionsRequest,
+    ): Promise<AdConnectionsResponse> {
+      return request<AdConnectionsResponse>(
+        `/api/tenants/${tenantId}/ad-connections`,
+        { method: "PUT", body: JSON.stringify(input) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/ad-connections/events → riwayat pengiriman konversi. */
+    events(tenantId: string): Promise<AdConversionEventListResponse> {
+      return request<AdConversionEventListResponse>(
+        `/api/tenants/${tenantId}/ad-connections/events`,
+        { method: "GET" },
       );
     },
   },

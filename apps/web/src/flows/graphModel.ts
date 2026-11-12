@@ -44,6 +44,7 @@ export const FLOW_NODE_LABEL_KEYS: Record<FlowNodeType, TranslationKey> = {
   show_catalog: "flows.nodeShowCatalog",
   cart_checkout: "flows.nodeCartCheckout",
   book_appointment: "flows.nodeBookAppointment",
+  send_ad_conversion: "flows.nodeSendAdConversion",
 };
 
 /** Tipe yang boleh ditambahkan dari palet (trigger dibuat otomatis & tunggal). */
@@ -70,6 +71,7 @@ export const ADDABLE_NODE_TYPES: FlowNodeType[] = [
   "show_catalog",
   "cart_checkout",
   "book_appointment",
+  "send_ad_conversion",
 ];
 
 /**
@@ -148,6 +150,8 @@ export function defaultNodeConfig(
       return { title: "", dealStageId: "" };
     case "move_deal_stage":
       return { dealStageId: "" };
+    case "send_ad_conversion":
+      return { platform: "meta", eventName: "Lead" };
     case "set_field":
       return { field: "name", value: "" };
     case "http_request":
@@ -329,6 +333,12 @@ export function summarizeNodeConfig(
       if (!id) return t("flows.summaryNotConfigured");
       const stage = resolvers?.dealStageName?.(id) ?? `${id.slice(0, 8)}…`;
       return t("flows.summaryMoveDealStage", { stage });
+    }
+    case "send_ad_conversion": {
+      const eventName = asString(c.eventName);
+      if (!eventName) return t("flows.summaryNotConfigured");
+      const platform = c.platform === "google" ? "Google Ads" : "Meta";
+      return t("flows.summaryAdConversion", { platform, eventName });
     }
     case "set_field": {
       const field = asString(c.field);

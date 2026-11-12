@@ -157,6 +157,11 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   google_youtube_client_secret: "admin.googleYoutubeClientSecretLabel",
   google_business_client_id: "admin.googleBusinessClientIdLabel",
   google_business_client_secret: "admin.googleBusinessClientSecretLabel",
+  // G16: layanan Google Ads — klien OAuth per layanan + developer
+  // token milik platform (kartu Google Ads).
+  google_ads_client_id: "admin.googleAdsClientIdLabel",
+  google_ads_client_secret: "admin.googleAdsClientSecretLabel",
+  google_ads_developer_token: "admin.googleAdsDeveloperTokenLabel",
   post_media_public_base_url: "admin.postMediaPublicBaseUrlLabel",
   youtube_privacy_status: "admin.youtubePrivacyStatusLabel",
   tiktok_privacy_level: "admin.tiktokPrivacyLevelLabel",
@@ -267,27 +272,38 @@ export function AdminPage({ t, locale }: AdminPageProps) {
     if (
       id === "google-calendar" ||
       id === "youtube" ||
-      id === "google-business"
+      id === "google-business" ||
+      id === "google-ads"
     ) {
       const service =
         id === "google-calendar"
           ? "calendar"
           : id === "youtube"
             ? "youtube"
-            : "business";
+            : id === "google-business"
+              ? "business"
+              : "ads";
       const effectiveId = googleInfo?.services[service].clientId ?? null;
       if (!effectiveId) return false;
       const [ownId, ownSecret] = adminCardById(id).requiredKeys;
+      let pairOk = false;
       if (ownId && ownSecret && pairConfigured(ownId, ownSecret)) {
-        return true;
+        pairOk = true;
+      } else {
+        pairOk =
+          effectiveId === (googleInfo?.clientId ?? null) &&
+          pairConfigured(
+            "google_oauth_client_id",
+            "google_oauth_client_secret",
+          );
       }
-      return (
-        effectiveId === (googleInfo?.clientId ?? null) &&
-        pairConfigured(
-          "google_oauth_client_id",
-          "google_oauth_client_secret",
-        )
-      );
+      if (!pairOk) return false;
+      // G16: khusus Ads, pasangan klien saja tidak cukup — panggilan
+      // Ads API juga wajib membawa developer token platform.
+      if (id === "google-ads") {
+        return Boolean(byKey("google_ads_developer_token")?.isSet);
+      }
+      return true;
     }
     return adminCardById(id).requiredKeys.every((k) => byKey(k)?.isSet);
   };
@@ -641,6 +657,28 @@ export function AdminPage({ t, locale }: AdminPageProps) {
               <InfoValue
                 label={t("admin.googleBusinessClientIdLabel")}
                 value={googleInfo.services.business.clientId}
+              />
+            </>
+          ) : null,
+        })}
+
+        {cardShell("google-ads", {
+          title: t("admin.googleAdsTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("google"),
+          body: <p>{t("admin.googleAdsBody")}</p>,
+          info: googleInfo ? (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={googleInfo.services.ads.redirectUri}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <InfoValue
+                label={t("admin.googleAdsClientIdLabel")}
+                value={googleInfo.services.ads.clientId}
               />
             </>
           ) : null,
