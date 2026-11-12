@@ -340,7 +340,11 @@ function ShellMain({ t, locale, controls, path, onNavigateTo, onReplaceTo }: She
         ) : activeId === "channels" ? (
           <ChannelsPage t={t} locale={locale} />
         ) : activeId === "automations" ? (
-          <AutomationsPage t={t} locale={locale} />
+          <AutomationsPage
+            t={t}
+            locale={locale}
+            onOpenWaTemplates={() => onNavigateTo("/broadcasts")}
+          />
         ) : activeId === "broadcasts" ? (
           <BroadcastsPage t={t} locale={locale} />
         ) : activeId === "posts" ? (

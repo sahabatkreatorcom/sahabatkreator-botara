@@ -5,16 +5,18 @@ import {
   useState,
   type FormEvent,
 } from "react";
-import type {
-  AutomationKind,
-  AutomationMatch,
-  AutomationResponse,
-  AutomationRunResponse,
-  AutomationTemplateCategory,
-  AutomationTemplateSummary,
-  ChannelAccountResponse,
-  CommentResponse,
-  SequenceEnrollmentResponse,
+import {
+  extractInstructionPlaceholders,
+  type AutomationKind,
+  type AutomationMatch,
+  type AutomationResponse,
+  type AutomationRunResponse,
+  type AutomationTemplateCategory,
+  type AutomationTemplateSummary,
+  type ChannelAccountResponse,
+  type CommentResponse,
+  type SequenceEnrollmentResponse,
+  type SequenceTemplateResponse,
 } from "@sahabat-kreator/contracts";
 import {
   formatNumber,
@@ -27,7 +29,9 @@ import { FieldError, inputClassName } from "../components/AuthLayout";
 import {
   TemplateGalleryGrid,
   TemplateGalleryPanel,
+  type TemplateGalleryCard,
 } from "../components/TemplateGallery";
+import { SequenceTimelinePreview } from "./automations/SequenceTimelinePreview";
 import { formatDateTime } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
@@ -57,6 +61,8 @@ const TPL_CATEGORY_KEYS: Record<AutomationTemplateCategory, TranslationKey> = {
 interface AutomationsPageProps {
   t: Translate;
   locale: Locale;
+  /** Arahkan ke manajemen template WA (halaman Siaran) — dari penanda risiko jendela di pratinjau linimasa. */
+  onOpenWaTemplates?: () => void;
 }
 
 /**
@@ -66,7 +72,7 @@ interface AutomationsPageProps {
  * untuk keyword, dan daftar pendaftaran (enrollments) untuk sequence.
  * Semua teks lewat i18n; tanggal lewat Intl.
  */
-export function AutomationsPage({ t, locale }: AutomationsPageProps) {
+export function AutomationsPage({ t, locale, onOpenWaTemplates }: AutomationsPageProps) {
   const { status, tenants, active, reload } = useWorkspace();
   const tenantId = active?.id ?? null;
 
@@ -95,6 +101,19 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
   >(null);
   const [usingSlug, setUsingSlug] = useState<string | null>(null);
   const [templateNotice, setTemplateNotice] = useState<string | null>(null);
+  // G2 — templat sequence pribadi tenant (galeri yang sama, sumber
+  // berbeda). `null` = belum dimuat; kegagalan muatnya TIDAK
+  // menggagalkan katalog (baris kesalahan sendiri di bawah grid,
+  // pola galeri agent).
+  const [myTemplates, setMyTemplates] = useState<
+    SequenceTemplateResponse[] | null
+  >(null);
+  const [myTemplatesError, setMyTemplatesError] = useState(false);
+  // Kunci kartu yang pratinjau linimasanya sedang terbuka
+  // (`tpl:<slug>` katalog / `mine:<id>` pribadi); null = semua tutup.
+  const [previewKey, setPreviewKey] = useState<string | null>(null);
+  const [usingSeqId, setUsingSeqId] = useState<string | null>(null);
+  const [deletingSeqId, setDeletingSeqId] = useState<string | null>(null);
   const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
@@ -128,16 +147,32 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
     void load();
   }, [load]);
 
+  const loadMyTemplates = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      const rows = await api.sequenceTemplates.list(tenantId);
+      setMyTemplates(rows);
+      setMyTemplatesError(false);
+    } catch {
+      // Galeri katalog tetap tampil; templat pribadi menyusul.
+      setMyTemplates([]);
+      setMyTemplatesError(true);
+    }
+  }, [tenantId]);
+
   const loadTemplates = useCallback(async () => {
     if (!tenantId) return;
     try {
-      const res = await api.automations.listTemplates(tenantId);
+      // G2: katalog diminta pada locale UI pemilik — teks langkah
+      // pratinjau + instantiate mengikuti bahasa itu.
+      const res = await api.automations.listTemplates(tenantId, locale);
       setTemplates(res.templates);
     } catch (err) {
       setError(translateApiError(t, err));
       setTemplates([]);
     }
-  }, [tenantId, t]);
+    void loadMyTemplates();
+  }, [tenantId, t, locale, loadMyTemplates]);
 
   useEffect(() => {
     if (galleryOpen && templates === null) void loadTemplates();
@@ -159,6 +194,7 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
       const created = await api.automations.instantiateTemplate(
         tenantId,
         tpl.slug,
+        { locale },
       );
       setTemplateNotice(
         t("automations.tplCreatedNotice", { name: created.name }),
@@ -168,6 +204,42 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
       setError(translateApiError(t, err));
     } finally {
       setUsingSlug(null);
+    }
+  };
+
+  /** Pakai templat pribadi — jalur yang sama: automation BARU nonaktif. */
+  const applyMyTemplate = async (tpl: SequenceTemplateResponse) => {
+    if (!tenantId || usingSeqId) return;
+    setUsingSeqId(tpl.id);
+    setError(null);
+    setTemplateNotice(null);
+    try {
+      const created = await api.sequenceTemplates.instantiate(
+        tenantId,
+        tpl.id,
+      );
+      setTemplateNotice(
+        t("automations.tplCreatedNotice", { name: created.name }),
+      );
+      await load();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setUsingSeqId(null);
+    }
+  };
+
+  const deleteMyTemplate = async (tpl: SequenceTemplateResponse) => {
+    if (!tenantId || deletingSeqId) return;
+    setDeletingSeqId(tpl.id);
+    setError(null);
+    try {
+      await api.sequenceTemplates.remove(tenantId, tpl.id);
+      await loadMyTemplates();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setDeletingSeqId(null);
     }
   };
 
@@ -198,6 +270,110 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
       setTogglingId(null);
     }
   };
+
+  /**
+   * Kartu galeri G2: katalog bawaan + templat sequence pribadi tenant
+   * dalam SATU daftar `cards` komponen TemplateGallery bersama (pola
+   * galeri agent) — dibedakan lencana sumbernya. Kartu sequence (dari
+   * sumber mana pun) membawa pratinjau linimasa yang bisa dibuka di
+   * `afterMeta`; kartu keyword tidak (tidak ada linimasa untuk
+   * balasan langsung).
+   */
+  const sequencePreviewBlock = (
+    key: string,
+    steps: { delayMinutes: number; text: string }[],
+  ) => (
+    <div>
+      <button
+        type="button"
+        onClick={() => setPreviewKey(previewKey === key ? null : key)}
+        className="mt-3 text-xs font-semibold text-accent hover:underline"
+      >
+        {previewKey === key
+          ? t("automations.tplPreviewCloseButton")
+          : t("automations.tplPreviewButton")}
+      </button>
+      {previewKey === key ? (
+        <SequenceTimelinePreview
+          t={t}
+          steps={steps}
+          onOpenWaTemplates={onOpenWaTemplates}
+        />
+      ) : null}
+    </div>
+  );
+
+  const galleryCards: TemplateGalleryCard[] = [
+    ...(templates ?? []).map((tpl) => ({
+      key: tpl.slug,
+      name: t(tpl.nameKey as TranslationKey),
+      badges: (
+        <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+          {t(TPL_CATEGORY_KEYS[tpl.category])}
+        </span>
+      ),
+      description: t(tpl.descriptionKey as TranslationKey),
+      meta:
+        tpl.kind === "sequence"
+          ? t("automations.tplSequenceMeta", {
+              count: tpl.stepCount,
+            })
+          : t("automations.tplKeywordMeta", {
+              count: tpl.keywordCount,
+            }),
+      afterMeta:
+        tpl.kind === "sequence"
+          ? sequencePreviewBlock(`tpl:${tpl.slug}`, tpl.steps)
+          : undefined,
+      actions: (
+        <button
+          type="button"
+          disabled={usingSlug !== null}
+          onClick={() => void applyTemplate(tpl)}
+          className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+        >
+          {usingSlug === tpl.slug
+            ? t("automations.tplUsing")
+            : t("automations.tplUseButton")}
+        </button>
+      ),
+    })),
+    ...(myTemplates ?? []).map((tpl) => ({
+      key: `mine:${tpl.id}`,
+      name: tpl.name,
+      badges: (
+        <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+          {t("automations.tplMineBadge")}
+        </span>
+      ),
+      description: tpl.steps[0]?.text ?? "",
+      descriptionClassName: "line-clamp-3 whitespace-pre-wrap",
+      meta: t("automations.tplSequenceMeta", { count: tpl.steps.length }),
+      afterMeta: sequencePreviewBlock(`mine:${tpl.id}`, tpl.steps),
+      actions: (
+        <div className="mt-3 flex gap-2">
+          <button
+            type="button"
+            disabled={usingSeqId !== null}
+            onClick={() => void applyMyTemplate(tpl)}
+            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+          >
+            {usingSeqId === tpl.id
+              ? t("automations.tplUsing")
+              : t("automations.tplUseButton")}
+          </button>
+          <button
+            type="button"
+            disabled={deletingSeqId === tpl.id}
+            onClick={() => void deleteMyTemplate(tpl)}
+            className="rounded-lg px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-60"
+          >
+            {t("automations.tplDeleteButton")}
+          </button>
+        </div>
+      ),
+    })),
+  ];
 
   if (status === "loading") {
     return (
@@ -267,42 +443,20 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
           subtitle={t("automations.tplGallerySubtitle")}
           loading={templates === null}
           loadingLabel={t("workspace.loading")}
-          empty={(templates ?? []).length === 0}
+          empty={
+            (templates ?? []).length === 0 && (myTemplates ?? []).length === 0
+          }
           emptyLabel={t("automations.tplGalleryEmpty")}
         >
           <TemplateGalleryGrid
             variant="panel"
-            cards={(templates ?? []).map((tpl) => ({
-              key: tpl.slug,
-              name: t(tpl.nameKey as TranslationKey),
-              badges: (
-                <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                  {t(TPL_CATEGORY_KEYS[tpl.category])}
-                </span>
-              ),
-              description: t(tpl.descriptionKey as TranslationKey),
-              meta:
-                tpl.kind === "sequence"
-                  ? t("automations.tplSequenceMeta", {
-                      count: tpl.stepCount,
-                    })
-                  : t("automations.tplKeywordMeta", {
-                      count: tpl.keywordCount,
-                    }),
-              actions: (
-                <button
-                  type="button"
-                  disabled={usingSlug !== null}
-                  onClick={() => void applyTemplate(tpl)}
-                  className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-                >
-                  {usingSlug === tpl.slug
-                    ? t("automations.tplUsing")
-                    : t("automations.tplUseButton")}
-                </button>
-              ),
-            }))}
+            cards={galleryCards}
           />
+          {myTemplatesError ? (
+            <p className="mt-3 text-xs text-danger">
+              {t("automations.tplMineLoadError")}
+            </p>
+          ) : null}
         </TemplateGalleryPanel>
       ) : null}
 
@@ -514,6 +668,7 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
           t={t}
           tenantId={active.id}
           automation={formTarget === "create" ? null : formTarget}
+          onTemplateSaved={() => void loadMyTemplates()}
           onClose={() => setFormTarget(null)}
           onSaved={(saved) => {
             setFormTarget(null);
@@ -799,12 +954,15 @@ function AutomationFormModal({
   automation,
   onClose,
   onSaved,
+  onTemplateSaved,
 }: {
   t: Translate;
   tenantId: string;
   automation: AutomationResponse | null;
   onClose: () => void;
   onSaved: (automation: AutomationResponse) => void;
+  /** Dipanggil sesudah "simpan sebagai templat" berhasil (G2) agar galeri memuat ulang templat pribadi. */
+  onTemplateSaved?: () => void;
 }) {
   const [name, setName] = useState(automation?.name ?? "");
   const [keywords, setKeywords] = useState(
@@ -841,6 +999,82 @@ function AutomationFormModal({
   );
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // --- G2: simpan sebagai templat sequence pribadi --------------------
+  // Keadaan langkah formulir saat ini, dinormalkan seperti yang akan
+  // dikirim saat membuat automation: mode buat dari baris editor;
+  // mode edit dari langkah tersimpan (langkah sequence memang tidak
+  // bisa diubah lewat formulir ini).
+  const isSequenceForm =
+    automation?.kind === "sequence" || (!automation && kind === "sequence");
+  const currentSteps: { delayMinutes: number; text: string }[] =
+    automation?.kind === "sequence"
+      ? automation.steps.map((s) => ({
+          delayMinutes: s.delayMinutes,
+          text: s.text,
+        }))
+      : kind === "sequence"
+        ? stepRows.map((row) => ({
+            delayMinutes: Number(row.delay),
+            text: row.text.trim(),
+          }))
+        : [];
+  // Penanda [...] yang belum diganti di teks langkah — peringatan
+  // murni tampilan (non-blokir), pola formulir agent.
+  const seqPlaceholders = isSequenceForm
+    ? extractInstructionPlaceholders(
+        currentSteps.map((s) => s.text).join("\n"),
+      )
+    : [];
+  const [saveFoldOpen, setSaveFoldOpen] = useState(false);
+  const [templateName, setTemplateName] = useState("");
+  const [savingTemplate, setSavingTemplate] = useState(false);
+  const [templateSavedName, setTemplateSavedName] = useState<string | null>(
+    null,
+  );
+
+  const handleSaveAsTemplate = async () => {
+    const trimmed = templateName.trim();
+    if (!trimmed) return setError(t("automations.tplSaveNameRequired"));
+    const parsedKeywords = parseKeywords(keywords);
+    if (parsedKeywords.length === 0)
+      return setError(t("automations.keywordsRequired"));
+    if (parsedKeywords.length > 10)
+      return setError(t("automations.keywordsTooMany"));
+    // Validasi langkah yang sama dengan pembuatan sequence.
+    if (currentSteps.length === 0)
+      return setError(t("automations.stepsRequired"));
+    if (currentSteps.length > 10)
+      return setError(t("automations.stepsTooMany"));
+    if (
+      currentSteps.some(
+        (s) =>
+          !Number.isInteger(s.delayMinutes) ||
+          s.delayMinutes < 0 ||
+          s.delayMinutes > 43200,
+      )
+    )
+      return setError(t("automations.stepDelayInvalid"));
+    if (currentSteps.some((s) => !s.text))
+      return setError(t("automations.stepTextRequired"));
+    setSavingTemplate(true);
+    setError(null);
+    try {
+      await api.sequenceTemplates.create(tenantId, {
+        name: trimmed,
+        keywords: parsedKeywords,
+        match,
+        steps: currentSteps,
+      });
+      setSaveFoldOpen(false);
+      setTemplateSavedName(trimmed);
+      onTemplateSaved?.();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSavingTemplate(false);
+    }
+  };
 
   const isCommentForm = automation?.kind === "comment" || kind === "comment";
   useEffect(() => {
@@ -1359,6 +1593,23 @@ function AutomationFormModal({
               </span>
             </label>
           )}
+          {/* Peringatan penanda [...] belum diganti pada teks langkah
+              sequence — murni tampilan, TIDAK PERNAH menghalangi simpan
+              (pola formulir agent, keputusan pemilik). */}
+          {isSequenceForm && seqPlaceholders.length > 0 ? (
+            <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2">
+              <p className="text-xs font-semibold text-warning">
+                {t("automations.tplPlaceholderWarningTitle")}
+              </p>
+              <p className="mt-0.5 text-xs leading-relaxed text-ink">
+                {t("automations.tplPlaceholderWarningBody", {
+                  placeholders: seqPlaceholders
+                    .map((p) => `[${p}]`)
+                    .join(", "),
+                })}
+              </p>
+            </div>
+          ) : null}
           <FieldError message={error} />
           <div className="flex gap-2 pt-1">
             <button
@@ -1382,6 +1633,67 @@ function AutomationFormModal({
               {t("common.cancel")}
             </button>
           </div>
+          {/* Aksi sekunder (G2, pola formulir agent): simpan susunan
+              sequence formulir ini sebagai templat pribadi untuk
+              dipakai ulang dari galeri — salinan, bukan rujukan. */}
+          {isSequenceForm ? (
+            <>
+              <div className="flex flex-wrap gap-2 border-t border-line pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTemplateSavedName(null);
+                    setTemplateName((prev) => prev || name);
+                    setSaveFoldOpen((v) => !v);
+                  }}
+                  className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+                >
+                  {t("automations.tplSaveAsButton")}
+                </button>
+              </div>
+              {templateSavedName ? (
+                <p className="rounded-lg bg-success/15 px-3 py-2 text-sm text-success">
+                  {t("automations.tplSaveSavedNotice", {
+                    name: templateSavedName,
+                  })}
+                </p>
+              ) : null}
+              {saveFoldOpen ? (
+                <div className="rounded-xl border border-line bg-surface p-3">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-medium text-muted">
+                      {t("automations.nameLabel")}
+                    </span>
+                    <input
+                      value={templateName}
+                      onChange={(e) => setTemplateName(e.target.value)}
+                      placeholder={t("automations.tplSaveNamePlaceholder")}
+                      className={inputClassName}
+                    />
+                  </label>
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      disabled={savingTemplate}
+                      onClick={() => void handleSaveAsTemplate()}
+                      className="rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {savingTemplate
+                        ? t("automations.tplSaveSavingButton")
+                        : t("automations.tplSaveConfirmButton")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSaveFoldOpen(false)}
+                      className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                    >
+                      {t("common.cancel")}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </form>
       </div>
     </div>
