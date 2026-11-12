@@ -415,12 +415,15 @@ export {
 export {
   createPinterestChannelAccount,
   updatePinterestChannelAccountCredentials,
+  getPinterestBoardChoice,
+  setPinterestBoardChoice,
   pinterestTokenLifecycleDecision,
   listExpiringPinterestTokens,
   type PinterestChannelTokenType,
   type CreatePinterestChannelInput,
   type UpdatePinterestCredentialsInput,
   type PinterestTokenLifecycleRef,
+  type PinterestBoardChoice,
 } from "./pinterest";
 export {
   createBlueskyChannelAccount,

@@ -168,6 +168,22 @@ export const channelAccounts = pgTable(
      * lain: null (tidak punya konsep induk terpisah).
      */
     parentExternalId: varchar("parent_external_id", { length: 255 }),
+    /**
+     * Board tujuan Pin untuk akun Pinterest (pemilih board — lanjutan
+     * keputusan Gelombang 3): id board API v5 yang dipilih pemilik
+     * workspace di Channels. NULL = belum memilih → penerbit memakai
+     * board PERTAMA akun seperti perilaku awal. Hanya bermakna untuk
+     * provider `pinterest`; provider lain selalu NULL.
+     */
+    pinterestBoardId: varchar("pinterest_board_id", { length: 64 }),
+    /**
+     * Snapshot NAMA board pilihan saat disimpan (pasangan
+     * `pinterest_board_id`) — agar kartu Channels bisa menampilkan
+     * board tujuan tanpa memanggil API Pinterest setiap kali dibaca.
+     * Nama bisa berubah di sisi Pinterest; snapshot diperbarui setiap
+     * kali pilihan disimpan/diambil ulang. NULL = belum memilih.
+     */
+    pinterestBoardName: varchar("pinterest_board_name", { length: 255 }),
     /** Versi Graph API yang ter-pin untuk akun Meta ini (mis. 'v26.0', RANCANGAN §12.1). */
     graphApiVersion: varchar("graph_api_version", { length: 16 }),
     /**

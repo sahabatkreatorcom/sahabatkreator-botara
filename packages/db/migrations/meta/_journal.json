@@ -176,6 +176,13 @@
       "when": 1793870118820,
       "tag": "0024_profile_photos_r2_storage",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1793870118821,
+      "tag": "0025_pinterest_board_choice",
+      "breakpoints": true
     }
   ]
 }

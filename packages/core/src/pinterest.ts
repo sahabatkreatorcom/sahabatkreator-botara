@@ -28,6 +28,10 @@ import { withTenantDb } from "./tx";
  * - public_handle = username Pinterest; display_name tidak dipakai
  *   (user_account v5 tidak menjanjikan nama tampil — kartu memakai
  *   username).
+ * - Board tujuan Pin bisa dipilih pemilik workspace per akun
+ *   (kolom `pinterest_board_id` + snapshot `pinterest_board_name`,
+ *   migrasi 0025); kosong = board pertama akun (perilaku awal
+ *   Gelombang 3). Lihat bagian "Pilihan board tujuan Pin" di bawah.
  * - token_type = `pinterest_user_token` (migrasi 0022) +
  *   token_expires_at dari `expires_in` grant — dasar lifecycle.
  *
@@ -172,6 +176,99 @@ export async function updatePinterestChannelAccountCredentials(
       )
       .returning();
     return row ?? null;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pilihan board tujuan Pin (pemilih board — lanjutan Gelombang 3)
+// ---------------------------------------------------------------------------
+
+/** Pilihan board tujuan Pin yang tersimpan untuk satu akun Pinterest. */
+export interface PinterestBoardChoice {
+  /** Id board API v5 (dari `GET /v5/boards` akun itu sendiri). */
+  boardId: string;
+  /** Snapshot nama board saat pilihan disimpan; null bila tak terbaca. */
+  boardName: string | null;
+}
+
+/**
+ * Baca pilihan board akun Pinterest. Mengembalikan null bila akun
+ * tidak ada / bukan Pinterest / belum memilih — ketiganya bermakna
+ * sama bagi penerbit: pakai board pertama akun (perilaku awal
+ * Gelombang 3, didokumentasikan di kolom skema).
+ */
+export async function getPinterestBoardChoice(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  channelAccountId: string,
+): Promise<PinterestBoardChoice | null> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [row] = await tx
+      .select({
+        provider: channelAccounts.provider,
+        boardId: channelAccounts.pinterestBoardId,
+        boardName: channelAccounts.pinterestBoardName,
+      })
+      .from(channelAccounts)
+      .where(
+        and(
+          eq(channelAccounts.tenantId, ctx.tenantId),
+          eq(channelAccounts.id, channelAccountId),
+        ),
+      )
+      .limit(1);
+    if (!row || row.provider !== "pinterest" || !row.boardId) return null;
+    return { boardId: row.boardId, boardName: row.boardName };
+  });
+}
+
+/**
+ * Simpan (atau bersihkan, dengan `choice = null`) pilihan board
+ * akun Pinterest + snapshot namanya, dan catat audit TANPA data
+ * sensitif (id & nama board adalah data tampil akun itu sendiri).
+ * Validasi bahwa board benar-benar milik akun adalah urusan
+ * pemanggil (endpoint API memvalidasinya ke `GET /v5/boards`
+ * sebelum memanggil ini). Mengembalikan baris akun terbaru, atau
+ * null bila akun tidak ada di tenant ini / bukan Pinterest.
+ */
+export async function setPinterestBoardChoice(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId" | "userId"> & { userId: string },
+  channelAccountId: string,
+  choice: PinterestBoardChoice | null,
+): Promise<ChannelAccount | null> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [row] = await tx
+      .update(channelAccounts)
+      .set({
+        pinterestBoardId: choice?.boardId ?? null,
+        pinterestBoardName: choice?.boardName ?? null,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(channelAccounts.tenantId, ctx.tenantId),
+          eq(channelAccounts.id, channelAccountId),
+          eq(channelAccounts.provider, "pinterest"),
+        ),
+      )
+      .returning();
+    if (!row) return null;
+
+    await tx.insert(auditLogs).values({
+      tenantId: ctx.tenantId,
+      actorType: "user",
+      actorId: ctx.userId,
+      action: "channel.pinterest_board_updated",
+      meta: {
+        channelAccountId: row.id,
+        provider: "pinterest",
+        pinterestBoardId: choice?.boardId ?? null,
+        pinterestBoardName: choice?.boardName ?? null,
+      },
+    });
+
+    return row;
   });
 }
 
