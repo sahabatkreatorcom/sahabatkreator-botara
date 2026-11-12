@@ -10,6 +10,11 @@ import {
   AutomationTemplateLocaleSchema,
   CreateAutomationRequestSchema,
   CreateSequenceTemplateRequestSchema,
+  EnrollConversationListResponseSchema,
+  EnrollSequenceByTagRequestSchema,
+  EnrollSequenceByTagResponseSchema,
+  EnrollSequenceContactRequestSchema,
+  EnrollSequenceContactResponseSchema,
   InstantiateAutomationTemplateRequestSchema,
   InstantiateSequenceTemplateRequestSchema,
   SequenceEnrollmentListResponseSchema,
@@ -28,11 +33,15 @@ import {
   createAutomation,
   createSequenceTemplate,
   deleteSequenceTemplate,
+  enrollContactsInSequenceByTag,
+  enrollContactInSequenceManually,
+  getAutomation,
   getChannelAccount,
   instantiateAutomationTemplate,
   instantiateSequenceTemplate,
   listAutomationRuns,
   listAutomations,
+  listContactMessagingConversations,
   listSequenceEnrollments,
   listSequenceTemplates,
   updateAutomation,
@@ -150,6 +159,18 @@ function serializeRun(row: AutomationRun): AutomationRunResponse {
  *   GET   /tenants/:tenantId/automations/:id/runs   riwayat eksekusi terbaru
  *   GET   /tenants/:tenantId/automations/:id/enrollments
  *                                                   pendaftaran sequence terbaru
+ *   POST  /tenants/:tenantId/automations/:id/enroll daftarkan SATU kontak
+ *                                                   secara manual (G2b);
+ *                                                   jangkar = conversationId
+ *                                                   pilihan atau percakapan
+ *                                                   pesan terbaru kontak
+ *   POST  /tenants/:tenantId/automations/:id/enroll-by-tag
+ *                                                   daftarkan semua kontak
+ *                                                   bertag; balasan = laporan
+ *                                                   agregat (G2b)
+ *   GET   /tenants/:tenantId/automations/:id/enroll-conversations?contactId=
+ *                                                   percakapan pesan kontak
+ *                                                   untuk pemilih jangkar (G2b)
  * Wajib sesi + membership workspace (non-member → 404 TENANT_NOT_FOUND,
  * pola Fase 1B/1D). Eksekusi automation sendiri berjalan di worker
  * (job `automation.evaluate` & `sequence.step`), bukan di proses API ini.
@@ -169,6 +190,9 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
     app.patch(`${base}/:id`, notConfigured);
     app.get(`${base}/:id/runs`, notConfigured);
     app.get(`${base}/:id/enrollments`, notConfigured);
+    app.post(`${base}/:id/enroll`, notConfigured);
+    app.post(`${base}/:id/enroll-by-tag`, notConfigured);
+    app.get(`${base}/:id/enroll-conversations`, notConfigured);
     app.post(seqTemplatesBase, notConfigured);
     app.get(seqTemplatesBase, notConfigured);
     app.delete(`${seqTemplatesBase}/:id`, notConfigured);
@@ -498,6 +522,186 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
       return apiError(c, 404, "NOT_FOUND", "Automation not found");
     const body = SequenceEnrollmentListResponseSchema.parse({
       enrollments: enrollments.map(serializeEnrollment),
+    });
+    return c.json(body);
+  });
+
+  // ---- Pendaftaran sequence manual (G2b) ----------------------------------
+  // Entry point manual di atas service bersama sequence-enroll (jalur
+  // yang sama dengan kata kunci & node flow). Penolakan selalu berkode
+  // khusus supaya UI menerjemahkan SEBABNYA ke pengguna (kontak tanpa
+  // percakapan pesan, kontak opt-out, sequence nonaktif/tanpa langkah)
+  // — bukan error generik.
+  app.post(`${base}/:id/enroll`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Automation not found");
+    }
+    const automation = await getAutomation(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+    );
+    if (!automation) return apiError(c, 404, "NOT_FOUND", "Automation not found");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = EnrollSequenceContactRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid enroll payload");
+    }
+    const result = await enrollContactInSequenceManually(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      {
+        automationId: id,
+        contactId: parsed.data.contactId,
+        conversationId: parsed.data.conversationId,
+      },
+    );
+    switch (result.kind) {
+      case "enrolled":
+      case "already_enrolled": {
+        const body = EnrollSequenceContactResponseSchema.parse({
+          outcome: result.kind,
+          enrollment: serializeEnrollment({
+            ...result.enrollment,
+            totalSteps: result.totalSteps,
+          }),
+        });
+        return c.json(body, result.kind === "enrolled" ? 201 : 200);
+      }
+      case "contact_not_found":
+        return apiError(c, 404, "NOT_FOUND", "Contact not found");
+      case "sequence_unavailable":
+        return apiError(
+          c,
+          422,
+          "SEQUENCE_UNAVAILABLE",
+          "Sequence is not an active sequence",
+        );
+      case "no_steps":
+        return apiError(
+          c,
+          422,
+          "SEQUENCE_NO_STEPS",
+          "Sequence has no steps to send",
+        );
+      case "no_conversation":
+        return apiError(
+          c,
+          422,
+          "ENROLL_NO_CONVERSATION",
+          "Contact has no messaging conversation to anchor the enrollment",
+        );
+      case "conversation_not_messaging":
+        return apiError(
+          c,
+          422,
+          "ENROLL_CONVERSATION_INVALID",
+          "Selected conversation is not a messaging conversation of this contact",
+        );
+      case "contact_opted_out":
+        return apiError(
+          c,
+          422,
+          "ENROLL_CONTACT_OPTED_OUT",
+          "Contact has opted out of marketing messages",
+        );
+    }
+  });
+
+  app.post(`${base}/:id/enroll-by-tag`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Automation not found");
+    }
+    const automation = await getAutomation(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+    );
+    if (!automation) return apiError(c, 404, "NOT_FOUND", "Automation not found");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = EnrollSequenceByTagRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid enroll-by-tag payload");
+    }
+    const result = await enrollContactsInSequenceByTag(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      { automationId: id, tag: parsed.data.tag },
+    );
+    if (result.kind === "sequence_unavailable") {
+      return apiError(
+        c,
+        422,
+        "SEQUENCE_UNAVAILABLE",
+        "Sequence is not an active sequence",
+      );
+    }
+    if (result.kind === "no_steps") {
+      return apiError(
+        c,
+        422,
+        "SEQUENCE_NO_STEPS",
+        "Sequence has no steps to send",
+      );
+    }
+    return c.json(EnrollSequenceByTagResponseSchema.parse(result.report));
+  });
+
+  app.get(`${base}/:id/enroll-conversations`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Automation not found");
+    }
+    const automation = await getAutomation(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+    );
+    if (!automation) return apiError(c, 404, "NOT_FOUND", "Automation not found");
+    const contactId = c.req.query("contactId") ?? "";
+    if (!z.string().uuid().safeParse(contactId).success) {
+      return apiError(
+        c,
+        400,
+        "VALIDATION_ERROR",
+        "contactId query parameter must be a uuid",
+      );
+    }
+    const rows = await listContactMessagingConversations(
+      bundle.db,
+      { tenantId: tenant.id },
+      contactId,
+    );
+    if (!rows) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    const body = EnrollConversationListResponseSchema.parse({
+      conversations: rows.map((row) => ({
+        id: row.id,
+        kind: row.kind === "group" ? ("group" as const) : ("private" as const),
+        provider: row.provider,
+        title: row.title,
+        lastMessageAt: row.lastMessageAt
+          ? row.lastMessageAt.toISOString()
+          : null,
+        createdAt: row.createdAt.toISOString(),
+      })),
     });
     return c.json(body);
   });
