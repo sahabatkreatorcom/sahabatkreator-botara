@@ -29,15 +29,20 @@
  *  [11] avatar yang GAGAL diunduh TIDAK menggagalkan connect
  *       (fail-soft — akun tetap connected, foto kosong);
  *  [12] user info ditolak KHUSUS scope (`scope_not_authorized` —
- *       izin user.info.basic belum disetujui aplikasi) → akun TETAP
- *       terhubung fail-soft, tetapi kepulangan membawa penanda
- *       peringatan `connected_profile_incomplete` (bukan sukses
- *       polos) dan akun tersimpan tanpa nama/handle/foto;
+ *       izin user.info.basic belum disetujui aplikasi) DAN cadangan
+ *       creator_info juga gagal → akun TETAP terhubung fail-soft,
+ *       tetapi kepulangan membawa penanda peringatan
+ *       `connected_profile_incomplete` (bukan sukses polos) dan akun
+ *       tersimpan tanpa nama/handle/foto;
  *  [13] hubungkan ulang akun [12] sesudah scope diberikan → profil
  *       dilengkapi pada baris yang sama (nama + handle terisi,
  *       avatar tersimpan) dan kepulangan kembali sukses polos;
  *  [14] user info gagal karena alasan LAIN (token ditolak) →
- *       tetap sukses polos TANPA penanda peringatan.
+ *       tetap sukses polos TANPA penanda peringatan;
+ *  [15] user info ditolak scope TETAPI creator_info berhasil →
+ *       akun terhubung DENGAN nama/handle/avatar dari info kreator
+ *       posting dan kepulangan sukses polos (banner hanya untuk
+ *       profil yang benar-benar tetap kosong).
  *
  * Token tiruan di skrip ini BUKAN kredensial sungguhan.
  *
@@ -116,10 +121,13 @@ const ACCESS_3B = "tiktok-access-uji-3b";
 const REFRESH_3B = "tiktok-refresh-uji-3b";
 const ACCESS_4 = "tiktok-access-uji-4";
 const REFRESH_4 = "tiktok-refresh-uji-4";
+const ACCESS_5 = "tiktok-access-uji-5";
+const REFRESH_5 = "tiktok-refresh-uji-5";
 const OPEN_ID = "open-id-kreator-1";
 const OPEN_ID_2 = "open-id-kreator-2";
 const OPEN_ID_3 = "open-id-kreator-3";
 const OPEN_ID_4 = "open-id-kreator-4";
+const OPEN_ID_5 = "open-id-kreator-5";
 const AVATAR_BYTES = Buffer.from([
   0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
 ]);
@@ -214,6 +222,20 @@ const fake = createServer((req, res) => {
         });
         return;
       }
+      if (code === "kode-scope-cadangan") {
+        // Consent hanya memberi scope penerbitan: user info akan
+        // ditolak scope, tetapi creator_info posting berhasil.
+        json(200, {
+          access_token: ACCESS_5,
+          refresh_token: REFRESH_5,
+          open_id: OPEN_ID_5,
+          expires_in: 86400,
+          refresh_expires_in: 31536000,
+          scope: "video.publish",
+          token_type: "Bearer",
+        });
+        return;
+      }
       exchangeCount += 1;
       const setB = exchangeCount > 1;
       json(200, {
@@ -253,7 +275,7 @@ const fake = createServer((req, res) => {
       });
       return;
     }
-    if (auth === `Bearer ${ACCESS_3}`) {
+    if (auth === `Bearer ${ACCESS_3}` || auth === `Bearer ${ACCESS_5}`) {
       // Bentuk resmi penolakan scope TikTok: HTTP 401 + envelope
       // error.code scope_not_authorized.
       json(401, {
@@ -279,6 +301,39 @@ const fake = createServer((req, res) => {
     json(401, {
       data: {},
       error: { code: "access_token_invalid", message: "token salah", request_id: "req-uji" },
+    });
+    return;
+  }
+  if (
+    req.method === "POST" &&
+    url.pathname === "/v2/post/publish/creator_info/query/"
+  ) {
+    const auth = req.headers.authorization;
+    if (auth === `Bearer ${ACCESS_5}`) {
+      json(200, {
+        data: {
+          creator_username: "kreator.cadangan",
+          creator_nickname: "Kreator Cadangan",
+          creator_avatar_url: `${fakeBaseHere}/cdn/tiktok-avatar.jpg`,
+          privacy_level_options: ["SELF_ONLY"],
+          comment_disabled: false,
+          duet_disabled: false,
+          stitch_disabled: false,
+          max_video_post_duration_sec: 600,
+        },
+        error: { code: "ok", message: "", request_id: "req-uji" },
+      });
+      return;
+    }
+    // ACCESS_3/ACCESS_4 dan token lain: cadangan juga gagal agar
+    // grup peringatan/profil-kosong membuktikan kegagalan dua sumber.
+    json(401, {
+      data: {},
+      error: {
+        code: "access_token_invalid",
+        message: "token salah",
+        request_id: "req-uji",
+      },
     });
     return;
   }
@@ -604,7 +659,7 @@ let happyState = "";
   console.log("[11] unduhan avatar gagal (CDN 500) → akun tetap connected tanpa foto (fail-soft): OK");
 }
 
-// ---------- [12] User info ditolak scope → terhubung + penanda peringatan ----------
+// ---------- [12] User info ditolak scope + creator_info gagal → terhubung + penanda ----------
 let scopeRowId = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
@@ -643,7 +698,7 @@ let scopeRowId = "";
     row.id,
   );
   assert.equal(photo, null);
-  console.log("[12] user info scope_not_authorized → akun connected tanpa profil + penanda connected_profile_incomplete: OK");
+  console.log("[12] user info scope_not_authorized + creator_info gagal → akun connected tanpa profil + penanda connected_profile_incomplete: OK");
 }
 
 // ---------- [13] Hubungkan ulang sesudah scope diberikan → profil dilengkapi ----------
@@ -706,6 +761,47 @@ let scopeRowId = "";
   assert.equal(rows.rows[0]!.status, "connected");
   assert.equal(rows.rows[0]!.display_name, null);
   console.log("[14] user info gagal access_token_invalid (bukan scope) → akun connected, sukses polos tanpa penanda: OK");
+}
+
+// ---------- [15] User info ditolak scope → profil dari creator_info ----------
+{
+  const state = await startAndGetState(app, TENANT_B, USER_B);
+  const res = await app.request(
+    `/tiktok/oauth/callback?code=kode-scope-cadangan&state=${encodeURIComponent(state)}`,
+  );
+  assert.equal(res.status, 302);
+  assert.equal(
+    res.headers.get("location"),
+    "https://app.test/channels?tiktok_oauth=connected",
+  );
+  const rows = await client.query<{
+    id: string;
+    display_name: string | null;
+    public_handle: string | null;
+    status: string;
+    access_token_encrypted: string;
+    refresh_token_encrypted: string;
+  }>(
+    `SELECT id, display_name, public_handle, status, access_token_encrypted, refresh_token_encrypted
+       FROM channel_accounts WHERE tenant_id = $1 AND provider = 'tiktok' AND external_id = $2`,
+    [TENANT_B, OPEN_ID_5],
+  );
+  assert.equal(rows.rows.length, 1);
+  const row = rows.rows[0]!;
+  assert.equal(row.status, "connected");
+  assert.equal(row.display_name, "Kreator Cadangan");
+  assert.equal(row.public_handle, "kreator.cadangan");
+  assert.equal(decryptChannelSecret(CHANNEL_SECRET, row.access_token_encrypted), ACCESS_5);
+  assert.equal(decryptChannelSecret(CHANNEL_SECRET, row.refresh_token_encrypted), REFRESH_5);
+  const photo = await getProfilePhoto(
+    db,
+    { tenantId: TENANT_B },
+    "channel_account",
+    row.id,
+  );
+  assert.ok(photo, "avatar creator_info harus tersimpan saat connect");
+  assert.ok(Buffer.from(photo.data).equals(AVATAR_BYTES));
+  console.log("[15] user info scope_not_authorized + creator_info sukses → profil kreator posting terisi, sukses polos: OK");
 }
 
 // ---------- [10] Fallback env kredensial aplikasi ----------

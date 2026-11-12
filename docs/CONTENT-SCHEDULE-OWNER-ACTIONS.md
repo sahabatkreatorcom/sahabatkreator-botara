@@ -383,10 +383,13 @@ masing-masing). Yang tersisa murni tindakan pemilik per platform:
    (d) ajukan audit Content Posting API (tanpa audit, postingan
    API hanya `SELF_ONLY`); (e) hubungkan akun contoh dari Channels;
    (f) pastikan scope `user.info.basic` (produk Login Kit) aktif/
-   disetujui di aplikasi — tanpa scope itu akun tetap terhubung
-   tetapi tampil TANPA nama & foto profil (Channels menampilkan
-   banner peringatan "profil belum lengkap"); aktifkan scope-nya
-   lalu hubungkan ulang akun yang sama agar nama & avatar terisi.
+   disetujui di aplikasi agar profil resmi user info dapat dibaca;
+   bila scope itu belum disetujui, sistem memakai cadangan
+   creator_info Content Posting (scope `video.publish`) untuk
+   nama/handle/avatar — akun hanya tampil tanpa nama & foto profil
+   bila kedua sumber gagal (Channels menampilkan banner peringatan
+   "profil belum lengkap"); hubungkan ulang akun yang sama untuk
+   mencoba mengisi profilnya lagi.
 2. **LinkedIn** — (a) buat aplikasi di LinkedIn Developers dan
    aktifkan produk "Sign In with LinkedIn using OpenID Connect" +
    "Share on LinkedIn" (scope `openid profile w_member_social`);
