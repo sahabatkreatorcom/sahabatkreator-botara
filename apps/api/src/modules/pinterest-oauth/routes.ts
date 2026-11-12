@@ -35,7 +35,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  * "Hubungkan dengan Pinterest".
  *
  *   POST /tenants/:tenantId/pinterest-oauth/start            buat state + URL dialog
- *   GET  /pinterest/oauth/callback                           callback TUNGGAL platform (publik)
+ *   GET  /oauth/pinterest/callback                           callback TUNGGAL platform (publik)
  *   GET  /tenants/:tenantId/channels/pinterest-oauth-info    ketersediaan connect (owner/admin)
  *
  * Alur resmi API v5: authorize di `https://www.pinterest.com/oauth/`
@@ -94,7 +94,7 @@ export function createPinterestOAuthRoutes(
     app.get("/tenants/:tenantId/channels/pinterest-oauth-info", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
-    app.get("/pinterest/oauth/callback", (c) =>
+    app.get("/oauth/pinterest/callback", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -106,7 +106,7 @@ export function createPinterestOAuthRoutes(
   });
 
   const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
-  const redirectUri = `${webBase}/api/pinterest/oauth/callback`;
+  const redirectUri = `${webBase}/api/oauth/pinterest/callback`;
 
   /** Konfigurasi OAuth efektif (panel → env). */
   async function resolvePinterestConfig() {
@@ -235,7 +235,7 @@ export function createPinterestOAuthRoutes(
   // Callback TUNGGAL (publik; identitas dari state bertanda tangan).
   // Semua kegagalan → redirect error berkode TANPA membuat akun apa pun.
   // -------------------------------------------------------------------------
-  app.get("/pinterest/oauth/callback", async (c) => {
+  app.get("/oauth/pinterest/callback", async (c) => {
     const fail = (code: string) =>
       c.redirect(`${webBase}/channels?pinterest_oauth_error=${code}`, 302);
 

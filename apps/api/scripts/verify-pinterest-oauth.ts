@@ -244,7 +244,7 @@ async function startAndGetState(
   };
   assert.equal(body.available, false);
   assert.equal(body.appId, null);
-  assert.equal(body.oauthRedirectUri, "https://app.test/api/pinterest/oauth/callback");
+  assert.equal(body.oauthRedirectUri, "https://app.test/api/oauth/pinterest/callback");
 
   const start = await app.request(`/tenants/${TENANT_A}/pinterest-oauth/start`, {
     method: "POST",
@@ -293,7 +293,7 @@ let happyState = "";
   assert.equal(dialog.searchParams.get("response_type"), "code");
   assert.equal(
     dialog.searchParams.get("redirect_uri"),
-    "https://app.test/api/pinterest/oauth/callback",
+    "https://app.test/api/oauth/pinterest/callback",
   );
   happyState = dialog.searchParams.get("state")!;
   assert.ok(happyState.length > 10);
@@ -303,7 +303,7 @@ let happyState = "";
 // ---------- [3] State rusak ditolak ----------
 {
   const res = await app.request(
-    `/pinterest/oauth/callback?code=apapun&state=${happyState}x`,
+    `/oauth/pinterest/callback?code=apapun&state=${happyState}x`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -315,7 +315,7 @@ let happyState = "";
 // ---------- [4] Callback sukses → akun tersimpan + avatar + sasaran /posts ----------
 {
   const res = await app.request(
-    `/pinterest/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/pinterest/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -326,7 +326,7 @@ let happyState = "";
   assert.equal(lastTokenForm?.get("code"), "kode-uji");
   assert.equal(
     lastTokenForm?.get("redirect_uri"),
-    "https://app.test/api/pinterest/oauth/callback",
+    "https://app.test/api/oauth/pinterest/callback",
   );
   // Kredensial aplikasi pergi sebagai Basic auth, BUKAN di badan form.
   const expectedBasic = `Basic ${Buffer.from("pin-app-panel:pin-secret-panel").toString("base64")}`;
@@ -378,7 +378,7 @@ let happyState = "";
 
   // ---------- [5] Replay state yang sama ditolak ----------
   const replay = await app.request(
-    `/pinterest/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/pinterest/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(replay.status, 302);
   assert.ok(
@@ -392,7 +392,7 @@ let happyState = "";
 // ---------- [6] User membatalkan di dialog ----------
 {
   const res = await app.request(
-    `/pinterest/oauth/callback?error=access_denied&error_description=dibatalkan`,
+    `/oauth/pinterest/callback?error=access_denied&error_description=dibatalkan`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -405,7 +405,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/pinterest/oauth/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
+    `/oauth/pinterest/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -424,7 +424,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/pinterest/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/pinterest/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -447,7 +447,7 @@ let happyState = "";
   );
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/pinterest/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/pinterest/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -480,7 +480,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/pinterest/oauth/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
+    `/oauth/pinterest/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -517,6 +517,16 @@ let happyState = "";
   assert.equal(body.available, true);
   assert.equal(body.appId, "pin-app-env");
   console.log("[10] tanpa panel → env fallback membuat connect tersedia: OK");
+}
+
+// ---------- [12] Path callback lama TIDAK terdaftar lagi (pemotongan bersih) ----------
+// Aturan pemilik 2026-11-12: penyeragaman URL TANPA alias — callback
+// kanonis adalah /oauth/pinterest/callback; path lama
+// /pinterest/oauth/callback harus menjawab 404.
+{
+  const res = await app.request(`/pinterest/oauth/callback?code=apapun&state=apapun`);
+  assert.equal(res.status, 404);
+  console.log("[12] path callback lama /pinterest/oauth/callback → 404 (tanpa alias): OK");
 }
 
 fake.closeAllConnections();

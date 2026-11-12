@@ -148,7 +148,7 @@ function check(name: string, ok: boolean): void {
     appId: "app-uji",
     appSecret: "secret-uji",
     code: "kode-uji",
-    redirectUri: "https://app.test/api/pinterest/oauth/callback",
+    redirectUri: "https://app.test/api/oauth/pinterest/callback",
   });
   check(
     "exchange code → token + refresh + expires_in 30 hari",
@@ -164,7 +164,7 @@ function check(name: string, ok: boolean): void {
       calls[0]!.auth === expectedBasic &&
       form.get("grant_type") === "authorization_code" &&
       form.get("code") === "kode-uji" &&
-      form.get("redirect_uri") === "https://app.test/api/pinterest/oauth/callback" &&
+      form.get("redirect_uri") === "https://app.test/api/oauth/pinterest/callback" &&
       form.get("client_secret") === null,
   );
   const refreshed = await client.refreshPinterestAccessToken({

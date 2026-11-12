@@ -651,7 +651,7 @@ routes.route(
 );
 // Modul Pinterest OAuth Connect (gelombang Semua OAuth) —
 // "Hubungkan dengan Pinterest": start ber-state sekali pakai +
-// callback tunggal publik /pinterest/oauth/callback + info
+// callback tunggal publik /oauth/pinterest/callback + info
 // ketersediaan. Kredensial aplikasi dari Panel Admin
 // (pinterest_app_id/secret; env hanya fallback). Access token
 // ±30 hari disegarkan worker lifecycle via refresh token.
