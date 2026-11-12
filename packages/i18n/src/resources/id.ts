@@ -1219,6 +1219,8 @@ export const id: Resources = {
     metaBody: "Secret milik Meta App platform — dipakai memverifikasi tanda tangan webhook Instagram & Messenger. Ambil dari dashboard Meta App (Pengaturan → Dasar → App Secret). Kunci ini sengaja tidak punya uji koneksi: Meta tidak menyediakan cara mandiri untuk memvalidasi app secret, jadi nilai yang salah hanya akan membuat tanda tangan webhook gagal.",
     metaAppSecretLabel: "App secret Meta",
     metaWebhookVerifyTokenLabel: "Token verifikasi webhook Meta",
+    threadsWebhookVerifyTokenLabel: "Token verifikasi webhook Threads",
+    threadsWebhookVerifyTokenBody: "Nilai bebas yang kamu tentukan sendiri dan ditempel ke pengaturan webhook aplikasi Threads (aplikasi Threads terpisah dari Meta App, jadi tokennya pun sendiri) agar Threads dapat memverifikasi handshake webhook. Menggantinya di sini berarti pengaturan webhook aplikasi Threads harus disesuaikan.",
     metaWebhookVerifyTokenBody: "Nilai bebas yang kamu tentukan sendiri dan ditempel ke dashboard Meta App (Webhook → Verify Token) agar Meta dapat memverifikasi handshake webhook. Owner/admin workspace melihat nilai yang berlaku di halaman Channel mereka untuk memasang webhook; menggantinya di sini berarti dashboard Meta App harus disesuaikan.",
     metaAppIdLabel: "App ID Meta",
     metaIgConfigIdLabel: "ID konfigurasi login Instagram (Unified Login)",

@@ -1220,6 +1220,8 @@ export const en = {
     metaBody: "The platform Meta app's secret — used to verify Instagram & Messenger webhook signatures. Find it in the Meta app dashboard (Settings → Basic → App Secret). This key has no connection test on purpose: Meta offers no standalone way to validate an app secret, so a wrong value simply makes webhook signatures fail.",
     metaAppSecretLabel: "Meta app secret",
     metaWebhookVerifyTokenLabel: "Meta webhook verify token",
+    threadsWebhookVerifyTokenLabel: "Threads webhook verify token",
+    threadsWebhookVerifyTokenBody: "A value you choose yourself and paste into the Threads app's webhook settings (the Threads app is separate from the Meta App, so it has its own token) so Threads can verify the webhook handshake. Changing it here means the Threads app webhook settings must be updated to match.",
     metaWebhookVerifyTokenBody: "A value you choose yourself and paste into the Meta app dashboard (Webhooks → Verify Token) so Meta can verify the webhook handshake. Workspace owners/admins see the current value on their Channels page to set up the webhook; changing it here means the Meta app dashboard must be updated to match.",
     metaAppIdLabel: "Meta app ID",
     metaIgConfigIdLabel: "Instagram sign-in configuration ID (Unified Login)",

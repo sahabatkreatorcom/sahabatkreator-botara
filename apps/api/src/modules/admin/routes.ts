@@ -134,6 +134,7 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   // Token verifikasi webhook Meta: nilai bebas yang ditempel ke
   // dashboard Meta App; panjang mengikuti kunci rahasia lain.
   meta_webhook_verify_token: 512,
+  threads_webhook_verify_token: 512,
   // Nama model embedding — pendek seperti openrouter_model.
   openrouter_embedding_model: 128,
   // Pengaturan content schedule: URL publik (batas URL wajar) dan dua

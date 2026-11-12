@@ -152,6 +152,11 @@ export const PLATFORM_SETTING_KEYS = [
   // meta-webhook-info (memang harus diketahui pemasang webhook), tetapi
   // tidak pernah ditampilkan di panel sebagai konfigurasi publik.
   "meta_webhook_verify_token",
+  // Token verifikasi handshake webhook THREADS (aplikasi Threads
+  // terpisah dari Meta App → tokennya sendiri). Pola meta token:
+  // panel → env (THREADS_WEBHOOK_VERIFY_TOKEN); bukan konfigurasi
+  // publik panel.
+  "threads_webhook_verify_token",
   // Model embedding OpenRouter: dulu env-only (OPENROUTER_EMBEDDING_MODEL)
   // padahal model LLM chat-nya (openrouter_model) sudah panel sejak 6C.
   "openrouter_embedding_model",

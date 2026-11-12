@@ -155,6 +155,7 @@ const platformOptions: PlatformSettingsOptions = {
     // Instruksi pemilik 2026-11-12: sisa kredensial/pengaturan platform
     // ikut dikelola Panel Admin — env hanya fallback per kunci.
     meta_webhook_verify_token: env.META_WEBHOOK_VERIFY_TOKEN,
+    threads_webhook_verify_token: env.THREADS_WEBHOOK_VERIFY_TOKEN,
     openrouter_embedding_model: env.OPENROUTER_EMBEDDING_MODEL,
     post_media_public_base_url: env.POST_MEDIA_PUBLIC_BASE_URL,
     youtube_privacy_status: env.YOUTUBE_PRIVACY_STATUS,

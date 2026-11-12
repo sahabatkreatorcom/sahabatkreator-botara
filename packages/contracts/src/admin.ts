@@ -110,6 +110,11 @@ export const PlatformSettingKeySchema = z.enum([
   // `openrouter_embedding_model` adalah nama model (bukan rahasia, pola
   // openrouter_model: hanya status yang dipertukarkan di daftar ini).
   "meta_webhook_verify_token",
+  // Token handshake webhook THREADS: aplikasi Threads terpisah dari
+  // Meta App, jadi verify token webhook-nya pun kunci sendiri (pola
+  // yang sama: nilai yang KITA tentukan, rahasia bersama dengan
+  // pengaturan webhook aplikasi Threads).
+  "threads_webhook_verify_token",
   "openrouter_embedding_model",
   // Pengaturan content schedule — BUKAN kredensial, tetapi nilai
   // platform yang diubah pemilik dari panel yang sama agar konsisten.

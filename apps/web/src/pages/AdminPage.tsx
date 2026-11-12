@@ -97,6 +97,7 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   meta_wa_config_id: "admin.metaWaConfigIdLabel",
   // Aplikasi Threads (terpisah dari Meta App utama) — sub-blok di grup Meta.
   threads_app_id: "admin.threadsAppIdLabel",
+  threads_webhook_verify_token: "admin.threadsWebhookVerifyTokenLabel",
   threads_app_secret: "admin.threadsAppSecretLabel",
   // Aplikasi TikTok (TikTok for Developers) — bagian tersendiri.
   tiktok_client_key: "admin.tiktokClientKeyLabel",
@@ -543,7 +544,17 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             status={byKey("threads_app_secret")}
             onStatusChanged={onStatusChanged}
           />
+          <SettingRow
+            t={t}
+            locale={locale}
+            settingKey="threads_webhook_verify_token"
+            status={byKey("threads_webhook_verify_token")}
+            onStatusChanged={onStatusChanged}
+          />
         </div>
+        <p className="mt-3 max-w-2xl text-sm text-muted">
+          {t("admin.threadsWebhookVerifyTokenBody")}
+        </p>
       </section>
 
       {/*

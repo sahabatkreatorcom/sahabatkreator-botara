@@ -199,6 +199,7 @@ const csOpts = {
   masterSecret: MASTER,
   env: {
     meta_webhook_verify_token: ENV_VERIFY_TOKEN,
+    threads_webhook_verify_token: ENV_VERIFY_TOKEN,
     youtube_privacy_status: "unlisted",
     tiktok_privacy_level: "SELF_ONLY",
     post_media_public_base_url: "https://media-contoh.invalid/env",
@@ -226,6 +227,29 @@ assert.equal(
   ENV_VERIFY_TOKEN,
 );
 console.log("[6a] meta_webhook_verify_token: env → panel menang → cabut → env lagi: OK");
+
+// Token webhook Threads: kunci sendiri, resolusi panel → env yang sama.
+assert.equal(
+  await getProviderSecret(db, "threads_webhook_verify_token", csOpts),
+  ENV_VERIFY_TOKEN,
+);
+await setPlatformSetting(
+  db,
+  { key: "threads_webhook_verify_token", value: PANEL_VERIFY_TOKEN, updatedByUserId: ADMIN_USER },
+  csOpts,
+);
+clearPlatformSettingsCache();
+assert.equal(
+  await getProviderSecret(db, "threads_webhook_verify_token", csOpts),
+  PANEL_VERIFY_TOKEN,
+);
+await clearPlatformSetting(db, { key: "threads_webhook_verify_token", updatedByUserId: ADMIN_USER });
+clearPlatformSettingsCache();
+assert.equal(
+  await getProviderSecret(db, "threads_webhook_verify_token", csOpts),
+  ENV_VERIFY_TOKEN,
+);
+console.log("[6c] threads_webhook_verify_token: env → panel menang → cabut → env lagi: OK");
 
 // Resolver bertipe: bawaan aman tanpa apa pun; env sah dipakai; panel sah
 // menang; nilai panel TIDAK sah (ditulis di luar API) diabaikan → env.

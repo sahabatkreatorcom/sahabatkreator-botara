@@ -198,6 +198,13 @@ const EnvSchema = z.object({
    */
   META_WEBHOOK_VERIFY_TOKEN: z.string().min(1).optional(),
   /**
+   * Token verifikasi handshake webhook THREADS — pola
+   * META_WEBHOOK_VERIFY_TOKEN persis, tetapi untuk aplikasi Threads
+   * yang terpisah dari Meta App. FALLBACK env saja; sumber utama
+   * Panel Admin (kunci `threads_webhook_verify_token`).
+   */
+  THREADS_WEBHOOK_VERIFY_TOKEN: z.string().min(1).optional(),
+  /**
    * Identifier PUBLIK Meta untuk OAuth (Fase 7D) — FALLBACK env saja;
    * sumber utama adalah Panel Admin (kunci `meta_app_id` /
    * `meta_ig_config_id` / `meta_wa_config_id` di platform_settings).
