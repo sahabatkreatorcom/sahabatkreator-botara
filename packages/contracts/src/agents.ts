@@ -12,6 +12,12 @@ export type AgentMode = z.infer<typeof AgentModeSchema>;
 export const AgentConfigSchema = z.object({
   maxReplyChars: z.number().int().positive().max(100_000).optional(),
   language: z.string().trim().min(2).max(16).optional(),
+  /**
+   * Cap balasan AI PER PERCAKAPAN dalam jendela bergulir 24 jam
+   * (Gelombang G6). Kosong = bawaan runtime (20); 0 = cap nonaktif.
+   * Ditolak negatif agar konfigurasi yang mustahil tidak tersimpan.
+   */
+  maxConversationReplies: z.number().int().min(0).max(1000).optional(),
 });
 export type AgentConfig = z.infer<typeof AgentConfigSchema>;
 

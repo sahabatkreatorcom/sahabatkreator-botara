@@ -79,6 +79,12 @@ export interface AgentConfig {
   maxReplyChars?: number;
   /** Petunjuk bahasa balasan, mis. 'id' | 'en'; kosong = mengikuti lawan bicara. */
   language?: string;
+  /**
+   * Cap balasan AI PER PERCAKAPAN dalam jendela bergulir 24 jam
+   * (Gelombang G6, klaim atomik di core/agent-guards.ts); kosong =
+   * bawaan runtime (20); 0 = cap nonaktif.
+   */
+  maxConversationReplies?: number;
 }
 
 const tsvector = customType<{ data: string }>({
