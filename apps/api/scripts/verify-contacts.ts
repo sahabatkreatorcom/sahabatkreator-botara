@@ -289,7 +289,7 @@ const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort();
 }
 
 // ---------- [6] impor CSV ----------
-let dewiId = "";
+
 {
   const csv = [
     "name,phone,email,tags,opt_in",
@@ -339,7 +339,7 @@ let dewiId = "";
   };
   const dewi = await findByName("Dewi Lestari");
   assert.ok(dewi, "kontak impor Dewi ada");
-  dewiId = dewi!.id;
+
   assert.deepEqual(dewi!.tags, ["lead", "baru"], "tag impor terbaca dari sel bertanda pisah");
   assert.equal(
     effectiveOptInStatus(dewi!),
