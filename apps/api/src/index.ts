@@ -433,8 +433,9 @@ routes.route(
     },
   }),
 );
-// Modul meta publik (Fase 7A) — webhook TUNGGAL Meta /meta/webhook untuk
-// Messenger + Instagram: handshake verify token + event bertanda tangan
+// Modul meta publik (Fase 7A) — webhook Meta /webhooks/meta untuk
+// Messenger + Instagram + /webhooks/whatsapp untuk WhatsApp (handler
+// yang sama): handshake verify token + event bertanda tangan
 // HMAC app secret (fail-closed 503 META_NOT_CONFIGURED tanpa secret).
 // App secret diselesaikan panel → env per request (Fase 7A.1).
 routes.route(

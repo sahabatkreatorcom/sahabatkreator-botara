@@ -421,6 +421,7 @@ export const en = {
     metaWebhookTitle: "Meta webhook",
     metaWebhookBody: "In your Meta app, open Webhooks and add the Callback URL and Verify Token below. Then subscribe to the messages field for each object you use.",
     metaWebhookUrlLabel: "Callback URL",
+    whatsappWebhookUrlLabel: "WhatsApp Callback URL",
     metaWebhookTokenLabel: "Verify Token",
     metaWebhookNotConfigured: "Webhook setup is not available yet.",
     metaWebhookSecretMissing: "Incoming webhooks will be rejected until the app secret is configured.",

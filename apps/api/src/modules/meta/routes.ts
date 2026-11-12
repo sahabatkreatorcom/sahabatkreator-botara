@@ -1,5 +1,5 @@
 import { timingSafeEqual, createHash } from "node:crypto";
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
   getProviderSecret,
   recordIntegrationLog,
@@ -13,12 +13,24 @@ import { apiError, type AppVariables } from "../../http";
 import { processMetaWebhookPayload } from "./process";
 
 /**
- * Modul meta publik (Fase 7A; WhatsApp Fase 7B) — webhook TUNGGAL Meta
- * untuk Messenger + Instagram + WhatsApp. TANPA sesi dashboard.
+ * Modul meta publik (Fase 7A; WhatsApp Fase 7B) — webhook Meta untuk
+ * Messenger + Instagram + WhatsApp. TANPA sesi dashboard.
  *
- *   GET  /meta/webhook   handshake verifikasi (hub.mode/hub.verify_token/
- *                        hub.challenge dari dashboard Meta App)
- *   POST /meta/webhook   event messaging bertanda tangan
+ *   GET  /webhooks/meta        handshake verifikasi (hub.mode/
+ *                              hub.verify_token/hub.challenge dari
+ *                              dashboard Meta App)
+ *   POST /webhooks/meta        event messaging bertanda tangan
+ *   GET|POST /webhooks/whatsapp  path kanonis per peruntukan WhatsApp —
+ *                              handler yang PERSIS sama (event WhatsApp
+ *                              Business memang masuk lewat webhook
+ *                              aplikasi Meta); hanya label provider
+ *                              baris log gerbangnya yang berbeda
+ *                              ('whatsapp').
+ *
+ * Penyeragaman URL 2026-11-12: path lama /meta/webhook TIDAK
+ * didaftarkan lagi (aturan pemilik: tanpa alias/fallback — registrasi
+ * Callback URL di dashboard Meta App wajib diperbarui ke path kanonis
+ * ini).
  *
  * Kepercayaan berlapis (berbeda dari Telegram yang per-akun):
  * 1. Handshake: `hub.verify_token` harus sama persis dengan token
@@ -47,7 +59,7 @@ import { processMetaWebhookPayload } from "./process";
  *
  * Fase 7B.1: setiap hit & event menulis baris `integration_log` dengan
  * outcome jujur per titik keluar (termasuk 503 belum terkonfigurasi &
- * 401 tanda tangan salah di gerbang bersama, provider 'meta'); payload
+ * 401 tanda tangan salah di gerbang bersama, provider gerbang sesuai path: 'meta' atau 'whatsapp'); payload
  * per baris event = seluruh payload hit (dibatasi ±32KB di core).
  * Handshake GET yang SUKSES sengaja tidak dicatat (bukan event).
  */
@@ -80,6 +92,8 @@ export interface MetaModuleOptions {
   graphApiVersion: string;
 }
 
+type ApiContext = Context<{ Variables: AppVariables }>;
+
 export function createMetaRoutes(
   bundle: AuthBundle | null,
   publisher: RealtimePublisher | null,
@@ -91,7 +105,7 @@ export function createMetaRoutes(
    * Fase 7B.1: pencatatan log integrasi untuk hit webhook Meta —
    * best-effort murni (tidak pernah mengubah respons). Baris pra-rute
    * (handshake gagal, secret belum terpasang, tanda tangan buruk)
-   * memakai provider 'meta' dan tenant NULL; baris per event memakai
+   * memakai provider gerbang path ('meta'/'whatsapp') dan tenant NULL; baris per event memakai
    * provider konkret sesudah resolusi akun.
    */
   const logIntegration = async (
@@ -105,7 +119,10 @@ export function createMetaRoutes(
     }
   };
 
-  app.get("/meta/webhook", async (c) => {
+  const handleHandshake = async (
+    c: ApiContext,
+    gateProvider: "meta" | "whatsapp",
+  ) => {
     // Token efektif per request (instruksi pemilik 2026-11-12): resolver
     // Panel Admin → env dengan cache ±60 dtk, pola yang sama seperti
     // app secret di POST — perubahan panel berlaku TANPA restart.
@@ -120,7 +137,7 @@ export function createMetaRoutes(
     if (!verifyToken) {
       await logIntegration({
         direction: "in",
-        provider: "meta",
+        provider: gateProvider,
         outcome: "rejected_unconfigured",
         summary: "GET handshake rejected: verify token not configured",
       });
@@ -153,15 +170,18 @@ export function createMetaRoutes(
     }
     await logIntegration({
       direction: "in",
-      provider: "meta",
+      provider: gateProvider,
       signatureValid: false,
       outcome: "rejected_signature",
       summary: "GET handshake rejected: verify token mismatch",
     });
     return apiError(c, 403, "FORBIDDEN", "Webhook verification failed");
-  });
+  };
 
-  app.post("/meta/webhook", async (c) => {
+  const handleEvent = async (
+    c: ApiContext,
+    gateProvider: "meta" | "whatsapp",
+  ) => {
     if (!bundle) {
       return apiError(c, 503, "INTERNAL_ERROR", "Database is not configured");
     }
@@ -174,7 +194,7 @@ export function createMetaRoutes(
     if (!appSecret) {
       await logIntegration({
         direction: "in",
-        provider: "meta",
+        provider: gateProvider,
         outcome: "rejected_unconfigured",
         summary: "POST rejected: meta app secret not configured",
       });
@@ -198,7 +218,7 @@ export function createMetaRoutes(
       }
       await logIntegration({
         direction: "in",
-        provider: "meta",
+        provider: gateProvider,
         signatureValid: false,
         outcome: "rejected_signature",
         summary: "POST rejected: signature verification failed",
@@ -220,7 +240,7 @@ export function createMetaRoutes(
       // Meta tidak me-retry selamanya; tidak ada yang disimpan.
       await logIntegration({
         direction: "in",
-        provider: "meta",
+        provider: gateProvider,
         signatureValid: true,
         outcome: "error",
         errorCode: "invalid_json",
@@ -246,7 +266,19 @@ export function createMetaRoutes(
       payload,
     );
     return c.json({ ok: true });
-  });
+  };
+
+  // Path kanonis per peruntukan (penyeragaman URL 2026-11-12, TANPA
+  // alias): satu handler yang sama melayani /webhooks/meta
+  // (Messenger + Instagram) dan /webhooks/whatsapp (WhatsApp
+  // Business memang masuk lewat webhook aplikasi Meta yang sama).
+  for (const [path, gateProvider] of [
+    ["/webhooks/meta", "meta"],
+    ["/webhooks/whatsapp", "whatsapp"],
+  ] as const) {
+    app.get(path, (c) => handleHandshake(c, gateProvider));
+    app.post(path, (c) => handleEvent(c, gateProvider));
+  }
 
   return app;
 }

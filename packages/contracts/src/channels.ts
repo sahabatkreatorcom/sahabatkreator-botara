@@ -260,8 +260,16 @@ export type ChannelAccountListResponse = z.infer<
  * sendiri. App secret TIDAK pernah termasuk di sini.
  */
 export const MetaWebhookInfoResponseSchema = z.object({
-  /** URL publik webhook tunggal: `{publicBaseUrl}/api/meta/webhook`. */
+  /** URL publik webhook kanonis Messenger/Instagram: `{publicBaseUrl}/api/webhooks/meta`. */
   webhookUrl: z.string(),
+  /**
+   * URL publik webhook kanonis per peruntukan WhatsApp:
+   * `{publicBaseUrl}/api/webhooks/whatsapp` — handler yang sama persis
+   * (event WhatsApp Business masuk lewat webhook aplikasi Meta);
+   * didaftarkan ke bidang Webhook aplikasi Meta untuk objek
+   * whatsapp_business_account.
+   */
+  whatsappWebhookUrl: z.string(),
   /** Verify token untuk ditempel ke Meta App; null bila env belum diset. */
   verifyToken: z.string().nullable(),
   /** True bila platform sudah punya app secret untuk memverifikasi tanda tangan. */

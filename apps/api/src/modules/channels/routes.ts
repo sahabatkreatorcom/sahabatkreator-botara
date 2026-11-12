@@ -851,7 +851,8 @@ export function createChannelsRoutes(
         ? await opts.metaWebhookVerifyToken()
         : opts.metaWebhookVerifyToken ?? null;
     const body = MetaWebhookInfoResponseSchema.parse({
-      webhookUrl: `${baseUrl}/api/meta/webhook`,
+      webhookUrl: `${baseUrl}/api/webhooks/meta`,
+      whatsappWebhookUrl: `${baseUrl}/api/webhooks/whatsapp`,
       verifyToken,
       appSecretConfigured,
     });

@@ -11,6 +11,7 @@
     "verify:http": "tsx scripts/verify-http.ts",
     "verify:oauth-kv": "tsx scripts/verify-oauth-kv.ts",
     "verify:meta-discovery": "tsx scripts/verify-meta-discovery.ts",
+    "verify:meta-webhook": "tsx scripts/verify-meta-webhook.ts",
     "verify:threads-oauth": "tsx scripts/verify-threads-oauth.ts",
     "verify:tiktok-oauth": "tsx scripts/verify-tiktok-oauth.ts",
     "verify:tiktok-avatar-r2": "tsx scripts/verify-tiktok-avatar-r2.ts",

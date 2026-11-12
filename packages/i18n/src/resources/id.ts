@@ -420,6 +420,7 @@ export const id: Resources = {
     metaWebhookTitle: "Webhook Meta",
     metaWebhookBody: "Di aplikasi Meta Anda, buka Webhooks lalu isi Callback URL dan Verify Token di bawah. Setelah itu berlangganan field messages untuk setiap objek yang dipakai.",
     metaWebhookUrlLabel: "Callback URL",
+    whatsappWebhookUrlLabel: "Callback URL WhatsApp",
     metaWebhookTokenLabel: "Verify Token",
     metaWebhookNotConfigured: "Pengaturan webhook belum tersedia.",
     metaWebhookSecretMissing: "Webhook masuk akan ditolak sampai app secret dikonfigurasi.",
