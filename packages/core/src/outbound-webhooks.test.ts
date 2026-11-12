@@ -131,6 +131,19 @@ describe("validasi URL anti-SSRF", () => {
     expect(res).toEqual({ ok: false, code: "WEBHOOK_URL_UNSAFE_HOST" });
   });
 
+  it("menolak literal IPv6 berbungkus kurung siku tanpa memanggil resolver", async () => {
+    const res = await validateOutboundWebhookUrl(
+      "https://[::1]/x",
+      failingResolver,
+    );
+    expect(res).toEqual({ ok: false, code: "WEBHOOK_URL_UNSAFE_HOST" });
+    const ula = await validateOutboundWebhookUrl(
+      "https://[fd00::1]/x",
+      failingResolver,
+    );
+    expect(ula).toEqual({ ok: false, code: "WEBHOOK_URL_UNSAFE_HOST" });
+  });
+
   it("menolak localhost dan resolusi yang CAMPURAN privat (rebinding)", async () => {
     expect(
       (await validateOutboundWebhookUrl("https://localhost:8443/x", publicResolver)).ok,

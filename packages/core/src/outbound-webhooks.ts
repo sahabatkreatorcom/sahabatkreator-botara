@@ -276,8 +276,14 @@ export async function validateOutboundWebhookUrl(
   if (hostname === "localhost" || hostname.endsWith(".localhost")) {
     return { ok: false, code: "WEBHOOK_URL_UNSAFE_HOST" };
   }
-  if (isIP(hostname)) {
-    return isPublicIpAddress(hostname)
+  // URL membungkus literal IPv6 dengan kurung siku ("[::1]") — lepas
+  // sebelum pemeriksaan IP, kalau tidak literal privat lolos ke DNS.
+  const bareHost =
+    hostname.startsWith("[") && hostname.endsWith("]")
+      ? hostname.slice(1, -1)
+      : hostname;
+  if (isIP(bareHost)) {
+    return isPublicIpAddress(bareHost)
       ? { ok: true, url: parsed.toString() }
       : { ok: false, code: "WEBHOOK_URL_UNSAFE_HOST" };
   }
