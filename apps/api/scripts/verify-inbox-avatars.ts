@@ -6,7 +6,11 @@
  * Membuktikan laporan pemilik "inbox avatar masih placeholder":
  *   [1] resolusi avatar efektif: kontak jangkar akun channel (kontak
  *       akun-dirinya) tanpa foto kontak mewarisi URL FOTO AKUN CHANNEL
- *       pada daftar kontak — bukan null. (Daftar inbox sendiri sejak
+ *       — bukan null. Sejak gelombang Perbaikan /contacts, kontak
+ *       jangkar TIDAK lagi tampil di daftar utama kontak (saringan
+ *       akun-sendiri; cakupannya di verify:contacts), jadi pewarisan
+ *       ini dibuktikan lewat endpoint DETAIL kontak, yang memakai
+ *       resolusi avatar efektif yang sama. (Daftar inbox sendiri sejak
  *       gelombang saringan Inbox hanya memuat percakapan pesan, jadi
  *       baris kind='channel' TIDAK lagi muncul di sana — yang diuji di
  *       sini untuk daftar inbox adalah ketiadaan baris channel itu,
@@ -291,6 +295,13 @@ async function listContacts(): Promise<
   };
   return body.contacts;
 }
+async function getContactDetail(
+  contactId: string,
+): Promise<{ id: string; avatarUrl: string | null }> {
+  const res = await app.request(`/tenants/${TENANT}/contacts/${contactId}`);
+  assert.equal(res.status, 200);
+  return (await res.json()) as { id: string; avatarUrl: string | null };
+}
 async function waitForContactPhoto(
   contactId: string,
   timeoutMs = 8000,
@@ -322,9 +333,15 @@ async function waitForContactPhoto(
   );
   const contacts = await listContacts();
   assert.equal(
-    contacts.find((row) => row.id === C_IG_SELF)?.avatarUrl,
+    contacts.find((row) => row.id === C_IG_SELF),
+    undefined,
+    "kontak jangkar akun IG tidak tampil di daftar utama kontak (saringan akun-sendiri)",
+  );
+  const detail = await getContactDetail(C_IG_SELF);
+  assert.equal(
+    detail.avatarUrl,
     channelUrl(ACC_IG),
-    "kontak jangkar akun IG harus mewarisi foto akun channel-nya",
+    "kontak jangkar akun IG harus mewarisi foto akun channel-nya (endpoint detail)",
   );
   console.log("[1] fallback foto akun channel untuk kontak jangkar: OK");
 }
@@ -339,9 +356,15 @@ async function waitForContactPhoto(
   );
   const contacts = await listContacts();
   assert.equal(
-    contacts.find((row) => row.id === C_IG2_SELF)?.avatarUrl,
+    contacts.find((row) => row.id === C_IG2_SELF),
+    undefined,
+    "kontak jangkar kedua juga tidak tampil di daftar utama kontak",
+  );
+  const detail2 = await getContactDetail(C_IG2_SELF);
+  assert.equal(
+    detail2.avatarUrl,
     contactUrl(C_IG2_SELF),
-    "kontak jangkar yang berfoto tetap memakai foto kontak, bukan foto akun",
+    "kontak jangkar yang berfoto tetap memakai foto kontak, bukan foto akun (endpoint detail)",
   );
   assert.equal(
     convs.find((row) => row.id === V_TG_DM)?.contactAvatarUrl,
