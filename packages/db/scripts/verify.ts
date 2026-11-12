@@ -110,7 +110,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 1 tabel Pemisahan Google / migrasi 0023 (google_connections)
 // + 1 tabel Templat Instruction / migrasi 0027 (agent_instruction_templates)
 // + 1 tabel Gelombang G2 / migrasi 0028 (sequence_templates)
-assert.equal(Number(tablesRes.rows[0].count), 66);
+// + 1 tabel Gelombang G3 / migrasi 0029 (flow_versions)
+assert.equal(Number(tablesRes.rows[0].count), 67);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -271,7 +272,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-12: migrasi 0028 (Gelombang G2 — templat sequence pribadi)
 // menambah `sequence_templates` dengan tenant_isolation → 91.
-assert.equal(Number(policies.rows[0].count), 91);
+//
+// 2026-11-12: migrasi 0029 (Gelombang G3 — versioning flow) menambah
+// `flow_versions` dengan tenant_isolation → 92.
+assert.equal(Number(policies.rows[0].count), 92);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -287,7 +291,7 @@ await db.exec(`
     automation_steps, sequence_enrollments,
     platform_settings, profile_photos, integration_log,
     broadcasts, broadcast_recipients,
-    flows, flow_runs, flow_run_steps,
+    flows, flow_versions, flow_runs, flow_run_steps,
     saved_replies,
     conversation_notes,
     whatsapp_templates,
@@ -2423,8 +2427,10 @@ function oneHotVector(index: number): string {
   // 2026-11-12: migrasi 0028 (Gelombang G2 — templat sequence pribadi)
   // menambah sequence_templates beserta tenant_isolation-nya → tabel 66,
   // policy 91.
-  assert.equal(counts.rows[0].tables, "66");
-  assert.equal(counts.rows[0].policies, "91");
+  // 2026-11-12: migrasi 0029 (Gelombang G3 — versioning flow) menambah
+  // flow_versions beserta tenant_isolation-nya → tabel 67, policy 92.
+  assert.equal(counts.rows[0].tables, "67");
+  assert.equal(counts.rows[0].policies, "92");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

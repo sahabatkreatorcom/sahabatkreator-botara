@@ -23,6 +23,17 @@ import { contacts, conversations, messages } from "./inbox";
  *                    satu node trigger). Status draft|active|archived.
  *                    Graf DRAFT boleh belum sah; validasi menyeluruh
  *                    terjadi di core saat aktivasi (FLOW_GRAPH_INVALID).
+ * - flow_versions  : snapshot graf yang TIDAK bisa diubah, ditulis
+ *                    SETIAP aktivasi flow (G3 — adopsi pola zernflow
+ *                    00010_flow_versions): nomor urut per flow, graf
+ *                    utuh, nama flow saat itu, pengaktif, dan
+ *                    `restored_from_version` bila versi ini lahir dari
+ *                    pemulihan versi lama. Append-only: pemulihan
+ *                    melahirkan versi BARU, sejarah tidak ditulis
+ *                    ulang. Run mem-pin versi lewat
+ *                    `flow_runs.flow_version_id` dan eksekutor membaca
+ *                    SNAPSHOT itu — bukan graf live — agar suntingan
+ *                    flow tidak mengubah run yang sedang berjalan.
  * - flow_runs      : satu eksekusi flow untuk satu (flow, pesan
  *                    pemicu) — unik parsial di DB sebagai idempotensi
  *                    terakhir. Status running|waiting|completed|failed|
@@ -30,6 +41,12 @@ import { contacts, conversations, messages } from "./inbox";
  *                    adalah penanda resume eksekutor worker; `context`
  *                    jsonb menyimpan konteks eksekusi (teks pesan
  *                    pemicu untuk predikat message_contains).
+ *                    `flow_version_id`/`flow_version` = pin versi graf
+ *                    yang dijalankan run ini; NULL = run warisan
+ *                    (lahir sebelum G3, atau flow aktif warisan yang
+ *                    belum pernah diaktifkan ulang) → eksekutor jatuh
+ *                    kembali ke graf live secara jujur, tanpa snapshot
+ *                    retroaktif yang dikarang.
  * - flow_run_steps : log per langkah (observabilitas yang diadopsi
  *                    dari riset referensi): urutan (seq), node, tipe,
  *                    ringkasan hasil terstruktur, error bila gagal.
@@ -86,6 +103,52 @@ export const flows = pgTable(
   ],
 );
 
+/**
+ * Snapshot versi flow (G3): satu baris per AKTIVASI. Ditulis core di
+ * dalam transaksi aktivasi yang sama (crud.activateFlow /
+ * versions.restoreFlowVersion) — tidak pernah diubah atau dihapus
+ * kecuali flow induknya dihapus (cascade). Unik (flow_id, version):
+ * nomor tidak pernah dipakai ulang walau dua aktivasi balapan.
+ */
+export const flowVersions = pgTable(
+  "flow_versions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    flowId: uuid("flow_id")
+      .notNull()
+      .references(() => flows.id, { onDelete: "cascade" }),
+    /** Nomor urut versi per flow (1-based, tanpa celah dari aktivasi). */
+    version: integer("version").notNull(),
+    /** Nama flow saat versi ini diaktifkan (label historis). */
+    name: varchar("name", { length: 255 }).notNull(),
+    /** Snapshot graf utuh {nodes, edges} persis seperti yang diaktifkan. */
+    graph: jsonb("graph").notNull(),
+    /**
+     * Versi sumber bila baris ini lahir dari pemulihan (restore);
+     * NULL untuk aktivasi biasa dari draft.
+     */
+    restoredFromVersion: integer("restored_from_version"),
+    /** User yang mengaktifkan — informasional, SET NULL bila hilang. */
+    activatedByUserId: uuid("activated_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("flow_versions_flow_version_unique").on(t.flowId, t.version),
+    index("flow_versions_tenant_id_idx").on(t.tenantId),
+    index("flow_versions_flow_id_idx").on(t.flowId),
+  ],
+);
+
+export type FlowVersion = typeof flowVersions.$inferSelect;
+export type NewFlowVersion = typeof flowVersions.$inferInsert;
+
 export const flowRuns = pgTable(
   "flow_runs",
   {
@@ -96,6 +159,19 @@ export const flowRuns = pgTable(
     flowId: uuid("flow_id")
       .notNull()
       .references(() => flows.id, { onDelete: "cascade" }),
+    /**
+     * Pin versi graf (G3): snapshot `flow_versions` yang dijalankan
+     * run ini. Eksekutor membaca graf DARI snapshot ini, bukan graf
+     * live flows. NULL = run warisan tanpa pin → fallback graf live.
+     * SET NULL bila baris versi hilang (versi append-only; hanya
+     * cascade hapus flow yang bisa menghilangkannya, dan itu ikut
+     * menghapus run ini).
+     */
+    flowVersionId: uuid("flow_version_id").references(() => flowVersions.id, {
+      onDelete: "set null",
+    }),
+    /** Nomor versi ter-pin (denormalisasi dari baris versi saat pin). */
+    flowVersion: integer("flow_version"),
     conversationId: uuid("conversation_id")
       .notNull()
       .references(() => conversations.id, { onDelete: "cascade" }),
