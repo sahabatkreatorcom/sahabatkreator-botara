@@ -813,12 +813,45 @@ developers.facebook.com → aplikasi Threads Botara):
   komentar sampai akun dihubungkan ulang agar tokennya membawa
   `threads_manage_replies`.
 
+## Gelombang G13 — Pelengkap Wacrm (2026-11-13)
+
+Gelombang ini TIDAK menambah kredensial, izin, atau langganan baru —
+semua butirnya menumpang token/izin yang sudah ada. Yang perlu
+diketahui pemilik hanya dua catatan perilaku jujur:
+
+- **Perekam pesan suara di Inbox (butir 10)**: format rekaman
+  ditentukan browser. Firefox merekam Ogg/Opus dan Safari MP4 —
+  keduanya diterima WhatsApp. **Chrome hanya bisa merekam
+  WebM/Opus; WhatsApp menolak format WebM saat pengiriman**, jadi
+  catatan suara dari Chrome ke kontak WhatsApp akan berakhir di
+  panel pesan gagal dengan penjelasan (ke Telegram format itu
+  terkirim sebagai lampiran audio). Ini batasan browser × platform,
+  bukan bug: tidak ada tindakan yang bisa membukanya dari sisi
+  pemilik selain memakai Firefox/Safari untuk merekam suara ke
+  kontak WhatsApp.
+- **Kesehatan nomor WhatsApp (butir 5)**: rating kualitas + tier
+  dibaca langsung dari Meta memakai token akun yang sudah terhubung
+  (tidak ada izin baru). Untuk nomor tanpa riwayat pengiriman, Meta
+  memang tidak mengembalikan rating — UI menampilkannya sebagai
+  "Tidak diketahui", apa adanya.
+- **Reaksi pesan masuk WhatsApp (butir 11)**: event reaksi tiba
+  lewat field webhook `messages` yang sudah dilanggankan — tidak
+  ada langganan baru. Reaksi kontak hanya tercatat bila pesan yang
+  direaksi ada di data kita; reaksi pada pesan di luar jangkauan
+  data dilewati dengan catatan log, bukan dikarang.
+- Checklist penyiapan Dashboard, KPI waktu balas, kehadiran tim,
+  banner ambil-alih AI, dan penerjemah error Meta (butir 4, 6, 7,
+  8, 9) murni memakai data internal yang sudah ada — tidak ada
+  tindakan pemilik.
+
 ---
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
 Gelombang G5 (pemicu postback/quick reply/welcome) + Gelombang G6
-(pengaman AI pelengkap) + Gelombang G7 (comment-to-DM Threads).
+(pengaman AI pelengkap) + Gelombang G7 (comment-to-DM Threads) +
+Gelombang G13 (pelengkap Wacrm — tanpa tindakan pemilik baru, hanya
+catatan perilaku).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
