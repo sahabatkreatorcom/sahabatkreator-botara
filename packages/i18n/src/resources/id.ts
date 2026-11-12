@@ -1568,6 +1568,7 @@ export const id: Resources = {
       "Rencanakan postingan ke channel Telegram, lalu biarkan jam tayangnya bekerja.",
     timezoneNote: "Semua jam di halaman ini memakai zona waktu workspace: {timezone}.",
     newPost: "Postingan baru",
+    editPost: "Ubah postingan",
     target: "Channel",
     targets: "Channel sasaran",
     groupHint:
@@ -1586,6 +1587,8 @@ export const id: Resources = {
     publishNow: "Terbitkan sekarang",
     schedule: "Jadwalkan",
     saveDraft: "Simpan draf",
+    saveChanges: "Simpan perubahan",
+    discardChanges: "Buang perubahan yang belum disimpan?",
     cancel: "Batalkan",
     cancelScheduled: "Batalkan jadwal",
     delete: "Hapus",

@@ -1569,6 +1569,7 @@ export const en = {
       "Plan posts to your Telegram channel and let the publish time do the work.",
     timezoneNote: "All times on this page use the workspace timezone: {timezone}.",
     newPost: "New post",
+    editPost: "Edit post",
     target: "Channel",
     targets: "Target channels",
     groupHint:
@@ -1587,6 +1588,8 @@ export const en = {
     publishNow: "Publish now",
     schedule: "Schedule",
     saveDraft: "Save draft",
+    saveChanges: "Save changes",
+    discardChanges: "Discard unsaved changes?",
     cancel: "Cancel",
     cancelScheduled: "Cancel schedule",
     delete: "Delete",
