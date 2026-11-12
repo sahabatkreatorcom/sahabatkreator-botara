@@ -22,6 +22,8 @@ import {
   computeMessagingWindow,
   decryptChannelSecret,
   getChannelAccount,
+  getConversationSlaStates,
+  type ConversationSlaState,
   getReactionTarget,
   listContactPhotoFetchCandidates,
   listConversations,
@@ -58,6 +60,7 @@ import { resolveTenantForUser } from "../tenants/guard";
 export function serializeConversation(
   row: ConversationWithSummary,
   contactAvatarUrlValue: string | null = null,
+  slaState: ConversationSlaState | null = null,
 ): ConversationResponse {
   // Fase 16C: keadaan jendela pesan bebas dihitung server — UI memakai
   // ini untuk mematikan kotak balasan LEBIH DULU, bukan menunggu
@@ -83,6 +86,26 @@ export function serializeConversation(
       lastInboundAt: window.lastInboundAt?.toISOString() ?? null,
       expiresAt: window.expiresAt?.toISOString() ?? null,
     },
+    // SLA manusia (G15): keadaan jendela menunggu yang terbuka,
+    // dihitung core saat baca; null = tidak ada jendela SLA terbuka.
+    sla: slaState
+      ? {
+          openedAt: slaState.openedAt.toISOString(),
+          targetMinutes: slaState.targetMinutes,
+          scheduleSource: slaState.scheduleSource,
+          measured: slaState.measured,
+          elapsedWorkingMinutes:
+            slaState.elapsedWorkingMinutes === null
+              ? null
+              : Math.round(slaState.elapsedWorkingMinutes * 10) / 10,
+          remainingWorkingMinutes:
+            slaState.remainingWorkingMinutes === null
+              ? null
+              : Math.round(slaState.remainingWorkingMinutes * 10) / 10,
+          deadlineAt: slaState.deadlineAt?.toISOString() ?? null,
+          breached: slaState.breached,
+        }
+      : null,
     unreadCount: row.unreadCount,
     lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
     lastMessagePreview: row.lastMessagePreview,
@@ -314,9 +337,20 @@ export function createInboxRoutes(
     // akun itu sendiri — himpunan pemilik berfoto dihitung sekali per
     // daftar oleh resolveConversationAvatarUrls.
     const avatarUrls = await resolveConversationAvatarUrls(tenant.id, rows);
+    // Keadaan SLA jendela terbuka untuk halaman ini (G15) — satu
+    // panggilan batch core, bukan per percakapan.
+    const slaStates = await getConversationSlaStates(
+      bundle.db,
+      { tenantId: tenant.id },
+      rows.map((row) => row.id),
+    );
     const body = ConversationListResponseSchema.parse({
       conversations: rows.map((row) =>
-        serializeConversation(row, avatarUrls.get(row.id) ?? null),
+        serializeConversation(
+          row,
+          avatarUrls.get(row.id) ?? null,
+          slaStates.get(row.id) ?? null,
+        ),
       ),
     });
     return c.json(body);

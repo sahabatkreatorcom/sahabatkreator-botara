@@ -70,6 +70,7 @@ import { createSegmentsRoutes } from "./modules/segments/routes";
 import { createAppointmentsRoutes } from "./modules/appointments/routes";
 import { createNotesRoutes } from "./modules/notes/routes";
 import { createTeamRoutes } from "./modules/team/routes";
+import { createSlaRoutes } from "./modules/sla/routes";
 import { createAnalyticsRoutes } from "./modules/analytics/routes";
 import { createDashboardRoutes } from "./modules/dashboard/routes";
 import {
@@ -413,6 +414,10 @@ routes.route(
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
   }),
 );
+// Modul SLA & jam kerja (G15) — jadwal anggota
+// /tenants/:tenantId/team/members/:userId/work-schedule +
+// pengaturan /tenants/:tenantId/sla/settings.
+routes.route("/", createSlaRoutes(authBundle));
 // Modul analitik (Fase 9B) — pemakaian AI /tenants/:tenantId/analytics/ai-usage.
 routes.route("/", createAnalyticsRoutes(authBundle));
 // Modul dashboard (Fase 16A) — ringkasan live /tenants/:tenantId/dashboard/summary.
