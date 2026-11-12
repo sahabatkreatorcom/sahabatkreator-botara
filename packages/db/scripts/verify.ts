@@ -112,7 +112,9 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 1 tabel Gelombang G2 / migrasi 0028 (sequence_templates)
 // + 1 tabel Gelombang G3 / migrasi 0029 (flow_versions)
 // + 1 tabel Gelombang G8 / migrasi 0032 (contact_notes)
-assert.equal(Number(tablesRes.rows[0].count), 68);
+// + 2 tabel Gelombang G9 / migrasi 0033 (broadcast_recurrence_rules,
+//   broadcast_recurrence_occurrences)
+assert.equal(Number(tablesRes.rows[0].count), 70);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -279,7 +281,12 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-12: migrasi 0032 (Gelombang G8 — catatan level kontak)
 // menambah `contact_notes` dengan tenant_isolation → 93.
-assert.equal(Number(policies.rows[0].count), 93);
+//
+// 2026-11-12: migrasi 0033 (Gelombang G9 — broadcast berulang)
+// menambah `broadcast_recurrence_rules` (tenant_isolation +
+// system_broadcast_recurrence_scan untuk penyapu worker) dan
+// `broadcast_recurrence_occurrences` (tenant_isolation) → 96.
+assert.equal(Number(policies.rows[0].count), 96);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2436,8 +2443,12 @@ function oneHotVector(index: number): string {
   // 2026-11-12: migrasi 0032 (Gelombang G8 — catatan level kontak)
   // menambah contact_notes beserta tenant_isolation-nya → tabel 68,
   // policy 93.
-  assert.equal(counts.rows[0].tables, "68");
-  assert.equal(counts.rows[0].policies, "93");
+  // 2026-11-12: migrasi 0033 (Gelombang G9 — broadcast berulang)
+  // menambah broadcast_recurrence_rules (tenant_isolation + policy
+  // pindai sistem) dan broadcast_recurrence_occurrences
+  // (tenant_isolation) → tabel 70, policy 96.
+  assert.equal(counts.rows[0].tables, "70");
+  assert.equal(counts.rows[0].policies, "96");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

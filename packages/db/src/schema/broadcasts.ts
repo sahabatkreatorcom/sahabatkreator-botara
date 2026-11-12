@@ -248,3 +248,179 @@ export type Broadcast = typeof broadcasts.$inferSelect;
 export type NewBroadcast = typeof broadcasts.$inferInsert;
 export type BroadcastRecipient = typeof broadcastRecipients.$inferSelect;
 export type NewBroadcastRecipient = typeof broadcastRecipients.$inferInsert;
+
+/**
+ * Broadcast Berulang (G9 — Tier 2 butir 9):
+ * - broadcast_recurrence_rules       : aturan berulang milik tenant.
+ *   Menyimpan SNAPSHOT definisi broadcast (kolom definisi yang sama
+ *   seperti `broadcasts`) + pola pengulangan. `source_broadcast_id`
+ *   mencatat broadcast asal salinan (SET NULL — aturan tidak mati
+ *   bersama sumbernya). `next_run_at` = slot berikutnya yang belum
+ *   diproses; NULL pada aturan terminal (completed/cancelled).
+ * - broadcast_recurrence_occurrences : ledger per slot. UNIQUE
+ *   (rule_id, slot_at) adalah kunci idempotensi materialisasi.
+ * Materialisasi memanggil jalur createBroadcast + scheduleBroadcast
+ * yang ada — tidak ada mesin kirim kedua.
+ */
+
+export const broadcastRecurrenceFrequencyEnum = pgEnum(
+  "broadcast_recurrence_frequency",
+  ["daily", "weekly", "monthly"],
+);
+
+export const broadcastRecurrenceStatusEnum = pgEnum(
+  "broadcast_recurrence_status",
+  ["active", "paused", "completed", "cancelled"],
+);
+
+export const broadcastRecurrenceOccurrenceStatusEnum = pgEnum(
+  "broadcast_recurrence_occurrence_status",
+  ["claimed", "created", "skipped", "missed"],
+);
+
+export const broadcastRecurrenceRules = pgTable(
+  "broadcast_recurrence_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    channelAccountId: uuid("channel_account_id")
+      .notNull()
+      .references(() => channelAccounts.id, { onDelete: "cascade" }),
+    /**
+     * Broadcast asal definisi disalin (provenance). SET NULL: aturan
+     * adalah snapshot — menghapus sumber tidak menghapus jadwal.
+     */
+    sourceBroadcastId: uuid("source_broadcast_id").references(
+      () => broadcasts.id,
+      { onDelete: "set null" },
+    ),
+    /** Nama aturan; broadcast anak dinamai dari nama ini + tanggal slot. */
+    name: varchar("name", { length: 255 }).notNull(),
+    /** Sama seperti broadcasts.message_text (snapshot BODY untuk WhatsApp). */
+    messageText: varchar("message_text", { length: 4096 }).notNull(),
+    whatsappTemplateId: uuid("whatsapp_template_id").references(
+      () => whatsappTemplates.id,
+      { onDelete: "set null" },
+    ),
+    templateVariableSources: jsonb("template_variable_sources")
+      .notNull()
+      .default([])
+      .$type<string[]>(),
+    /** Sama seperti broadcasts.audience_filter (BroadcastAudienceFilter). */
+    audienceFilter: jsonb("audience_filter").notNull().default({}),
+    requireOptIn: boolean("require_opt_in").notNull().default(false),
+    abSplitPercentB: integer("ab_split_percent_b"),
+    variantBMessageText: varchar("variant_b_message_text", { length: 4096 }),
+    variantBWhatsappTemplateId: uuid(
+      "variant_b_whatsapp_template_id",
+    ).references(() => whatsappTemplates.id, { onDelete: "set null" }),
+    variantBTemplateVariableSources: jsonb(
+      "variant_b_template_variable_sources",
+    )
+      .notNull()
+      .default([])
+      .$type<string[]>(),
+    frequency: broadcastRecurrenceFrequencyEnum("frequency").notNull(),
+    /** Setiap N (hari/minggu/bulan sesuai frequency). */
+    interval: integer("interval").notNull().default(1),
+    /**
+     * Hari aktif mingguan (0=Minggu..6=Sabtu); hanya bermakna untuk
+     * frequency 'weekly'. Kosong = hari yang sama dengan starts_at.
+     */
+    daysOfWeek: jsonb("days_of_week").notNull().default([]).$type<number[]>(),
+    /**
+     * Tanggal bulanan (1..31); hanya bermakna untuk 'monthly'.
+     * Tanggal melampaui akhir bulan dijepit ke hari terakhir bulan
+     * itu. NULL (dan last_day_of_month false) = tanggal starts_at.
+     */
+    dayOfMonth: integer("day_of_month"),
+    /** Monthly: slot selalu di hari terakhir bulan. */
+    lastDayOfMonth: boolean("last_day_of_month").notNull().default(false),
+    /** Zona waktu IANA aturan — semua perhitungan slot dalam zona ini. */
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    /** Jangkar: slot pertama; jam dindingnya (di timezone) dipakai semua slot. */
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    /** Slot terakhir yang masih boleh lahir (inklusif); NULL = tanpa batas tanggal. */
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** Batas jumlah broadcast anak yang dibuat; NULL = tanpa batas jumlah. */
+    maxOccurrences: integer("max_occurrences"),
+    /** Jumlah broadcast anak yang sudah benar-benar dibuat (ledger 'created'). */
+    occurrencesCreated: integer("occurrences_created").notNull().default(0),
+    status: broadcastRecurrenceStatusEnum("status").notNull().default("active"),
+    /** Slot berikutnya yang belum diproses; NULL bila aturan terminal. */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("broadcast_recurrence_rules_tenant_id_idx").on(t.tenantId),
+    index("broadcast_recurrence_rules_tenant_status_idx").on(
+      t.tenantId,
+      t.status,
+    ),
+    index("broadcast_recurrence_rules_due_idx").on(t.nextRunAt),
+  ],
+);
+
+export const broadcastRecurrenceOccurrences = pgTable(
+  "broadcast_recurrence_occurrences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => broadcastRecurrenceRules.id, { onDelete: "cascade" }),
+    /** Instan slot (UTC) — bersama rule_id membentuk kunci idempotensi. */
+    slotAt: timestamp("slot_at", { withTimezone: true }).notNull(),
+    status: broadcastRecurrenceOccurrenceStatusEnum("status").notNull(),
+    /**
+     * Alasan untuk skipped/missed: 'rule_paused' | 'slot_expired' |
+     * 'claim_stale' | kode gerbang buat/jadwalkan (channel_not_found,
+     * channel_disconnected, channel_unsupported, template_required,
+     * template_not_approved, segment_not_found, message_required,
+     * ab_incomplete). NULL untuk created/claimed.
+     */
+    reason: varchar("reason", { length: 64 }),
+    /** Broadcast anak yang lahir dari slot ini (hanya status created). */
+    broadcastId: uuid("broadcast_id").references(() => broadcasts.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("broadcast_recurrence_occurrences_rule_slot_unique").on(
+      t.ruleId,
+      t.slotAt,
+    ),
+    index("broadcast_recurrence_occurrences_tenant_id_idx").on(t.tenantId),
+    index("broadcast_recurrence_occurrences_rule_slot_idx").on(
+      t.ruleId,
+      t.slotAt,
+    ),
+  ],
+);
+
+export type BroadcastRecurrenceRule =
+  typeof broadcastRecurrenceRules.$inferSelect;
+export type NewBroadcastRecurrenceRule =
+  typeof broadcastRecurrenceRules.$inferInsert;
+export type BroadcastRecurrenceOccurrence =
+  typeof broadcastRecurrenceOccurrences.$inferSelect;
+export type NewBroadcastRecurrenceOccurrence =
+  typeof broadcastRecurrenceOccurrences.$inferInsert;
