@@ -377,6 +377,11 @@ export const FlowNodeTypeSchema = z.enum([
   // G17 — gambar dinamis: kartu PNG berisi teks dari konteks run,
   // dirender tanpa dependensi raster (font bitmap tertanam di core).
   "send_dynamic_image",
+  // G18 — pesan + tombol aksi: "salin teks" (copy_text) dan
+  // "telepon" (call) dalam bentuk NATIF kanal bila platform
+  // mendukungnya, fallback teks tercatat bila tidak (lihat
+  // ACTION_BUTTON_NATIVE_SUPPORT).
+  "send_action_buttons",
 ]);
 export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
 
@@ -611,10 +616,66 @@ export const FlowNodeConfigSchema = z.union([
     backgroundColor: z.string().min(4).max(7).optional(),
     accentColor: z.string().min(4).max(7).optional(),
   }),
+  // G18 — send_action_buttons: teks pesan + 1..3 tombol aksi.
+  // `value` adalah templat pesan juga: untuk copy_text = teks yang
+  // disalin pelanggan; untuk call = nomor telepon tujuan.
+  z.object({
+    text: z.string().min(1).max(2000),
+    buttons: z
+      .array(
+        z.object({
+          kind: z.enum(["copy_text", "call"]),
+          label: z.string().min(1).max(64),
+          value: z.string().min(1).max(320),
+        }),
+      )
+      .min(1)
+      .max(3),
+  }),
   // ai_response / handoff / end: config kosong.
   z.object({}),
 ]);
 export type FlowNodeConfig = z.infer<typeof FlowNodeConfigSchema>;
+
+/** Jenis tombol aksi node `send_action_buttons` (G18). */
+export type FlowActionButtonKind = "copy_text" | "call";
+
+/** Satu tombol aksi pada config node `send_action_buttons` (G18). */
+export interface FlowActionButton {
+  kind: FlowActionButtonKind;
+  label: string;
+  /** Templat pesan: teks yang disalin (copy_text) / nomor tujuan (call). */
+  value: string;
+}
+
+/**
+ * Dukungan NATIF platform untuk tombol aksi `send_action_buttons`
+ * (G18) — satu-satunya peta kebenaran; pembangun muatan di core dan
+ * catatan builder membaca dari sini:
+ * - telegram: copy_text adalah tombol inline Bot API resmi
+ *   (`copy_text`, Bot API 7.0+); call = tombol URL `tel:` resmi.
+ * - messenger: call adalah tombol `phone_number` template tombol
+ *   Send API; copy_text TIDAK punya bentuk natif di Send API.
+ * - whatsapp: pesan interaktif Cloud API tidak punya tombol salin
+ *   maupun telepon (keduanya hanya ada pada TEMPLATE pesan yang
+ *   disetujui Meta — di luar jangkauan node ini).
+ * - instagram/webchat/threads/dll.: tidak ada bentuk natif yang
+ *   terdokumentasi untuk dua aksi ini.
+ * Tombol tanpa dukungan natif TIDAK gagal diam-diam: nilainya
+ * ditulis sebagai baris teks terbaca di badan pesan dan modenya
+ * tercatat di detail langkah run ("text_fallback").
+ */
+export const ACTION_BUTTON_NATIVE_SUPPORT: Record<
+  string,
+  Record<FlowActionButtonKind, boolean>
+> = {
+  telegram: { copy_text: true, call: true },
+  messenger: { copy_text: false, call: true },
+  whatsapp: { copy_text: false, call: false },
+  instagram: { copy_text: false, call: false },
+  webchat: { copy_text: false, call: false },
+  threads: { copy_text: false, call: false },
+};
 
 /**
  * Satu pertanyaan node questionnaire (Fase 13E) — bentuk kanonis yang

@@ -145,6 +145,10 @@ import {
   skipMissingQuestionnaireTargets,
 } from "./evaluate";
 import { buildCatalogMessage } from "./catalog-native";
+import {
+  actionButtonsConfigOf,
+  buildActionButtonsDelivery,
+} from "./action-buttons";
 
 // ---------------------------------------------------------------------------
 // Eksekusi run (sisi worker, job `flow.step`)
@@ -1316,6 +1320,60 @@ async function executeNodeInTx(
       return {
         detail: { outcome: "cart_empty" },
         branch: "empty",
+      };
+    }
+
+    case "send_action_buttons": {
+      // G18: pesan + tombol aksi salin teks / telepon. Bentuk natif
+      // per provider dibangun MURNI oleh buildActionButtonsDelivery
+      // (peta dukungan di contracts): Telegram = keyboard inline
+      // (copy_text + URL tel:), Messenger = template tombol
+      // phone_number; tombol tanpa bentuk natif turun sebagai baris
+      // teks terbaca di badan pesan — modenya TERCATAT di detail
+      // langkah, tidak pernah hilang diam-diam.
+      if (!ctx.contact) throw new FlowNodeError("kontak run tidak ditemukan");
+      if (!ctx.conversation) {
+        throw new FlowNodeError("percakapan run tidak ditemukan");
+      }
+      const config = actionButtonsConfigOf(node);
+      if (!config.text || config.buttons.length === 0) {
+        throw new FlowNodeError(
+          "send_action_buttons tanpa teks/tombol",
+          "action_buttons_unconfigured",
+        );
+      }
+      const vars = { name: ctx.contact.name };
+      const built = buildActionButtonsDelivery({
+        provider: ctx.conversation.provider,
+        text: renderMessageText(config.text, vars),
+        buttons: config.buttons.map((b) => ({
+          kind: b.kind,
+          label: renderMessageText(b.label, vars),
+          value: renderMessageText(b.value, vars),
+        })),
+      });
+      const outboundId = built.interactivePayload
+        ? await queueFlowOutboundInteractive(tx, tenantId, run, ctx.conversation, {
+            text: built.contentText,
+            interactivePayload: built.interactivePayload,
+          })
+        : await queueFlowOutboundText(
+            tx,
+            tenantId,
+            run,
+            ctx.conversation,
+            built.contentText,
+          );
+      return {
+        detail: {
+          outcome: "buttons_sent",
+          format: built.interactivePayload
+            ? built.interactivePayload.kind
+            : "text",
+          buttons: built.modes,
+          outboundMessageId: outboundId,
+        },
+        outboundMessageId: outboundId,
       };
     }
 

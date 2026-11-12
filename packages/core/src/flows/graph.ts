@@ -101,6 +101,8 @@ export const NODE_TYPES = new Set([
   "send_catalog",
   "cart_summary",
   "send_dynamic_image",
+  // G18 — tombol aksi salin teks / telepon
+  "send_action_buttons",
 ]);
 
 /**

@@ -359,6 +359,23 @@ export function startMetaDeliveryPoller(
                   ),
               )
             : delivery.accountExternalId;
+        // G18: tombol aksi — template tombol Send API (Messenger;
+        // hanya tombol telepon yang natif di sini, teks salin sudah
+        // diturunkan core menjadi baris teks di contentText).
+        if (
+          delivery.provider === "messenger" &&
+          delivery.interactivePayload?.kind === "messenger_button_template"
+        ) {
+          return (
+            await client.sendButtonTemplateMessage({
+              accountExternalId: sendObjectId,
+              recipientExternalId: delivery.recipientExternalId,
+              text: delivery.contentText ?? "",
+              buttons: delivery.interactivePayload.buttons,
+              recipientCommentId: delivery.providerCommentId,
+            })
+          ).providerMessageId;
+        }
         // G17: katalog natif — template generik Send API (satu
         // elemen per produk + tombol postback Tambah ke Keranjang).
         if (delivery.interactivePayload?.kind === "generic_template") {

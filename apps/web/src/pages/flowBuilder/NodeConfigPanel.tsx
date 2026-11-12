@@ -84,6 +84,23 @@ export function NodeConfigPanel({
   const set = (patch: Record<string, unknown>) =>
     onChange(node.id, { ...config, ...patch });
   const str = (v: unknown) => (typeof v === "string" ? v : "");
+  // G18: daftar tombol aksi node send_action_buttons (bentuk config
+  // kanonis contracts; dibaca defensif seperti config lain).
+  const actionButtonsOf = (
+    cfg: Record<string, unknown>,
+  ): Array<{ kind: "copy_text" | "call"; label: string; value: string }> => {
+    if (!Array.isArray(cfg.buttons)) return [];
+    return cfg.buttons
+      .filter(
+        (b): b is Record<string, unknown> =>
+          !!b && typeof b === "object",
+      )
+      .map((b) => ({
+        kind: b.kind === "call" ? ("call" as const) : ("copy_text" as const),
+        label: typeof b.label === "string" ? b.label : "",
+        value: typeof b.value === "string" ? b.value : "",
+      }));
+  };
   const numVal = (v: unknown, fallback: number) =>
     typeof v === "number" && Number.isFinite(v) ? v : fallback;
 
@@ -971,6 +988,124 @@ export function NodeConfigPanel({
             </div>
           </div>
           <p className="text-xs text-muted">{t("flows.dynamicImageLimits")}</p>
+        </>
+      ) : null}
+
+      {type === "send_action_buttons" ? (
+        <>
+          <p className="text-xs text-muted">{t("flows.actionButtonsNote")}</p>
+          <div>
+            <label className={labelClass} htmlFor="cfg-ab-text">
+              {t("flows.actionButtonsTextLabel")}
+            </label>
+            <textarea
+              id="cfg-ab-text"
+              className={inputClass}
+              rows={3}
+              maxLength={2000}
+              disabled={readOnly}
+              placeholder={t("flows.actionButtonsTextPlaceholder")}
+              value={str(config.text)}
+              onChange={(e) => set({ text: e.target.value })}
+            />
+          </div>
+          {actionButtonsOf(config).map((button, index) => (
+            <div
+              key={index}
+              className="space-y-2 rounded-md border border-border p-3"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-muted">
+                  {t("flows.actionButtonsButtonLabel", { index: index + 1 })}
+                </span>
+                {actionButtonsOf(config).length > 1 ? (
+                  <button
+                    type="button"
+                    className="text-xs text-danger"
+                    disabled={readOnly}
+                    onClick={() =>
+                      set({
+                        buttons: actionButtonsOf(config).filter(
+                          (_, i) => i !== index,
+                        ),
+                      })
+                    }
+                  >
+                    {t("flows.actionButtonsRemove")}
+                  </button>
+                ) : null}
+              </div>
+              <select
+                className={inputClass}
+                disabled={readOnly}
+                value={button.kind}
+                onChange={(e) =>
+                  set({
+                    buttons: actionButtonsOf(config).map((b, i) =>
+                      i === index
+                        ? { ...b, kind: e.target.value as "copy_text" | "call" }
+                        : b,
+                    ),
+                  })
+                }
+              >
+                <option value="copy_text">
+                  {t("flows.actionButtonsKindCopy")}
+                </option>
+                <option value="call">{t("flows.actionButtonsKindCall")}</option>
+              </select>
+              <input
+                className={inputClass}
+                maxLength={64}
+                disabled={readOnly}
+                placeholder={t("flows.actionButtonsLabelPlaceholder")}
+                value={button.label}
+                onChange={(e) =>
+                  set({
+                    buttons: actionButtonsOf(config).map((b, i) =>
+                      i === index ? { ...b, label: e.target.value } : b,
+                    ),
+                  })
+                }
+              />
+              <input
+                className={inputClass}
+                maxLength={320}
+                disabled={readOnly}
+                placeholder={
+                  button.kind === "call"
+                    ? t("flows.actionButtonsValueCallPlaceholder")
+                    : t("flows.actionButtonsValueCopyPlaceholder")
+                }
+                value={button.value}
+                onChange={(e) =>
+                  set({
+                    buttons: actionButtonsOf(config).map((b, i) =>
+                      i === index ? { ...b, value: e.target.value } : b,
+                    ),
+                  })
+                }
+              />
+            </div>
+          ))}
+          {actionButtonsOf(config).length < 3 ? (
+            <button
+              type="button"
+              className="text-xs font-medium text-accent"
+              disabled={readOnly}
+              onClick={() =>
+                set({
+                  buttons: [
+                    ...actionButtonsOf(config),
+                    { kind: "call" as const, label: "", value: "" },
+                  ],
+                })
+              }
+            >
+              {t("flows.actionButtonsAdd")}
+            </button>
+          ) : null}
+          <p className="text-xs text-muted">{t("flows.actionButtonsLimits")}</p>
         </>
       ) : null}
 

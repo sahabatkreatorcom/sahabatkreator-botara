@@ -86,11 +86,22 @@ export function startTelegramDeliveryPoller(
           baseUrl: opts.telegramApiBase,
           token,
         });
+        // G18: tombol aksi natif (node send_action_buttons) —
+        // keyboard inline copy_text / URL tel: dari muatan pesan.
+        const inlineButtons =
+          delivery.interactivePayload?.kind === "telegram_inline_buttons"
+            ? delivery.interactivePayload.buttons.map((b) => ({
+                text: b.label,
+                ...(b.copyText !== undefined ? { copyText: b.copyText } : {}),
+                ...(b.url !== undefined ? { url: b.url } : {}),
+              }))
+            : undefined;
         return (
           await client.sendMessage({
             chatId: delivery.chatExternalId,
             text: delivery.contentText!,
             ...(replyToMessageId !== undefined ? { replyToMessageId } : {}),
+            ...(inlineButtons ? { inlineButtons } : {}),
           })
         ).providerMessageId;
       },

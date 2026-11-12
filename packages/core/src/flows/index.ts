@@ -272,4 +272,12 @@ export {
   type BuiltCatalogMessage,
   type CatalogMessageFormat,
 } from "./catalog-native";
+export {
+  actionButtonsConfigOf,
+  buildActionButtonsDelivery,
+  normalizeCallNumber,
+  type ActionButtonDeliveryMode,
+  type ActionButtonsConfig,
+  type BuiltActionButtonsDelivery,
+} from "./action-buttons";
 export { queueFlowOutboundImage } from "./evaluate";

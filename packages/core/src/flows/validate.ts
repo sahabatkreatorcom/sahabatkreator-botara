@@ -852,6 +852,43 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
       }
       break;
     }
+    case "send_action_buttons": {
+      // G18: teks pesan + 1..3 tombol aksi (salin teks / telepon).
+      if (
+        typeof c.text !== "string" ||
+        c.text.trim().length === 0 ||
+        c.text.length > 2000
+      ) {
+        err(
+          "ACTION_BUTTONS_TEXT_REQUIRED",
+          "Node send_action_buttons membutuhkan config.text non-kosong (maks 2000 karakter)",
+        );
+      }
+      const buttons = Array.isArray(c.buttons) ? c.buttons : [];
+      if (buttons.length < 1 || buttons.length > 3) {
+        err(
+          "ACTION_BUTTONS_COUNT_INVALID",
+          "Node send_action_buttons membutuhkan 1..3 tombol pada config.buttons",
+        );
+      }
+      for (const raw of buttons) {
+        const b = (raw ?? {}) as Record<string, unknown>;
+        if (
+          (b.kind !== "copy_text" && b.kind !== "call") ||
+          !isNonEmptyString(b.label) ||
+          String(b.label).length > 64 ||
+          !isNonEmptyString(b.value) ||
+          String(b.value).length > 320
+        ) {
+          err(
+            "ACTION_BUTTON_INVALID",
+            "Node send_action_buttons: tiap tombol membutuhkan kind (copy_text/call), label (maks 64), dan value (maks 320) non-kosong",
+          );
+          break;
+        }
+      }
+      break;
+    }
     case "ai_response":
     case "handoff":
     case "end":

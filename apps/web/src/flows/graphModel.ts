@@ -49,6 +49,7 @@ export const FLOW_NODE_LABEL_KEYS: Record<FlowNodeType, TranslationKey> = {
   send_catalog: "flows.nodeSendCatalog",
   cart_summary: "flows.nodeCartSummary",
   send_dynamic_image: "flows.nodeSendDynamicImage",
+  send_action_buttons: "flows.nodeSendActionButtons",
 };
 
 /** Tipe yang boleh ditambahkan dari palet (trigger dibuat otomatis & tunggal). */
@@ -80,6 +81,7 @@ export const ADDABLE_NODE_TYPES: FlowNodeType[] = [
   "send_catalog",
   "cart_summary",
   "send_dynamic_image",
+  "send_action_buttons",
 ];
 
 /**
@@ -194,6 +196,11 @@ export function defaultNodeConfig(
       return {};
     case "send_dynamic_image":
       return { titleTemplate: "" };
+    case "send_action_buttons":
+      return {
+        text: "",
+        buttons: [{ kind: "copy_text", label: "", value: "" }],
+      };
     case "book_appointment":
       return {
         serviceId: "",
@@ -455,6 +462,10 @@ export function summarizeNodeConfig(
     case "send_dynamic_image": {
       const title = asString(c.titleTemplate);
       return title ? truncate(title) : t("flows.summaryNotConfigured");
+    }
+    case "send_action_buttons": {
+      const text = asString(c.text);
+      return text ? truncate(text) : t("flows.summaryNotConfigured");
     }
     case "cart_checkout": {
       return t("flows.summaryCheckout");

@@ -1369,6 +1369,57 @@ export class MetaGraphClient extends GraphHttpClient {
   }
 
   /**
+   * Template TOMBOL Send API (G18 — tombol aksi node
+   * send_action_buttons): teks pesan + maks 3 tombol. Bentuk natif
+   * yang dipakai di sini hanya `phone_number` (tombol telepon
+   * resmi Messenger); copy_text tidak punya bentuk natif Send API
+   * dan diturunkan core menjadi baris teks sebelum sampai ke sini.
+   * Batas platform (judul tombol maks 20) ditegakkan pembangun
+   * muatan di core.
+   */
+  async sendButtonTemplateMessage(input: {
+    accountExternalId: string;
+    recipientExternalId: string;
+    text: string;
+    buttons: Array<{
+      type: "phone_number";
+      title: string;
+      payload: string;
+    }>;
+    recipientCommentId?: string | null;
+  }): Promise<{ providerMessageId: string }> {
+    const attachment = {
+      type: "template",
+      payload: {
+        template_type: "button",
+        text: input.text,
+        buttons: input.buttons.map((b) => ({
+          type: b.type,
+          title: b.title,
+          payload: b.payload,
+        })),
+      },
+    };
+    const body = await this.postJson<{ message_id?: string }>(
+      `${encodeURIComponent(input.accountExternalId)}/messages`,
+      input.recipientCommentId
+        ? {
+            recipient: { comment_id: input.recipientCommentId },
+            message: { attachment },
+          }
+        : {
+            recipient: { id: input.recipientExternalId },
+            messaging_type: "RESPONSE",
+            message: { attachment },
+          },
+    );
+    if (typeof body.message_id !== "string" || !body.message_id) {
+      throw new MetaGraphError(200, null, "missing_message_id");
+    }
+    return { providerMessageId: body.message_id };
+  }
+
+  /**
    * Balasan PUBLIK pada sebuah komentar (Fase 10B):
    * - Instagram: `POST /{comment-id}/replies` body { message }.
    * - Messenger/Page: `POST /{comment-id}/comments` body { message }.

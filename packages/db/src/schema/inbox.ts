@@ -294,8 +294,8 @@ export interface MessageTriggerSignal {
 }
 
 /**
- * Muatan interaktif natif kanal pada pesan keluar (G17) — bentuk
- * kolom `messages.interactive_payload`. Dua bentuk resmi:
+ * Muatan interaktif natif kanal pada pesan keluar (G17, diperluas
+ * G18) — bentuk kolom `messages.interactive_payload`. Bentuk resmi:
  * - `whatsapp_list`: pesan daftar interaktif WhatsApp Cloud API —
  *   body-nya adalah content_text baris pesan; baris (row) id-nya =
  *   id produk, dan ketukan pelanggan kembali sebagai sinyal
@@ -330,6 +330,31 @@ export type MessageInteractivePayload =
           title: string;
           payload: string;
         }>;
+      }>;
+    }
+  | {
+      // G18 — tombol aksi NATIF Telegram (node send_action_buttons):
+      // keyboard inline Bot API; `copyText` = tombol copy_text
+      // resmi, `url` = tombol tautan (untuk call: skema `tel:`).
+      // Satu tombol per baris keyboard (dibentuk poller).
+      kind: "telegram_inline_buttons";
+      buttons: Array<{
+        label: string;
+        copyText?: string;
+        url?: string;
+      }>;
+    }
+  | {
+      // G18 — template tombol Send API Messenger (node
+      // send_action_buttons): teksnya adalah content_text baris
+      // pesan; hanya tombol `phone_number` (call) yang punya bentuk
+      // natif di sini — copy_text selalu fallback teks.
+      kind: "messenger_button_template";
+      buttons: Array<{
+        type: "phone_number";
+        title: string;
+        /** Nomor tujuan ternormalisasi (awalan + dipertahankan). */
+        payload: string;
       }>;
     };
 

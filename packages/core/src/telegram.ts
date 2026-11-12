@@ -10,6 +10,7 @@ import {
   type ChannelAccount,
   type Database,
   type Message,
+  type MessageInteractivePayload,
   type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
@@ -678,6 +679,12 @@ export interface TelegramQueuedDelivery {
   conversationId: string;
   contentText: string | null;
   /**
+   * Muatan interaktif natif (G18, node send_action_buttons):
+   * poller membentuk keyboard inline Telegram dari bentuk
+   * `telegram_inline_buttons`. Null untuk pesan lain.
+   */
+  interactivePayload: MessageInteractivePayload | null;
+  /**
    * Id baris pesan yang dikutip pesan ini (Fase 7B.5), atau null.
    * Poller menurunkan id numerik Telegram targetnya dari baris itu
    * dalam konteks tenant (getMessageProviderMessageId) — id provider
@@ -741,6 +748,7 @@ export async function listQueuedTelegramDeliveries(
         messageId: messages.id,
         conversationId: messages.conversationId,
         contentText: messages.contentText,
+        interactivePayload: messages.interactivePayload,
         replyToMessageId: messages.replyToMessageId,
         channelAccountId: channelAccounts.id,
         botExternalId: channelAccounts.externalId,

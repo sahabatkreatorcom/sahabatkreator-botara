@@ -1102,6 +1102,19 @@ Node "Kirim gambar dinamis" merender kartu PNG 1200×630
   penulis yang menjadi kontak sesudah pindai berjalan dilewati
   saat impor (tidak diduplikatkan).
 
+### Butir 3 — Tombol Salin Teks & Telepon di Flow (tanpa tindakan pemilik)
+
+- Node flow baru "Kirim tombol aksi": pesan + maks 3 tombol Salin
+  teks / Telepon. Dukungan natif per platform (jujur, sesuai API
+  resmi): Telegram keduanya natif (tombol copy_text Bot API +
+  tombol tautan tel:), Messenger hanya Telepon (tombol
+  phone_number Send API). WhatsApp TIDAK punya tombol salin/
+  telepon pada pesan interaktif (hanya pada template pesan yang
+  disetujui Meta) dan Instagram/webchat tidak punya bentuk natif
+  terdokumentasi — di kanal-kanal itu nilai tombol tampil sebagai
+  baris teks terbaca di badan pesan dan modenya tercatat di detail
+  run. Tidak ada tindakan pemilik; ini batas platform, bukan bug.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +

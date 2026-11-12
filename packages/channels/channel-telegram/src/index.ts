@@ -282,12 +282,34 @@ export class TelegramBotApiClient {
     chatId: string;
     text: string;
     replyToMessageId?: number;
+    /**
+     * Tombol inline NATIF (G18, node flow send_action_buttons):
+     * satu tombol per baris keyboard. `copyText` = tombol
+     * `copy_text` resmi Bot API (teks disalin saat diketuk);
+     * `url` = tombol tautan (untuk telepon: skema `tel:`).
+     */
+    inlineButtons?: Array<{
+      text: string;
+      copyText?: string;
+      url?: string;
+    }>;
   }): Promise<{ providerMessageId: string }> {
     const result = await this.call<TelegramMessage>("sendMessage", {
       chat_id: input.chatId,
       text: input.text,
       ...(input.replyToMessageId !== undefined
         ? { reply_parameters: { message_id: input.replyToMessageId } }
+        : {}),
+      ...(input.inlineButtons && input.inlineButtons.length > 0
+        ? {
+            reply_markup: {
+              inline_keyboard: input.inlineButtons.map((b) => [
+                b.copyText !== undefined
+                  ? { text: b.text, copy_text: { text: b.copyText } }
+                  : { text: b.text, url: b.url ?? "" },
+              ]),
+            },
+          }
         : {}),
     });
     return { providerMessageId: String(result.message_id) };
