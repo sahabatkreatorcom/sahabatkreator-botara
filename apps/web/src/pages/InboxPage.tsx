@@ -1096,7 +1096,15 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
 
       {loading && conversations.length === 0 ? (
         <p className="mt-6 text-sm text-muted">{t("common.loading")}</p>
-      ) : conversations.length === 0 && !error && assignmentFilter === "all" ? (
+      ) : conversations.length === 0 &&
+        !error &&
+        assignmentFilter === "all" &&
+        // Pencarian aktif BUKAN workspace kosong: tanpa syarat ini blok
+        // kosong besar menelan seluruh bingkai (termasuk kotak pencarian
+        // itu sendiri) dan pengguna tidak bisa membersihkan cariannya.
+        // Dengan syarat ini pencarian kosong jatuh ke kolom daftar
+        // dengan pesan `inbox.searchEmpty`.
+        searchInput.trim() === "" ? (
         <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center">
           <h2 className="text-base font-semibold text-ink">{t("inbox.emptyTitle")}</h2>
           <p className="mx-auto mt-1 max-w-md text-sm text-muted">{t("inbox.emptyBody")}</p>
