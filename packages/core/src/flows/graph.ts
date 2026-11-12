@@ -93,6 +93,8 @@ export const NODE_TYPES = new Set([
   // G12 — aksi deals
   "create_deal",
   "move_deal_stage",
+  // G16 — konversi iklan
+  "send_ad_conversion",
 ]);
 
 const FLOW_BRANCHES: readonly FlowBranch[] = [

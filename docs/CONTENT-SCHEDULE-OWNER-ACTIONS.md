@@ -909,6 +909,84 @@ agar tidak kaget:
 
 ---
 
+## Gelombang G16 — Konversi Iklan dari Flow (Tier 3 butir 16)
+
+Node flow baru **"Kirim konversi iklan"** (`send_ad_conversion`)
+mengirim peristiwa konversi ke platform iklan TENANT saat flow
+mencapai titik itu (mis. sesudah node Buat deal / Pindahkan tahap
+deal / Checkout). Pengiriman berjalan lewat worker (ledger +
+outbox); kegagalan platform tercatat di Pengaturan → Konversi
+Iklan → riwayat pengiriman dan TIDAK menghentikan flow. Ada
+tindakan PLATFORM (sekali, oleh pemilik platform) dan tindakan
+TENANT (per workspace yang mau memakai fitur ini):
+
+### Pemilik platform — Google Ads (sekali)
+
+1. **Developer token Google Ads.** Setiap panggilan Google Ads API
+   wajib membawa developer token yang diterbitkan untuk AKUN
+   MANAGER (MCC) milik platform. Ajukan dari akun manager:
+   Google Ads → Tools → API Center (akun manager) → ajukan akses
+   (mulai dari level Explorer/Test, naikkan ke Basic bila perlu —
+   persetujuan Basic bisa memakan hari dan kadang ditolak; selama
+   belum ada token, pengiriman Google tercatat gagal beralasan
+   `google_developer_token_missing`, Meta tetap jalan). Isi token
+   ke **Panel Admin → kartu Google Ads** (kunci
+   `google_ads_developer_token`; env `GOOGLE_ADS_DEVELOPER_TOKEN`
+   hanya fallback).
+2. **Proyek Cloud untuk OAuth Ads.** Layanan Google 'ads' memakai
+   klien OAuth-nya sendiri (pola pemisahan per layanan): buat/ pilih
+   proyek Cloud, **aktifkan Google Ads API**, buat OAuth client
+   (Web), daftarkan redirect URI KANONIS persis:
+   `https://botara.my.id/api/oauth/google_ads/callback`, lalu isi
+   Client ID/Secret ke Panel Admin → kartu Google Ads (kunci
+   `google_ads_client_id`/`google_ads_client_secret`). Bila kartu
+   ini kosong, pasangan bersama Google (kartu "Google — klien
+   bersama") dipakai sebagai fallback — tetapi proyek klien bersama
+   itu tetap WAJIB mengaktifkan Google Ads API, kalau tidak consent
+   tenant gagal di Google. Layar consent proyek itu juga harus
+   mengajukan scope `https://www.googleapis.com/auth/adwords`
+   (scope sensitif — verifikasi Google mungkin diminta bila aplikasi
+   dipakai publik).
+
+### Tenant — Meta (per workspace)
+
+1. **Buat dataset** di Meta Events Manager (dataset yang sama bisa
+   dipakai untuk pixel web + Conversions API) dan **buat access
+   token Conversions API** untuk dataset itu.
+2. Isi **Dataset ID + access token** di Pengaturan → Konversi Iklan.
+   Token terenkripsi dan tidak pernah tampil lagi. Uji dulu dengan
+   mengisi **kode peristiwa uji** (Events Manager → Test Events):
+   peristiwa muncul di tab Test Events; kosongkan kode sesudah
+   yakin, kalau tidak peristiwa selamanya berstatus uji.
+3. Kejujuran identitas: Botara HANYA mengirim hash email/telepon
+   kontak + external_id. Cookie browser **fbp/fbc tidak tersedia
+   dari chat** dan tidak dikarang — kualitas pencocokan (Event
+   Match Quality) akan lebih rendah daripada instalasi pixel web;
+   itu batas konteks chat, bukan bug.
+
+### Tenant — Google Ads (per workspace)
+
+1. Punya **akun Google Ads** aktif. Di dalamnya buat **aksi
+   konversi** jenis import/enhanced conversions for leads
+   (Tools → Conversions → New → Import / CRM), catat **Customer ID**
+   akun (digit) dan **ID aksi konversi**-nya.
+2. Di Pengaturan → Konversi Iklan: klik **Hubungkan Google Ads**
+   dan beri consent dengan akun Google yang punya akses ke akun Ads
+   itu, lalu isi customer ID + ID aksi konversi. Aksi konversi di
+   sisi Google harus disetel menerima **enhanced conversions**
+   (pengenal ter-hash) — tanpa itu Google mengabaikan userIdentifiers
+   yang Botara kirim.
+3. Kejujuran atribusi: **gclid tidak tersedia dari chat.** Konversi
+   dikirim sebagai enhanced conversion (hash email/telepon E.164 +
+   orderId dedup). Kontak TANPA email dan telepon tidak punya apa
+   pun untuk dicocokkan → peristiwa **dilewati tercatat**
+   (`google_no_identifier`), tidak dikirim dan tidak dikarang.
+   Konversi yang cocok akan muncul di Google Ads sebagai konversi
+   import dengan jeda pemrosesan Google (jam sampai ±24 jam) —
+   bukan kegagalan bila belum langsung terlihat.
+
+---
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -918,6 +996,8 @@ Gelombang G13 (pelengkap Wacrm — tanpa tindakan pemilik baru, hanya
 catatan perilaku) + Gelombang G14 (kode diskon — tanpa tindakan
 pemilik baru, hanya catatan perilaku) + Gelombang G15 (jam kerja
 tim + SLA manusia — tanpa tindakan pemilik baru, hanya catatan
-perilaku).
+perilaku) + Gelombang G16 (konversi iklan dari flow — tindakan
+platform: developer token Google Ads + proyek OAuth Ads; tindakan
+tenant: dataset + token Meta / akun + aksi konversi Google Ads).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
