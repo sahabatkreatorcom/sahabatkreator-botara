@@ -40,6 +40,7 @@
     "verify:agent-tools": "tsx scripts/verify-agent-tools.ts",
     "verify:ai-guards": "tsx scripts/verify-ai-guards.ts",
     "verify:broadcast-recurrence": "tsx scripts/verify-broadcast-recurrence.ts",
+    "verify:post-recurrence": "tsx scripts/verify-post-recurrence.ts",
     "verify:outbound-webhooks": "tsx scripts/verify-outbound-webhooks.ts",
     "verify:ad-conversions": "tsx scripts/verify-ad-conversions.ts",
     "verify:agent-playground": "tsx scripts/verify-agent-playground.ts",
