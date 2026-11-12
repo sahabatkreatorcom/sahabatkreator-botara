@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   IntegrationLogResponse,
   PlatformContentScheduleInfo,
@@ -19,8 +25,15 @@ import { api } from "../api/client";
 import { translateApiError } from "../api/errorText";
 import { FieldError, inputClassName } from "../components/AuthLayout";
 import { PasswordInput } from "../components/PasswordInput";
+import { ProviderGlyph, providerMeta } from "../components/ChannelAvatar";
 import { LEGAL_PATHS } from "../components/LegalLinks";
 import { formatDateTime } from "../utils/format";
+import {
+  WEBHOOK_PATHS,
+  adminCardById,
+  type AdminCardId,
+  type AdminCardFieldSpec,
+} from "./admin/platformCards";
 
 type Translate = (
   key: TranslationKey,
@@ -40,22 +53,27 @@ const TESTABLE: ReadonlySet<PlatformSettingKey> = new Set([
 ]);
 
 /**
- * Baris URL read-only + tombol salin (Fase 7D.1) — pola yang sama dengan
- * baris Redirect URI OAuth: nilai ditampilkan mono, salin memberi
- * umpan balik "Tersalin!" selama 2 detik. State salin per baris.
+ * Baris URL read-only + tombol salin — pola baris Redirect URI OAuth:
+ * nilai ditampilkan mono, salin memberi umpan balik "Tersalin!" selama
+ * 2 detik. State salin per baris. Varian kotak info kartu memakai
+ * `bg-elevated` (kotak krem referensi) di atas permukaan kartu.
  */
 function CopyableUrlRow({
   t,
   label,
   url,
+  help,
+  boxed = false,
 }: {
   t: Translate;
   label: string;
   url: string;
+  help?: string;
+  boxed?: boolean;
 }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="rounded-xl bg-surface p-3">
+    <div className={`rounded-xl p-3 ${boxed ? "bg-elevated" : "bg-surface"}`}>
       <dt className="text-xs text-muted">{label}</dt>
       <dd className="mt-0.5 flex flex-wrap items-center gap-2">
         <span className="break-all font-mono text-xs text-ink">{url}</span>
@@ -70,10 +88,29 @@ function CopyableUrlRow({
               })
               .catch(() => undefined);
           }}
-          className="rounded-md bg-elevated px-2 py-1 text-xs font-medium text-ink"
+          className="rounded-md bg-surface px-2 py-1 text-xs font-medium text-ink"
         >
           {copied ? t("admin.copiedLabel") : t("admin.copyButton")}
         </button>
+      </dd>
+      {help ? <p className="mt-1 text-xs text-muted">{help}</p> : null}
+    </div>
+  );
+}
+
+/** Kotak nilai efektif read-only (identifier publik / identitas R2). */
+function InfoValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null;
+}) {
+  return (
+    <div className="rounded-xl bg-elevated p-3">
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="mt-0.5 break-all font-mono text-xs text-ink">
+        {value ?? "—"}
       </dd>
     </div>
   );
@@ -95,17 +132,17 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   meta_app_id: "admin.metaAppIdLabel",
   meta_ig_config_id: "admin.metaIgConfigIdLabel",
   meta_wa_config_id: "admin.metaWaConfigIdLabel",
-  // Aplikasi Threads (terpisah dari Meta App utama) — sub-blok di grup Meta.
+  // Aplikasi Threads (terpisah dari Meta App utama) — kartu Threads.
   threads_app_id: "admin.threadsAppIdLabel",
-  threads_webhook_verify_token: "admin.threadsWebhookVerifyTokenLabel",
   threads_app_secret: "admin.threadsAppSecretLabel",
-  // Aplikasi TikTok (TikTok for Developers) — bagian tersendiri.
+  threads_webhook_verify_token: "admin.threadsWebhookVerifyTokenLabel",
+  // Aplikasi TikTok (TikTok for Developers) — kartu TikTok.
   tiktok_client_key: "admin.tiktokClientKeyLabel",
   tiktok_client_secret: "admin.tiktokClientSecretLabel",
-  // Aplikasi LinkedIn (LinkedIn Developer Portal) — bagian tersendiri.
+  // Aplikasi LinkedIn (LinkedIn Developer Portal) — kartu LinkedIn.
   linkedin_client_id: "admin.linkedinClientIdLabel",
   linkedin_client_secret: "admin.linkedinClientSecretLabel",
-  // Aplikasi Pinterest (Pinterest Developers) — bagian tersendiri.
+  // Aplikasi Pinterest (Pinterest Developers) — kartu Pinterest.
   pinterest_app_id: "admin.pinterestAppIdLabel",
   pinterest_app_secret: "admin.pinterestAppSecretLabel",
   resend_api_key: "admin.resendApiKeyLabel",
@@ -125,16 +162,32 @@ const KEY_LABELS: Record<PlatformSettingKey, TranslationKey> = {
   tiktok_privacy_level: "admin.tiktokPrivacyLevelLabel",
 };
 
+/** Teks bantuan per kolom (di bawah input) — hanya untuk kunci yang perlu. */
+const FIELD_HELP: Partial<Record<PlatformSettingKey, TranslationKey>> = {
+  // Privasi bawaan postingan: default panel yang dapat ditimpa
+  // pengguna per postingan di formulir /posts (koreksi pemilik).
+  youtube_privacy_status: "admin.postPrivacyDefaultHelp",
+  tiktok_privacy_level: "admin.postPrivacyDefaultHelp",
+};
+
 /**
  * Halaman Panel Admin Platform (Fase 6C) — HANYA dirender untuk user
  * ber-flag isPlatformAdmin (menu pun disembunyikan untuk yang lain, dan
- * API menjawab 404 untuk non-admin). Mengelola kredensial provider milik
- * platform per grup (OpenRouter / R2 / Meta): status per kunci (chip sumber
- * Panel/Env/Belum diatur + jejak ubah), field password untuk nilai baru
- * (nilai tersimpan TIDAK PERNAH dirender kembali — field selalu mulai
- * kosong), tombol Simpan / Hapus (kembali ke env) / Uji koneksi.
- * Grup Meta (Fase 7A.1) hanya berisi App Secret dan SENGAJA tanpa tombol
- * Uji: Meta tidak menyediakan validasi app secret yang berdiri sendiri.
+ * API menjawab 404 untuk non-admin). Mengelola kredensial provider
+ * milik platform per grup: status per kunci (chip sumber Panel/Env/
+ * Belum diatur + jejak ubah), field password untuk nilai baru (nilai
+ * tersimpan TIDAK PERNAH dirender kembali — field selalu mulai kosong),
+ * tombol Simpan / Hapus (kembali ke env) / Uji koneksi.
+ *
+ * Tata letak GRID KARTU per platform (permintaan pemilik 2026-11-12
+ * dengan referensi UI): pemetaan kunci → kartu hidup di registry
+ * `admin/platformCards.ts` (dibuktikan test), tombol Simpan kini per
+ * kartu (menyimpan hanya kunci kartu itu lewat API yang sama), dan
+ * keterangan SUMBER nilai efektif per kolom (Panel / Environment /
+ * Belum diatur) dipertahankan persis seperti perilaku sebelumnya —
+ * termasuk untuk status kartu: nilai dari Environment tetap berarti
+ * terkonfigurasi. Semantik resolver panel→env, enkripsi, audit, dan
+ * guard admin TIDAK berubah; ini murni penataan presentasi.
  */
 export function AdminPage({ t, locale }: AdminPageProps) {
   const [statuses, setStatuses] = useState<PlatformSettingStatus[]>([]);
@@ -154,7 +207,6 @@ export function AdminPage({ t, locale }: AdminPageProps) {
   );
   const [contentScheduleInfo, setContentScheduleInfo] =
     useState<PlatformContentScheduleInfo | null>(null);
-  const [redirectCopied, setRedirectCopied] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const requestSeq = useRef(0);
@@ -198,6 +250,107 @@ export function AdminPage({ t, locale }: AdminPageProps) {
     );
   };
 
+  /** Terkonfigurasi = punya nilai EFEKTIF (panel ATAU environment). */
+  const pairConfigured = (
+    idKey: PlatformSettingKey,
+    secretKey: PlatformSettingKey,
+  ) => Boolean(byKey(idKey)?.isSet && byKey(secretKey)?.isSet);
+
+  /** Status kartu default: semua kunci wajibnya efektif terisi. */
+  const cardConfigured = (id: AdminCardId): boolean => {
+    // Layanan Google: terkonfigurasi bila pasangan kliennya sendiri
+    // lengkap, ATAU ia benar-benar berjalan di atas pasangan bersama
+    // (clientId efektif layanan == clientId bersama DAN pasangan
+    // bersama lengkap). Semua pemeriksaan memakai keadaan EFEKTIF
+    // (isSet = panel atau environment) — nilai dari env tetap berarti
+    // terkonfigurasi, sumbernya ditunjukkan chip per kolom.
+    if (
+      id === "google-calendar" ||
+      id === "youtube" ||
+      id === "google-business"
+    ) {
+      const service =
+        id === "google-calendar"
+          ? "calendar"
+          : id === "youtube"
+            ? "youtube"
+            : "business";
+      const effectiveId = googleInfo?.services[service].clientId ?? null;
+      if (!effectiveId) return false;
+      const [ownId, ownSecret] = adminCardById(id).requiredKeys;
+      if (ownId && ownSecret && pairConfigured(ownId, ownSecret)) {
+        return true;
+      }
+      return (
+        effectiveId === (googleInfo?.clientId ?? null) &&
+        pairConfigured(
+          "google_oauth_client_id",
+          "google_oauth_client_secret",
+        )
+      );
+    }
+    return adminCardById(id).requiredKeys.every((k) => byKey(k)?.isSet);
+  };
+
+  const origin = window.location.origin;
+  const canonicalUrl = (path: string) => `${origin}${path}`;
+
+  const cardShell = (
+    id: AdminCardId,
+    props: {
+      title: string;
+      caps: TranslationKey;
+      icon: ReactNode;
+      body?: ReactNode;
+      info?: ReactNode;
+    },
+  ) => (
+    <PlatformCard
+      key={id}
+      t={t}
+      locale={locale}
+      cardId={id}
+      title={props.title}
+      caps={t(props.caps)}
+      configured={cardConfigured(id)}
+      icon={props.icon}
+      body={props.body}
+      info={props.info}
+      byKey={byKey}
+      onStatusChanged={onStatusChanged}
+      onReload={() => void load()}
+    />
+  );
+
+  const providerIcon = (provider: string) => (
+    <span
+      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+      style={{
+        color: providerMeta(provider).color,
+        backgroundColor: `${providerMeta(provider).color}1A`,
+      }}
+    >
+      <ProviderGlyph provider={provider} className="h-5 w-5" />
+    </span>
+  );
+
+  const genericIcon = (glyph: ReactNode) => (
+    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-elevated text-muted">
+      <svg
+        className="h-5 w-5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden={true}
+      >
+        {glyph}
+      </svg>
+    </span>
+  );
+
   return (
     <div>
       <h1 className="text-xl font-bold text-ink">{t("nav.admin")}</h1>
@@ -212,769 +365,751 @@ export function AdminPage({ t, locale }: AdminPageProps) {
         <p className="mt-4 text-sm text-muted">{t("common.loading")}</p>
       ) : null}
 
-      <section className="mt-6">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.openrouterTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.openrouterBody")}
-        </p>
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="openrouter_api_key"
-            status={byKey("openrouter_api_key")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="openrouter_model"
-            status={byKey("openrouter_model")}
-            secret={false}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="openrouter_embedding_model"
-            status={byKey("openrouter_embedding_model")}
-            secret={false}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
-      </section>
+      <div className="mt-6 grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {cardShell("meta", {
+          title: t("admin.metaTitle"),
+          caps: "admin.cardCapsOauthWebhook",
+          icon: providerIcon("messenger"),
+          body: (
+            <>
+              <p>{t("admin.metaBody")}</p>
+              <p>{t("admin.metaPublicIdsBody")}</p>
+              <p>{t("admin.metaWebhookVerifyTokenBody")}</p>
+            </>
+          ),
+          info: metaInfo ? (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={metaInfo.oauthRedirectUri}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardWebhookLabel")}
+                url={canonicalUrl(WEBHOOK_PATHS.meta)}
+                help={t("admin.metaWebhookHelp")}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={`${t("admin.cardWebhookLabel")} — WhatsApp`}
+                url={canonicalUrl(WEBHOOK_PATHS.whatsapp)}
+                help={t("admin.whatsappWebhookHelp")}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardDataDeletionLabel")}
+                url={canonicalUrl(WEBHOOK_PATHS.metaDataDeletion)}
+                help={t("admin.metaDataDeletionHelp")}
+              />
+              <InfoValue
+                label={t("admin.metaAppIdLabel")}
+                value={metaInfo.appId}
+              />
+              <InfoValue
+                label={t("admin.metaIgConfigIdLabel")}
+                value={metaInfo.igConfigId}
+              />
+              <InfoValue
+                label={t("admin.metaWaConfigIdLabel")}
+                value={metaInfo.waConfigId}
+              />
+              {/*
+                URL halaman legal publik untuk diisi ke pengaturan
+                aplikasi Meta (Privasi & instruksi penghapusan data
+                wajib ada untuk App Review) — diturunkan dari origin
+                publik saat ini + path tetap halaman legal.
+              */}
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.metaPrivacyUrlLabel")}
+                url={`${origin}${LEGAL_PATHS.privacy}`}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.metaTermsUrlLabel")}
+                url={`${origin}${LEGAL_PATHS.terms}`}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.metaDeletionUrlLabel")}
+                url={`${origin}${LEGAL_PATHS.deletion}`}
+              />
+            </>
+          ) : null,
+        })}
 
-      {/*
-        Grup R2 SATU kesatuan (instruksi pemilik 2026-11-12): identitas
-        bucket (account id, endpoint, bucket — publik, baris teks,
-        nilai efektif ditampilkan di kartu), kredensial access key
-        (rahasia, baris password + uji koneksi), dan base URL media
-        publik yang memang alamat publik dari bucket yang sama (dulu
-        di grup Content schedule). Baris publik dimuat ulang sesudah
-        diubah agar kartu efektifnya segar — pola identifier Meta.
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">{t("admin.r2Title")}</h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">{t("admin.r2Body")}</p>
-        {r2Info ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">{t("admin.r2AccountLabel")}</dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {r2Info.accountId}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">{t("admin.r2EndpointLabel")}</dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {r2Info.endpoint}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">{t("admin.r2BucketLabel")}</dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {r2Info.bucket}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.postMediaPublicBaseUrlLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {contentScheduleInfo?.publicMediaBaseUrl ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="r2_account_id"
-            status={byKey("r2_account_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="r2_endpoint"
-            status={byKey("r2_endpoint")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="r2_bucket"
-            status={byKey("r2_bucket")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="r2_access_key_id"
-            status={byKey("r2_access_key_id")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="r2_secret_access_key"
-            status={byKey("r2_secret_access_key")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="post_media_public_base_url"
-            status={byKey("post_media_public_base_url")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-        </div>
-      </section>
+        {cardShell("threads", {
+          title: t("admin.threadsTitle"),
+          caps: "admin.cardCapsOauthWebhook",
+          icon: providerIcon("threads"),
+          body: (
+            <>
+              <p>{t("admin.threadsBody")}</p>
+              <p className="mt-2">{t("admin.threadsWebhookVerifyTokenBody")}</p>
+            </>
+          ),
+          info: (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={canonicalUrl(
+                  adminCardById("threads").callbackPath ?? "",
+                )}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardWebhookLabel")}
+                url={canonicalUrl(WEBHOOK_PATHS.threads)}
+                help={t("admin.threadsWebhookHelp")}
+              />
+              {threadsInfo ? (
+                <InfoValue
+                  label={t("admin.threadsAppIdLabel")}
+                  value={threadsInfo.appId}
+                />
+              ) : null}
+            </>
+          ),
+        })}
 
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">{t("admin.metaTitle")}</h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">{t("admin.metaBody")}</p>
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="meta_app_secret"
-            status={byKey("meta_app_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
+        {cardShell("tiktok", {
+          title: t("admin.tiktokTitle"),
+          caps: "admin.cardCapsOauthWebhook",
+          icon: providerIcon("tiktok"),
+          body: <p>{t("admin.tiktokBody")}</p>,
+          info: (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={canonicalUrl(adminCardById("tiktok").callbackPath ?? "")}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardWebhookLabel")}
+                url={canonicalUrl(WEBHOOK_PATHS.tiktok)}
+                help={t("admin.tiktokWebhookHelp")}
+              />
+              {tiktokInfo ? (
+                <InfoValue
+                  label={t("admin.tiktokClientKeyLabel")}
+                  value={tiktokInfo.clientKey}
+                />
+              ) : null}
+              {contentScheduleInfo ? (
+                <InfoValue
+                  label={t("admin.tiktokPrivacyLevelLabel")}
+                  value={contentScheduleInfo.tiktokPrivacyLevel}
+                />
+              ) : null}
+            </>
+          ),
+        })}
 
-        {/*
-          Token verifikasi handshake webhook Meta — nilai yang KITA
-          tentukan (bukan dari Meta). Baris password seperti app secret:
-          nilai tersimpan tidak dirender; owner/admin workspace yang
-          memasang webhook melihat nilai efektifnya di halaman Channel.
-        */}
-        <p className="mt-6 max-w-2xl text-sm text-muted">
-          {t("admin.metaWebhookVerifyTokenBody")}
-        </p>
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="meta_webhook_verify_token"
-            status={byKey("meta_webhook_verify_token")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
+        {cardShell("linkedin", {
+          title: t("admin.linkedinTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("linkedin"),
+          body: <p>{t("admin.linkedinBody")}</p>,
+          info: (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={canonicalUrl(
+                  adminCardById("linkedin").callbackPath ?? "",
+                )}
+                help={t("admin.cardCallbackHelp")}
+              />
+              {linkedinInfo ? (
+                <InfoValue
+                  label={t("admin.linkedinClientIdLabel")}
+                  value={linkedinInfo.clientId}
+                />
+              ) : null}
+            </>
+          ),
+        })}
 
-        {/*
-          Fase 7D — identifier publik OAuth Meta. Berbeda dari kunci
-          rahasia di atas: App ID & config ID BUKAN kredensial, jadi
-          nilai efektifnya (panel → env) DITAMPILKAN agar bisa
-          diverifikasi, dan field-nya teks biasa (bukan password).
-          Baris tetap memakai mekanisme simpan/hapus panel yang sama.
-        */}
-        <p className="mt-6 max-w-2xl text-sm text-muted">
-          {t("admin.metaPublicIdsBody")}
-        </p>
-        {metaInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.metaOauthRedirectLabel")}
-              </dt>
-              <dd className="mt-0.5 flex flex-wrap items-center gap-2">
-                <span className="break-all font-mono text-xs text-ink">
-                  {metaInfo.oauthRedirectUri}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void navigator.clipboard
-                      ?.writeText(metaInfo.oauthRedirectUri)
-                      .then(() => {
-                        setRedirectCopied(true);
-                        setTimeout(() => setRedirectCopied(false), 2000);
-                      })
-                      .catch(() => undefined);
-                  }}
-                  className="rounded-md bg-elevated px-2 py-1 text-xs font-medium text-ink"
-                >
-                  {redirectCopied
-                    ? t("admin.copiedLabel")
-                    : t("admin.copyButton")}
-                </button>
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">{t("admin.metaAppIdLabel")}</dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {metaInfo.appId ?? "—"}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.metaIgConfigIdLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {metaInfo.igConfigId ?? "—"}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.metaWaConfigIdLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {metaInfo.waConfigId ?? "—"}
-              </dd>
-            </div>
-            {/*
-              Fase 7D.1 — URL halaman legal publik untuk diisi ke
-              pengaturan aplikasi Meta (Privasi & instruksi penghapusan
-              data wajib ada untuk App Review). Nilainya diturunkan dari
-              origin publik saat ini + path tetap halaman legal.
-            */}
-            <CopyableUrlRow
-              t={t}
-              label={t("admin.metaPrivacyUrlLabel")}
-              url={`${window.location.origin}${LEGAL_PATHS.privacy}`}
+        {cardShell("pinterest", {
+          title: t("admin.pinterestTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("pinterest"),
+          body: <p>{t("admin.pinterestBody")}</p>,
+          info: (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={canonicalUrl(
+                  adminCardById("pinterest").callbackPath ?? "",
+                )}
+                help={t("admin.cardCallbackHelp")}
+              />
+              {pinterestInfo ? (
+                <InfoValue
+                  label={t("admin.pinterestAppIdLabel")}
+                  value={pinterestInfo.appId}
+                />
+              ) : null}
+            </>
+          ),
+        })}
+
+        {cardShell("google-calendar", {
+          title: t("admin.googleCalendarTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("google"),
+          body: <p>{t("admin.googleBody")}</p>,
+          info: googleInfo ? (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={googleInfo.services.calendar.redirectUri}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <InfoValue
+                label={t("admin.googleCalendarClientIdLabel")}
+                value={googleInfo.services.calendar.clientId}
+              />
+            </>
+          ) : null,
+        })}
+
+        {cardShell("youtube", {
+          title: t("admin.googleYoutubeTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("youtube"),
+          body: <p>{t("admin.googleBody")}</p>,
+          info: googleInfo ? (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={googleInfo.services.youtube.redirectUri}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <InfoValue
+                label={t("admin.googleYoutubeClientIdLabel")}
+                value={googleInfo.services.youtube.clientId}
+              />
+              {contentScheduleInfo ? (
+                <InfoValue
+                  label={t("admin.youtubePrivacyStatusLabel")}
+                  value={contentScheduleInfo.youtubePrivacyStatus}
+                />
+              ) : null}
+            </>
+          ) : null,
+        })}
+
+        {cardShell("google-business", {
+          title: t("admin.googleBusinessTitle"),
+          caps: "admin.cardCapsOauth",
+          icon: providerIcon("google_business"),
+          body: <p>{t("admin.googleBody")}</p>,
+          info: googleInfo ? (
+            <>
+              <CopyableUrlRow
+                t={t}
+                boxed
+                label={t("admin.cardCallbackLabel")}
+                url={googleInfo.services.business.redirectUri}
+                help={t("admin.cardCallbackHelp")}
+              />
+              <InfoValue
+                label={t("admin.googleBusinessClientIdLabel")}
+                value={googleInfo.services.business.clientId}
+              />
+            </>
+          ) : null,
+        })}
+
+        {cardShell("google-shared", {
+          title: t("admin.googleSharedTitle"),
+          caps: "admin.cardCapsGoogleShared",
+          icon: providerIcon("google"),
+          body: <p>{t("admin.googleSharedBody")}</p>,
+          info: googleInfo ? (
+            <InfoValue
+              label={t("admin.googleOauthClientIdLabel")}
+              value={googleInfo.clientId}
             />
-            <CopyableUrlRow
-              t={t}
-              label={t("admin.metaTermsUrlLabel")}
-              url={`${window.location.origin}${LEGAL_PATHS.terms}`}
-            />
-            <CopyableUrlRow
-              t={t}
-              label={t("admin.metaDeletionUrlLabel")}
-              url={`${window.location.origin}${LEGAL_PATHS.deletion}`}
-            />
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="meta_app_id"
-            status={byKey("meta_app_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="meta_ig_config_id"
-            status={byKey("meta_ig_config_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="meta_wa_config_id"
-            status={byKey("meta_wa_config_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-        </div>
+          ) : null,
+        })}
 
-        {/*
-          Kredensial APLIKASI Threads — aplikasi TERPISAH dari Meta App
-          utama (ditambahkan 2026-11-12 karena pemilik tidak menemukan
-          formnya). Pola mengikuti Meta: app id publik (teks biasa,
-          nilai efektif ditampilkan), app secret baris password yang
-          tidak pernah dirender. BELUM ada konsumen — disiapkan untuk
-          alur connect/OAuth Threads; penerbitan memakai token akun.
-        */}
-        <p className="mt-6 max-w-2xl text-sm text-muted">
-          {t("admin.threadsBody")}
-        </p>
-        {threadsInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.threadsAppIdLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {threadsInfo.appId ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="threads_app_id"
-            status={byKey("threads_app_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="threads_app_secret"
-            status={byKey("threads_app_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="threads_webhook_verify_token"
-            status={byKey("threads_webhook_verify_token")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
-        <p className="mt-3 max-w-2xl text-sm text-muted">
-          {t("admin.threadsWebhookVerifyTokenBody")}
-        </p>
-      </section>
+        {cardShell("r2", {
+          title: t("admin.r2Title"),
+          caps: "admin.cardCapsStorage",
+          icon: genericIcon(
+            <>
+              <path d="M17.5 19a4.5 4.5 0 0 0 .9-8.9 6 6 0 0 0-11.7 1.1A4 4 0 0 0 7 19h10.5z" />
+            </>,
+          ),
+          body: <p>{t("admin.r2Body")}</p>,
+          info: r2Info ? (
+            <>
+              <InfoValue
+                label={t("admin.r2AccountLabel")}
+                value={r2Info.accountId}
+              />
+              <InfoValue
+                label={t("admin.r2EndpointLabel")}
+                value={r2Info.endpoint}
+              />
+              <InfoValue
+                label={t("admin.r2BucketLabel")}
+                value={r2Info.bucket}
+              />
+              <InfoValue
+                label={t("admin.postMediaPublicBaseUrlLabel")}
+                value={contentScheduleInfo?.publicMediaBaseUrl ?? null}
+              />
+            </>
+          ) : null,
+        })}
 
-      {/*
-        Kredensial APLIKASI TikTok (TikTok for Developers) — bagian
-        tersendiri (bukan aplikasi Meta): client key pengenal publik
-        (teks biasa, nilai efektif ditampilkan), client secret baris
-        password yang tidak pernah dirender. BELUM ada konsumen —
-        disiapkan untuk alur connect/OAuth TikTok (Login Kit).
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.tiktokTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.tiktokBody")}
-        </p>
-        {tiktokInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.tiktokClientKeyLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {tiktokInfo.clientKey ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="tiktok_client_key"
-            status={byKey("tiktok_client_key")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="tiktok_client_secret"
-            status={byKey("tiktok_client_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
-      </section>
+        {cardShell("openrouter", {
+          title: t("admin.openrouterTitle"),
+          caps: "admin.cardCapsLlm",
+          icon: genericIcon(
+            <>
+              <path d="M12 3l1.9 4.6L18.5 9l-4.6 1.9L12 15.5l-1.9-4.6L5.5 9l4.6-1.4L12 3z" />
+              <path d="M19 15l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z" />
+            </>,
+          ),
+          body: <p>{t("admin.openrouterBody")}</p>,
+        })}
 
-      {/*
-        Kredensial APLIKASI LinkedIn (LinkedIn Developer Portal) —
-        bagian tersendiri: client ID pengenal publik (teks biasa,
-        nilai efektif ditampilkan), client secret baris password yang
-        tidak pernah dirender. Konsumennya adalah alur connect/OAuth
-        LinkedIn gelombang Semua OAuth (Sign In with LinkedIn +
-        Share on LinkedIn) — token LinkedIn TIDAK bisa di-refresh,
-        jadi connect ulang adalah bagian dari siklus hidupnya.
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.linkedinTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.linkedinBody")}
-        </p>
-        {linkedinInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.linkedinClientIdLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {linkedinInfo.clientId ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="linkedin_client_id"
-            status={byKey("linkedin_client_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="linkedin_client_secret"
-            status={byKey("linkedin_client_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
-      </section>
-
-      {/*
-        Kredensial APLIKASI Pinterest (Pinterest Developers) — bagian
-        tersendiri: app ID pengenal publik (teks biasa, nilai efektif
-        ditampilkan), app secret baris password yang tidak pernah
-        dirender. Konsumennya adalah alur connect/OAuth Pinterest
-        gelombang Semua OAuth + refresh token di worker (token
-        endpoint v5 memakai pasangan ini sebagai Basic auth).
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.pinterestTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.pinterestBody")}
-        </p>
-        {pinterestInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.pinterestAppIdLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {pinterestInfo.appId ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="pinterest_app_id"
-            status={byKey("pinterest_app_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="pinterest_app_secret"
-            status={byKey("pinterest_app_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
-      </section>
-
-      {/*
-        Fase 11B — email transaksional Resend. Kunci API rahasia (baris
-        password + tombol Uji via GET /domains); identitas pengirim
-        BUKAN rahasia — nilai efektifnya ditampilkan seperti identifier
-        Meta, dan barisnya teks biasa, dimuat ulang sesudah diubah agar
-        tampilan efektifnya segar.
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.resendTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.resendBody")}
-        </p>
-        {emailInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.resendFromEmailLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {emailInfo.fromEmail ?? "—"}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.resendFromNameLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {emailInfo.fromName ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="resend_api_key"
-            status={byKey("resend_api_key")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="resend_from_email"
-            status={byKey("resend_from_email")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="resend_from_name"
-            status={byKey("resend_from_name")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-        </div>
-      </section>
-
-      {/*
-        Fase 13G — klien OAuth Google milik platform. Client ID publik
-        (baris teks + nilai efektif ditampilkan); client secret rahasia
-        (baris password, SENGAJA tanpa tombol Uji — pola Meta app
-        secret). Gelombang Pemisahan Google: pasangan pertama kini
-        berperan BERSAMA/fallback; tiga pasangan per layanan di bawah
-        membolehkan proyek Cloud terpisah per layanan (billing/kuota/
-        persetujuan API sendiri-sendiri). Client ID efektif per
-        layanan ditampilkan agar pemilik bisa memverifikasi rantai
-        fallback-nya.
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.googleTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.googleBody")}
-        </p>
-        {googleInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.googleOauthClientIdLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {googleInfo.clientId ?? "—"}
-              </dd>
-            </div>
-            <CopyableUrlRow
-              t={t}
-              label={`${t("admin.googleServiceCalendarName")} — ${t("admin.googleOauthRedirectLabel")}`}
-              url={googleInfo.services.calendar.redirectUri}
-            />
-            <CopyableUrlRow
-              t={t}
-              label={`${t("admin.googleServiceYoutubeName")} — ${t("admin.googleOauthRedirectLabel")}`}
-              url={googleInfo.services.youtube.redirectUri}
-            />
-            <CopyableUrlRow
-              t={t}
-              label={`${t("admin.googleServiceBusinessName")} — ${t("admin.googleOauthRedirectLabel")}`}
-              url={googleInfo.services.business.redirectUri}
-            />
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.googleServiceEffectiveLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {t("admin.googleServiceCalendarName")}:{" "}
-                {googleInfo.services.calendar.clientId ?? "—"}
-                <br />
-                {t("admin.googleServiceYoutubeName")}:{" "}
-                {googleInfo.services.youtube.clientId ?? "—"}
-                <br />
-                {t("admin.googleServiceBusinessName")}:{" "}
-                {googleInfo.services.business.clientId ?? "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_oauth_client_id"
-            status={byKey("google_oauth_client_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_oauth_client_secret"
-            status={byKey("google_oauth_client_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_calendar_client_id"
-            status={byKey("google_calendar_client_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_calendar_client_secret"
-            status={byKey("google_calendar_client_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_youtube_client_id"
-            status={byKey("google_youtube_client_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_youtube_client_secret"
-            status={byKey("google_youtube_client_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_business_client_id"
-            status={byKey("google_business_client_id")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="google_business_client_secret"
-            status={byKey("google_business_client_secret")}
-            onStatusChanged={onStatusChanged}
-          />
-        </div>
-      </section>
-
-      {/*
-        Pengaturan content schedule multi-platform — BUKAN kredensial:
-        dua level privasi enum (base URL media publik PINDAH ke grup
-        Cloudflare R2 di atas — ia alamat publik bucket yang sama).
-        Nilai efektif (panel → env → bawaan aman) DITAMPILKAN seperti
-        grup publik lain; barisnya teks biasa dan dimuat ulang sesudah
-        diubah agar tampilan efektifnya segar. Nilai di luar pilihan
-        sah ditolak server saat disimpan.
-        Sejak gelombang Pilihan Privasi & AI per Postingan kedua
-        level ini adalah NILAI BAWAAN platform: formulir postingan
-        menampilkan pemilihnya per postingan dan pilihan pengguna
-        menimpa bawaan ini (keputusan pemilik 2026-11-12 — panel
-        dipertahankan sebagai default, BUKAN dicabut).
-      */}
-      <section className="mt-8">
-        <h2 className="text-base font-semibold text-ink">
-          {t("admin.contentScheduleTitle")}
-        </h2>
-        <p className="mt-1 max-w-2xl text-sm text-muted">
-          {t("admin.contentScheduleBody")}
-        </p>
-        {contentScheduleInfo ? (
-          <dl className="mt-3 grid max-w-2xl grid-cols-1 gap-2 text-sm sm:grid-cols-2">
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.youtubePrivacyStatusLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {contentScheduleInfo.youtubePrivacyStatus}
-              </dd>
-            </div>
-            <div className="rounded-xl bg-surface p-3">
-              <dt className="text-xs text-muted">
-                {t("admin.tiktokPrivacyLevelLabel")}
-              </dt>
-              <dd className="mt-0.5 break-all font-mono text-xs text-ink">
-                {contentScheduleInfo.tiktokPrivacyLevel}
-              </dd>
-            </div>
-          </dl>
-        ) : null}
-        <div className="mt-4 space-y-3">
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="youtube_privacy_status"
-            status={byKey("youtube_privacy_status")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-          <SettingRow
-            t={t}
-            locale={locale}
-            settingKey="tiktok_privacy_level"
-            status={byKey("tiktok_privacy_level")}
-            secret={false}
-            onStatusChanged={(next) => {
-              onStatusChanged(next);
-              void load();
-            }}
-          />
-        </div>
-      </section>
+        {cardShell("resend", {
+          title: t("admin.resendTitle"),
+          caps: "admin.cardCapsEmail",
+          icon: genericIcon(
+            <>
+              <rect x="3" y="5" width="18" height="14" rx="2" />
+              <path d="M3 7l9 6 9-6" />
+            </>,
+          ),
+          body: <p>{t("admin.resendBody")}</p>,
+          info: emailInfo ? (
+            <>
+              <InfoValue
+                label={t("admin.resendFromEmailLabel")}
+                value={emailInfo.fromEmail}
+              />
+              <InfoValue
+                label={t("admin.resendFromNameLabel")}
+                value={emailInfo.fromName}
+              />
+            </>
+          ) : null,
+        })}
+      </div>
 
       <UnresolvedLogsSection t={t} locale={locale} />
+    </div>
+  );
+}
+
+/**
+ * Satu kartu platform: kepala (ikon + nama + lencana status efektif),
+ * subjudul kemampuan + status konfigurasi, teks penjelasan, kotak info
+ * URL/nilai efektif, kolom-kolom kuncinya, dan tombol Simpan per kartu
+ * (menyimpan HANYA kunci kartu ini yang terisi, satu per satu lewat API
+ * yang sama seperti sebelumnya; hasil dilaporkan per kartu).
+ */
+function PlatformCard({
+  t,
+  locale,
+  cardId,
+  title,
+  caps,
+  configured,
+  icon,
+  body,
+  info,
+  byKey,
+  onStatusChanged,
+  onReload,
+}: {
+  t: Translate;
+  locale: Locale;
+  cardId: AdminCardId;
+  title: string;
+  caps: string;
+  configured: boolean;
+  icon: ReactNode;
+  body?: ReactNode;
+  info?: ReactNode;
+  byKey: (key: PlatformSettingKey) => PlatformSettingStatus | null;
+  onStatusChanged: (next: PlatformSettingStatus) => void;
+  onReload: () => void;
+}) {
+  const spec = adminCardById(cardId);
+  const [values, setValues] = useState<
+    Partial<Record<PlatformSettingKey, string>>
+  >({});
+  const [saving, setSaving] = useState(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [saveErrors, setSaveErrors] = useState<
+    { label: string; message: string }[]
+  >([]);
+
+  const dirtyFields = spec.fields.filter((f) =>
+    (values[f.key] ?? "").trim(),
+  );
+
+  const handleSaveCard = async () => {
+    if (dirtyFields.length === 0 || saving) return;
+    setSaving(true);
+    setSavedNotice(null);
+    setSaveErrors([]);
+    const savedLabels: string[] = [];
+    const errors: { label: string; message: string }[] = [];
+    let needsReload = false;
+    for (const field of dirtyFields) {
+      const value = (values[field.key] ?? "").trim();
+      try {
+        const next = await api.admin.setSetting(field.key, value);
+        onStatusChanged(next);
+        savedLabels.push(t(KEY_LABELS[field.key]));
+        if (field.reloadOnChange) needsReload = true;
+        setValues((prev) => ({ ...prev, [field.key]: "" }));
+      } catch (err) {
+        errors.push({
+          label: t(KEY_LABELS[field.key]),
+          message: translateApiError(t, err),
+        });
+      }
+    }
+    if (savedLabels.length > 0) {
+      setSavedNotice(
+        t("admin.cardSavedNotice", { names: savedLabels.join(", ") }),
+      );
+    }
+    setSaveErrors(errors);
+    setSaving(false);
+    if (needsReload) onReload();
+  };
+
+  return (
+    <section className="rounded-2xl bg-surface p-5">
+      <div className="flex items-start gap-3">
+        {icon}
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="text-base font-semibold text-ink">{title}</h2>
+            <span
+              className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                configured
+                  ? "bg-success/15 text-success"
+                  : "bg-elevated text-muted"
+              }`}
+            >
+              {configured
+                ? t("admin.cardActiveBadge")
+                : t("admin.cardInactiveBadge")}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs text-muted">
+            {caps} ·{" "}
+            {configured
+              ? t("admin.cardConfiguredText")
+              : t("admin.cardUnconfiguredText")}
+          </p>
+        </div>
+      </div>
+
+      {body ? (
+        <div className="mt-3 space-y-2 text-sm text-muted">{body}</div>
+      ) : null}
+
+      {info ? <dl className="mt-4 grid grid-cols-1 gap-2">{info}</dl> : null}
+
+      <div className="mt-4 space-y-4">
+        {spec.fields.map((field) => (
+          <CardField
+            key={field.key}
+            t={t}
+            locale={locale}
+            field={field}
+            status={byKey(field.key)}
+            value={values[field.key] ?? ""}
+            onValueChange={(next) =>
+              setValues((prev) => ({ ...prev, [field.key]: next }))
+            }
+            disabled={saving}
+            onStatusChanged={onStatusChanged}
+            onReload={onReload}
+          />
+        ))}
+      </div>
+
+      {savedNotice ? (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-success">
+          {savedNotice}
+        </p>
+      ) : null}
+      {saveErrors.length > 0 ? (
+        <div className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-red-600">
+          {saveErrors.map((e) => (
+            <p key={e.label}>
+              {e.label}: {e.message}
+            </p>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="mt-4 flex justify-end">
+        <button
+          type="button"
+          onClick={() => void handleSaveCard()}
+          disabled={saving || dirtyFields.length === 0}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {saving ? t("admin.saving") : t("admin.saveButton")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Satu kolom kunci di dalam kartu. Mempertahankan perilaku baris lama
+ * persis: chip SUMBER nilai efektif (Panel / Environment / Belum
+ * diatur — istilah & data API yang sama), jejak ubah panel, input
+ * nilai baru (password untuk rahasia — placeholder "sudah tersimpan"
+ * tidak pernah menampilkan nilai; teks biasa untuk identifier publik),
+ * tombol Hapus (kembali ke environment, dengan konfirmasi) dan Uji
+ * koneksi untuk kunci yang bisa diuji. Penyimpanan nilai baru kini
+ * lewat tombol Simpan kartu.
+ */
+function CardField({
+  t,
+  locale,
+  field,
+  status,
+  value,
+  onValueChange,
+  disabled,
+  onStatusChanged,
+  onReload,
+}: {
+  t: Translate;
+  locale: Locale;
+  field: AdminCardFieldSpec;
+  status: PlatformSettingStatus | null;
+  value: string;
+  onValueChange: (next: string) => void;
+  disabled: boolean;
+  onStatusChanged: (next: PlatformSettingStatus) => void;
+  onReload: () => void;
+}) {
+  const settingKey = field.key;
+  const [busy, setBusy] = useState<"clear" | "test" | null>(null);
+  const [rowError, setRowError] = useState<string | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [testResult, setTestResult] =
+    useState<PlatformSettingTestResult | null>(null);
+
+  const label = t(KEY_LABELS[settingKey]);
+  const sourceChip = !status?.isSet
+    ? { text: t("admin.sourceNone"), cls: "bg-elevated text-muted" }
+    : status.source === "panel"
+      ? { text: t("admin.sourcePanel"), cls: "bg-accent/15 text-accent" }
+      : { text: t("admin.sourceEnv"), cls: "bg-elevated text-ink" };
+
+  const handleClear = async () => {
+    setBusy("clear");
+    setRowError(null);
+    try {
+      const next = await api.admin.clearSetting(settingKey);
+      setConfirmClear(false);
+      setTestResult(null);
+      onStatusChanged(next);
+      if (field.reloadOnChange) onReload();
+    } catch (err) {
+      setRowError(translateApiError(t, err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleTest = async () => {
+    setBusy("test");
+    setRowError(null);
+    try {
+      setTestResult(await api.admin.testSetting(settingKey));
+    } catch (err) {
+      setRowError(translateApiError(t, err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm font-semibold text-ink">{label}</span>
+        <span
+          className={`rounded-full px-2 py-0.5 text-xs font-medium ${sourceChip.cls}`}
+        >
+          {sourceChip.text}
+        </span>
+      </div>
+      {status?.source === "panel" && status.updatedAt ? (
+        <div className="mt-1 text-xs text-muted">
+          {t("admin.updatedLabel", {
+            date: formatDateTime(status.updatedAt, locale),
+            by: status.updatedBy ?? "—",
+          })}
+        </div>
+      ) : null}
+
+      <label className="mt-2 block">
+        <span className="mb-1 block text-xs font-medium text-muted">
+          {t("admin.newValueLabel")}
+        </span>
+        {field.secret ? (
+          <PasswordInput
+            t={t}
+            value={value}
+            onChange={(e) => onValueChange(e.target.value)}
+            placeholder={
+              status?.isSet
+                ? t("admin.secretSavedPlaceholder")
+                : t("admin.newValuePlaceholder")
+            }
+            autoComplete="off"
+            className={inputClassName}
+          />
+        ) : (
+          <input
+            type="text"
+            value={value}
+            onChange={(e) => onValueChange(e.target.value)}
+            placeholder={
+              settingKey === "openrouter_model"
+                ? t("admin.openrouterModelPlaceholder")
+                : t("admin.newValuePlaceholder")
+            }
+            autoComplete="off"
+            className={inputClassName}
+          />
+        )}
+      </label>
+      {FIELD_HELP[settingKey] ? (
+        <p className="mt-1 text-xs text-muted">
+          {t(FIELD_HELP[settingKey]!)}
+        </p>
+      ) : null}
+      <FieldError message={rowError} />
+
+      {status?.source === "panel" || TESTABLE.has(settingKey) ? (
+        <div className="mt-2 flex flex-wrap gap-2">
+          {status?.source === "panel" ? (
+            <button
+              type="button"
+              onClick={() => setConfirmClear(true)}
+              disabled={busy !== null || disabled}
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-red-600 disabled:opacity-60"
+            >
+              {t("admin.clearButton")}
+            </button>
+          ) : null}
+          {TESTABLE.has(settingKey) ? (
+            <button
+              type="button"
+              onClick={handleTest}
+              disabled={busy !== null || disabled}
+              className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink disabled:opacity-60"
+            >
+              {busy === "test" ? t("admin.testing") : t("admin.testButton")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {testResult ? (
+        <div className="mt-2 rounded-lg bg-elevated px-3 py-2 text-sm">
+          <span className={testResult.ok ? "text-accent" : "text-red-600"}>
+            {testResult.ok
+              ? t("admin.testOk")
+              : t("admin.testFailed", { code: testResult.code })}
+          </span>
+          {testResult.ok && testResult.info ? (
+            <span className="text-muted">
+              {typeof testResult.info.label === "string"
+                ? ` · ${t("admin.testInfoLabel")}: ${testResult.info.label}`
+                : ""}
+              {typeof testResult.info.isFreeTier === "boolean"
+                ? ` · ${t("admin.testInfoTier")}: ${testResult.info.isFreeTier ? "✓" : "—"}`
+                : ""}
+              {typeof testResult.info.limitRemaining === "number"
+                ? ` · ${t("admin.testInfoLimitRemaining")}: ${testResult.info.limitRemaining}`
+                : ""}
+              {typeof testResult.info.domains === "number"
+                ? ` · ${t("admin.resendTestInfoDomains")}: ${testResult.info.domains}`
+                : ""}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
+      {confirmClear ? (
+        <div
+          className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="w-full max-w-lg rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+            <h3 className="text-lg font-bold text-ink">
+              {t("admin.clearConfirmTitle")}
+            </h3>
+            <p className="mt-2 text-sm text-muted">
+              {t("admin.clearConfirmBody", { name: label })}
+            </p>
+            <div className="mt-4 flex gap-2">
+              <button
+                type="button"
+                onClick={handleClear}
+                disabled={busy !== null}
+                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {busy === "clear" ? t("admin.clearing") : t("admin.clearButton")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmClear(false)}
+                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+              >
+                {t("common.cancel")}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1152,223 +1287,5 @@ function UnresolvedLogsSection({
         </ul>
       )}
     </section>
-  );
-}
-
-function SettingRow({
-  t,
-  locale,
-  settingKey,
-  status,
-  secret = true,
-  onStatusChanged,
-}: {
-  t: Translate;
-  locale: Locale;
-  settingKey: PlatformSettingKey;
-  status: PlatformSettingStatus | null;
-  /** True = input password (kredensial); false = teks biasa (nama model). */
-  secret?: boolean;
-  onStatusChanged: (next: PlatformSettingStatus) => void;
-}) {
-  const [value, setValue] = useState("");
-  const [busy, setBusy] = useState<"save" | "clear" | "test" | null>(null);
-  const [rowError, setRowError] = useState<string | null>(null);
-  const [confirmClear, setConfirmClear] = useState(false);
-  const [testResult, setTestResult] =
-    useState<PlatformSettingTestResult | null>(null);
-
-  const label = t(KEY_LABELS[settingKey]);
-  const sourceChip = !status?.isSet
-    ? { text: t("admin.sourceNone"), cls: "bg-elevated text-muted" }
-    : status.source === "panel"
-      ? { text: t("admin.sourcePanel"), cls: "bg-accent/15 text-accent" }
-      : { text: t("admin.sourceEnv"), cls: "bg-elevated text-ink" };
-
-  const handleSave = async () => {
-    if (!value.trim()) return;
-    setBusy("save");
-    setRowError(null);
-    try {
-      const next = await api.admin.setSetting(settingKey, value.trim());
-      setValue("");
-      setTestResult(null);
-      onStatusChanged(next);
-    } catch (err) {
-      setRowError(translateApiError(t, err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleClear = async () => {
-    setBusy("clear");
-    setRowError(null);
-    try {
-      const next = await api.admin.clearSetting(settingKey);
-      setConfirmClear(false);
-      setTestResult(null);
-      onStatusChanged(next);
-    } catch (err) {
-      setRowError(translateApiError(t, err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const handleTest = async () => {
-    setBusy("test");
-    setRowError(null);
-    try {
-      setTestResult(await api.admin.testSetting(settingKey));
-    } catch (err) {
-      setRowError(translateApiError(t, err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <div className="max-w-2xl rounded-xl bg-surface p-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-ink">{label}</span>
-        <span
-          className={`rounded-full px-2 py-0.5 text-xs font-medium ${sourceChip.cls}`}
-        >
-          {sourceChip.text}
-        </span>
-      </div>
-      {status?.source === "panel" && status.updatedAt ? (
-        <div className="mt-1 text-xs text-muted">
-          {t("admin.updatedLabel", {
-            date: formatDateTime(status.updatedAt, locale),
-            by: status.updatedBy ?? "—",
-          })}
-        </div>
-      ) : null}
-
-      <label className="mt-3 block">
-        <span className="mb-1 block text-xs font-medium text-muted">
-          {t("admin.newValueLabel")}
-        </span>
-        {secret ? (
-          <PasswordInput
-            t={t}
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={t("admin.newValuePlaceholder")}
-            autoComplete="off"
-            className={inputClassName}
-          />
-        ) : (
-          <input
-            type="text"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-            placeholder={
-              settingKey === "openrouter_model"
-                ? t("admin.openrouterModelPlaceholder")
-                : t("admin.newValuePlaceholder")
-            }
-            autoComplete="off"
-            className={inputClassName}
-          />
-        )}
-      </label>
-      <FieldError message={rowError} />
-
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={handleSave}
-          disabled={busy !== null || !value.trim()}
-          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-        >
-          {busy === "save" ? t("admin.saving") : t("admin.saveButton")}
-        </button>
-        {status?.source === "panel" ? (
-          <button
-            type="button"
-            onClick={() => setConfirmClear(true)}
-            disabled={busy !== null}
-            className="rounded-lg bg-elevated px-3 py-2 text-sm font-medium text-red-600 disabled:opacity-60"
-          >
-            {t("admin.clearButton")}
-          </button>
-        ) : null}
-        {TESTABLE.has(settingKey) ? (
-          <button
-            type="button"
-            onClick={handleTest}
-            disabled={busy !== null}
-            className="rounded-lg bg-elevated px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
-          >
-            {busy === "test" ? t("admin.testing") : t("admin.testButton")}
-          </button>
-        ) : null}
-      </div>
-
-      {testResult ? (
-        <div className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm">
-          <span
-            className={testResult.ok ? "text-accent" : "text-red-600"}
-          >
-            {testResult.ok
-              ? t("admin.testOk")
-              : t("admin.testFailed", { code: testResult.code })}
-          </span>
-          {testResult.ok && testResult.info ? (
-            <span className="text-muted">
-              {typeof testResult.info.label === "string"
-                ? ` · ${t("admin.testInfoLabel")}: ${testResult.info.label}`
-                : ""}
-              {typeof testResult.info.isFreeTier === "boolean"
-                ? ` · ${t("admin.testInfoTier")}: ${testResult.info.isFreeTier ? "✓" : "—"}`
-                : ""}
-              {typeof testResult.info.limitRemaining === "number"
-                ? ` · ${t("admin.testInfoLimitRemaining")}: ${testResult.info.limitRemaining}`
-                : ""}
-              {typeof testResult.info.domains === "number"
-                ? ` · ${t("admin.resendTestInfoDomains")}: ${testResult.info.domains}`
-                : ""}
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-
-      {confirmClear ? (
-        <div
-          className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
-          role="dialog"
-          aria-modal="true"
-        >
-          <div className="w-full max-w-lg rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
-            <h3 className="text-lg font-bold text-ink">
-              {t("admin.clearConfirmTitle")}
-            </h3>
-            <p className="mt-2 text-sm text-muted">
-              {t("admin.clearConfirmBody", { name: label })}
-            </p>
-            <div className="mt-4 flex gap-2">
-              <button
-                type="button"
-                onClick={handleClear}
-                disabled={busy !== null}
-                className="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-              >
-                {busy === "clear" ? t("admin.clearing") : t("admin.clearButton")}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmClear(false)}
-                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
-              >
-                {t("common.cancel")}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-    </div>
   );
 }

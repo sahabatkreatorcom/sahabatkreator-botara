@@ -126,7 +126,11 @@ export const ADMIN_CARDS: readonly AdminCardSpec[] = [
   },
   {
     id: "threads",
-    fields: [pub("threads_app_id"), sec("threads_app_secret")],
+    fields: [
+      pub("threads_app_id"),
+      sec("threads_app_secret"),
+      sec("threads_webhook_verify_token"),
+    ],
     requiredKeys: ["threads_app_id", "threads_app_secret"],
     callbackPath: OAUTH_CALLBACK_PATHS.threads,
     webhookPaths: [WEBHOOK_PATHS.threads],
