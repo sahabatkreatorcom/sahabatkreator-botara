@@ -219,6 +219,12 @@ export {
   type UpdateAgentInput,
 } from "./agents";
 export {
+  createAgentInstructionTemplate,
+  listAgentInstructionTemplates,
+  deleteAgentInstructionTemplate,
+  type CreateAgentInstructionTemplateInput,
+} from "./agent-templates";
+export {
   chunkText,
   createKbDocument,
   listKbDocuments,
