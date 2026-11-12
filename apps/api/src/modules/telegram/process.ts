@@ -10,6 +10,7 @@ import {
   type TelegramAccountRef,
 } from "@sahabat-kreator/core";
 import {
+  parseTelegramCallbackQuery,
   parseTelegramChannelPost,
   parseTelegramUpdate,
   type TelegramUpdate,
@@ -182,6 +183,87 @@ export async function processTelegramUpdate(
         tenantId: account.tenantId,
         conversationId: recorded.message.conversationId,
       });
+    }
+    return outcomes;
+  }
+
+  // Update `callback_query` (G5): ketukan tombol inline — padanan
+  // postback Meta. Dicatat sebagai pesan masuk bersinyal postback
+  // lewat record yang sama dengan pesan teks (kontak/percakapan dari
+  // chat tempat tombol menempel; id dedup dari id callback, BUKAN
+  // message_id pesan lama tempat tombol menempel). Data tombol adalah
+  // payload sekaligus teks tampilnya (Telegram tidak memisahkan
+  // judul). Callback tanpa data/pesan chat → parser null → diabaikan
+  // berjejak. CATATAN: update ini hanya tiba bila webhook didaftarkan
+  // dengan allowed_updates memuat callback_query (lihat channel).
+  if ((payload as TelegramUpdate).callback_query) {
+    const callback = parseTelegramCallbackQuery(payload);
+    if (!callback) {
+      await log({
+        direction: "in",
+        provider: "telegram",
+        tenantId: account.tenantId,
+        channelAccountId: account.id,
+        signatureValid: true,
+        outcome: "ignored_status_only",
+        summary: "callback query without recordable payload",
+        payload,
+      });
+      return outcomes;
+    }
+    let recorded: Awaited<ReturnType<typeof recordTelegramInboundMessage>>;
+    try {
+      recorded = await recordTelegramInboundMessage(deps.db, account, {
+        senderExternalId: callback.senderExternalId,
+        senderName: callback.senderName,
+        senderUsername: callback.senderUsername ?? undefined,
+        chatExternalId: callback.chatExternalId,
+        isGroup: callback.isGroup,
+        chatTitle: callback.chatTitle,
+        providerMessageId: `telegram:${account.externalId}:cbq:${callback.callbackQueryId}`,
+        text: callback.data,
+        triggerSignal: {
+          kind: "postback",
+          payload: callback.data,
+          title: null,
+        },
+      });
+    } catch (err) {
+      await log({
+        direction: "in",
+        provider: "telegram",
+        tenantId: account.tenantId,
+        channelAccountId: account.id,
+        signatureValid: true,
+        outcome: "error",
+        errorCode: "processing_error",
+        summary: `failed to record callback query from ${callback.senderExternalId}`,
+        payload,
+      });
+      throw err;
+    }
+    await log({
+      direction: "in",
+      provider: "telegram",
+      tenantId: account.tenantId,
+      channelAccountId: account.id,
+      signatureValid: true,
+      outcome:
+        recorded === null || recorded.duplicate ? "duplicate" : "recorded",
+      summary: `callback query data=${callback.data} from ${callback.senderExternalId}`,
+      payload,
+    });
+    if (recorded) {
+      if (recorded.identityCreated) {
+        triggerContactPhoto(deps, account, recorded.contactId, callback.senderExternalId);
+      }
+      if (deps.publisher) {
+        await deps.publisher.publishNudge({
+          kind: "message.received",
+          tenantId: account.tenantId,
+          conversationId: recorded.message.conversationId,
+        });
+      }
     }
     return outcomes;
   }

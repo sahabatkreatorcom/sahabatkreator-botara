@@ -20,6 +20,7 @@ import {
 } from "@sahabat-kreator/core";
 import {
   parseMetaCommentEvents,
+  parseMetaPostbackEvents,
   parseMetaReferralEvents,
   parseMetaWebhookEvents,
 } from "@sahabat-kreator/channel-messenger";
@@ -175,6 +176,17 @@ export async function processMetaWebhookPayload(
         // Fase 7B.5: message.reply_to.mid (mentah; core menyusun majemuk).
         replyToProviderMessageId: event.replyToProviderMessageId,
         text: event.text,
+        // G5: ketukan quick reply — teksnya tetap judul tombol, dan
+        // payload mesinnya tercatat sebagai sinyal pemicu quick reply.
+        ...(event.quickReplyPayload
+          ? {
+              triggerSignal: {
+                kind: "quick_reply" as const,
+                payload: event.quickReplyPayload,
+                title: event.text,
+              },
+            }
+          : {}),
       });
     } catch (err) {
       await log({
@@ -365,17 +377,104 @@ export async function processMetaWebhookPayload(
       triggerContactProfile(deps, account, recorded.contactId, event.senderExternalId);
     }
   }
-  if (events.length === 0 && commentEvents.length === 0 && referralEvents.length === 0 && !scoped) {
-    // Payload sah tanpa event messaging yang dikenal parser (receipt
-    // delivery/read murni, postback, objek selain page/instagram):
-    // tetap satu baris agregat agar tidak ada hit yang senyap.
+  // G5: event POSTBACK (ketukan tombol Messenger/IG) — dicatat sebagai
+  // pesan masuk bersinyal postback lewat jalur record yang sama dengan
+  // pesan teks (kontak/percakapan/outbox `message.received` identik,
+  // jadi worker mengevaluasinya dengan rantai prioritas yang sama).
+  // Teks tampilnya = judul tombol; tanpa judul, payload-nya sendiri.
+  // Postback yang juga membawa referral tetap diproses parser referral
+  // di atas sebagai atribusi — dua-duanya sah, tidak saling meniadakan.
+  const postbackEvents = parseMetaPostbackEvents(payload);
+  for (const event of postbackEvents) {
+    const provider: MetaProvider =
+      event.objectKind === "page" ? "messenger" : "instagram";
+    const account = await resolveAccount(provider, event.entryExternalId);
+    if (!account) {
+      if (scoped) continue;
+      await log({
+        direction: "in",
+        provider,
+        signatureValid: true,
+        outcome: "unresolved_account",
+        summary: `postback for unknown ${provider} account ${event.entryExternalId}`,
+        payload,
+      });
+      continue;
+    }
+    if (scoped && account.tenantId !== deps.tenantScopeId) continue;
+    if (account.status !== "connected") {
+      await log({
+        direction: "in",
+        provider,
+        tenantId: account.tenantId,
+        channelAccountId: account.id,
+        signatureValid: true,
+        outcome: "ignored_disconnected",
+        summary: `postback for ${account.status} account`,
+        payload,
+      });
+      continue;
+    }
+    let recorded: Awaited<ReturnType<typeof recordMetaInboundMessage>>;
+    try {
+      recorded = await recordMetaInboundMessage(deps.db, account, {
+        senderExternalId: event.senderExternalId,
+        providerMessageId: event.providerMessageId,
+        text: event.title ?? event.payload,
+        triggerSignal: {
+          kind: "postback",
+          payload: event.payload,
+          title: event.title,
+        },
+      });
+    } catch (err) {
+      await log({
+        direction: "in",
+        provider,
+        tenantId: account.tenantId,
+        channelAccountId: account.id,
+        signatureValid: true,
+        outcome: "error",
+        errorCode: "processing_error",
+        summary: `failed to record postback from ${event.senderExternalId}`,
+        payload,
+      });
+      throw err;
+    }
+    await log({
+      direction: "in",
+      provider,
+      tenantId: account.tenantId,
+      channelAccountId: account.id,
+      signatureValid: true,
+      outcome:
+        recorded === null || recorded.duplicate ? "duplicate" : "recorded",
+      summary: `postback payload=${event.payload} from ${event.senderExternalId}`,
+      payload,
+    });
+    if (!recorded) continue;
+    if (recorded.identityCreated) {
+      triggerContactProfile(deps, account, recorded.contactId, event.senderExternalId);
+    }
+    if (deps.publisher) {
+      await deps.publisher.publishNudge({
+        kind: "message.received",
+        tenantId: account.tenantId,
+        conversationId: recorded.message.conversationId,
+      });
+    }
+  }
+  if (events.length === 0 && commentEvents.length === 0 && referralEvents.length === 0 && postbackEvents.length === 0 && !scoped) {
+    // Payload sah tanpa event yang dikenal parser mana pun (receipt
+    // delivery/read murni, objek selain page/instagram): tetap satu
+    // baris agregat agar tidak ada hit yang senyap.
     // (Mode replay ber-scope tidak menulis baris agregat platform.)
     await log({
       direction: "in",
       provider: "meta",
       signatureValid: true,
       outcome: "ignored_status_only",
-      summary: "payload without messaging events (receipts/postbacks)",
+      summary: "payload without messaging events (receipts only)",
       payload,
     });
   }
@@ -534,6 +633,17 @@ async function handleWhatsAppWebhook(
           // Unduhannya TIDAK dilakukan di sini (webhook harus ack cepat);
           // worker yang mengambilnya lewat `ingestMessageMedia`.
           media: message.media,
+          // G5: balasan tombol/daftar interaktif = sinyal quick reply
+          // (payload = id tombol/baris yang dikonfigurasi pengirim).
+          ...(message.interactiveReply
+            ? {
+                triggerSignal: {
+                  kind: "quick_reply" as const,
+                  payload: message.interactiveReply.id,
+                  title: message.interactiveReply.title,
+                },
+              }
+            : {}),
         });
       } catch (err) {
         await log({

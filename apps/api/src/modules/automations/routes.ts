@@ -46,6 +46,7 @@ import {
   listSequenceTemplates,
   updateAutomation,
   type AutomationWithRunCount,
+  type CreateAutomationInput,
   type SequenceEnrollmentWithTotal,
 } from "@sahabat-kreator/core";
 import type { AutomationRun, SequenceTemplate } from "@sahabat-kreator/db";
@@ -60,6 +61,8 @@ export function serializeAutomation(row: AutomationWithRunCount): AutomationResp
     triggerType: row.triggerType,
     kind: row.kind,
     keywords: row.triggerConfig.keywords,
+    // G5: payload tombol aturan postback/quick_reply; kosong selain itu.
+    payloads: row.triggerConfig.payloads ?? [],
     match: row.triggerConfig.match,
     actionType: row.actionType,
     text: row.actionConfig.text,
@@ -245,36 +248,59 @@ export function createAutomationsRoutes(bundle: AuthBundle | null) {
         );
       }
     }
+    // G5: varian pemicu baru (postback/quick_reply/welcome) dikenali
+    // dari field triggerType — diperiksa PERTAMA karena variannya
+    // juga bisa membawa steps (kind 'sequence'). Aksi mengikuti kind;
+    // keywords selalu kosong (payload yang dicocokkan, bukan teks).
+    let createInput: CreateAutomationInput;
+    if ("triggerType" in parsed.data) {
+      const data = parsed.data;
+      createInput = {
+        name: data.name,
+        keywords: [],
+        match: "exact",
+        kind: data.kind,
+        triggerType: data.triggerType,
+        ...(data.triggerType !== "welcome"
+          ? { payloads: data.payloads }
+          : {}),
+        ...(data.kind === "sequence"
+          ? { steps: data.steps }
+          : { text: data.text }),
+      };
+    } else if ("steps" in parsed.data) {
+      createInput = {
+        name: parsed.data.name,
+        keywords: parsed.data.keywords,
+        match: parsed.data.match,
+        kind: "sequence",
+        steps: parsed.data.steps,
+      };
+    } else if ("channelAccountId" in parsed.data) {
+      createInput = {
+        name: parsed.data.name,
+        keywords: parsed.data.keywords,
+        match: parsed.data.match,
+        kind: "comment",
+        channelAccountId: parsed.data.channelAccountId,
+        sendDm: parsed.data.sendDm,
+        text: parsed.data.dmText,
+        publicReplyText: parsed.data.publicReplyText ?? null,
+        hideComment: parsed.data.hideComment,
+      };
+    } else {
+      createInput = {
+        name: parsed.data.name,
+        keywords: parsed.data.keywords,
+        match: parsed.data.match,
+        kind: "keyword",
+        text: parsed.data.text,
+      };
+    }
     const created = await createAutomation(
       bundle.db,
       { tenantId: tenant.id },
-      "steps" in parsed.data
-        ? {
-            name: parsed.data.name,
-            keywords: parsed.data.keywords,
-            match: parsed.data.match,
-            kind: "sequence",
-            steps: parsed.data.steps,
-          }
-        : "channelAccountId" in parsed.data
-          ? {
-              name: parsed.data.name,
-              keywords: parsed.data.keywords,
-              match: parsed.data.match,
-              kind: "comment",
-              channelAccountId: parsed.data.channelAccountId,
-              sendDm: parsed.data.sendDm,
-              text: parsed.data.dmText,
-              publicReplyText: parsed.data.publicReplyText ?? null,
-              hideComment: parsed.data.hideComment,
-            }
-          : {
-              name: parsed.data.name,
-              keywords: parsed.data.keywords,
-              match: parsed.data.match,
-              kind: "keyword",
-              text: parsed.data.text,
-            },
+      createInput,
     );
     return c.json(
       serializeAutomation({

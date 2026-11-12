@@ -29,6 +29,7 @@
     "verify:sequence-enroll": "tsx scripts/verify-sequence-enroll.ts",
     "verify:flow-versions": "tsx scripts/verify-flow-versions.ts",
     "verify:flow-simulator": "tsx scripts/verify-flow-simulator.ts",
+    "verify:trigger-priority": "tsx scripts/verify-trigger-priority.ts",
     "backfill:reply-snapshots": "tsx scripts/backfill-reply-snapshots.ts",
     "backfill:usage-meta": "tsx scripts/backfill-usage-meta.ts",
     "backfill:kb-embeddings": "tsx scripts/backfill-kb-embeddings.ts",
