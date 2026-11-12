@@ -9,8 +9,10 @@
  *   catalog.ts        node commerce         (Fase 13F)
  *   appointment.ts    node book_appointment (Fase 13G)
  *   validate.ts       validasi graf saat aktivasi
+ *   versions.ts       snapshot versi + resolusi graf ter-pin (G3)
  *   pagination.ts     util kursor halaman
- *   crud.ts           manajemen flow (sisi API dashboard)
+ *   crud.ts           manajemen flow (sisi API dashboard) + riwayat/
+ *                     pemulihan versi
  *   runs.ts           baca run & langkah
  *   evaluate.ts       pemicu + mesin parkir (sisi evaluasi pesan masuk)
  *   execute.ts        eksekusi run (sisi worker, job `flow.step`)
@@ -59,11 +61,17 @@
  *   kontak dan cap langkah.
  * - Menonaktifkan/mengarsipkan flow TIDAK membatalkan run yang sedang
  *   berjalan (konsisten sequence: is_active hanya memblokir pemicu
- *   baru) — run menyelesaikan graf versi SAAT RUN DIMULAI? Tidak:
- *   eksekutor membaca graf flow saat ini. Mengedit graf flow aktif
- *   memang dicegah (edit hanya draft), jadi graf tidak berubah di
- *   bawah run yang hidup kecuali lewat nonaktifkan→edit→aktifkan;
- *   risiko itu diterima v1 dan dicatat.
+ *   baru).
+ * - G3 (versioning, menggantikan keputusan v1 di poin sebelumnya):
+ *   setiap aktivasi menulis snapshot graf yang tidak bisa diubah
+ *   (`flow_versions`, nomor urut per flow); run MEM-PIN versi yang
+ *   memulainya dan eksekutor + mesin parkir membaca graf dari
+ *   SNAPSHOT itu (versions.resolveRunGraph) — nonaktifkan→edit→
+ *   aktifkan tidak lagi mengubah sisa perjalanan run hidup. Run
+ *   warisan tanpa pin (lahir sebelum G3 / flow aktif warisan) membaca
+ *   graf live sebagai fallback jujur; tidak ada snapshot retroaktif.
+ *   Pemulihan versi lama melahirkan versi BARU (append-only) dan
+ *   menolak menimpa draft yang belum diaktifkan (dirty_draft).
  * - Node `ai_response` memanggil jalur agent.respond yang ADA
  *   (`respondToInboundMessage`) untuk pesan pemicu run: mode auto →
  *   balasan terkirim; suggest → saran tercatat; agent tak ada/
@@ -180,6 +188,14 @@ export {
   type FlowGraphIssue,
 } from "./validate";
 export {
+  copyFlowGraph,
+  flowGraphsEqual,
+  latestFlowVersion,
+  resolveRunGraph,
+  snapshotFlowVersion,
+  type ResolvedRunGraph,
+} from "./versions";
+export {
   createFlow,
   instantiateFlowTemplate,
   listFlows,
@@ -189,12 +205,17 @@ export {
   deactivateFlow,
   setFlowArchived,
   deleteFlow,
+  listFlowVersions,
+  restoreFlowVersion,
   type FlowWithRunCount,
   type InstantiateFlowTemplateResult,
   type UpdateFlowResult,
   type ActivateFlowResult,
   type FlowStatusActionResult,
   type DeleteFlowResult,
+  type FlowVersionSummary,
+  type ListFlowVersionsResult,
+  type RestoreFlowVersionResult,
 } from "./crud";
 export {
   listFlowRuns,

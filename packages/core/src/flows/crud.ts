@@ -10,9 +10,11 @@ import { findFlowTemplate } from "@sahabat-kreator/contracts";
 import {
   auditLogs,
   flowRuns,
+  flowVersions,
   flows,
   type Database,
   type Flow,
+  type FlowVersion,
 } from "@sahabat-kreator/db";
 import {
   withTenantDb,
@@ -30,6 +32,12 @@ import {
   validateFlowGraph,
   type FlowGraphIssue,
 } from "./validate";
+import {
+  copyFlowGraph,
+  flowGraphsEqual,
+  latestFlowVersion,
+  snapshotFlowVersion,
+} from "./versions";
 import {
   clampLimit,
   cursorCondition,
@@ -343,7 +351,13 @@ export async function updateFlow(
 }
 
 export type ActivateFlowResult =
-  | { kind: "activated"; flow: Flow; warnings: FlowGraphIssue[] }
+  | {
+      kind: "activated";
+      flow: Flow;
+      warnings: FlowGraphIssue[];
+      /** Nomor versi snapshot yang ditulis aktivasi ini (G3). */
+      version: number;
+    }
   | { kind: "not_found" }
   | { kind: "invalid_state"; status: FlowStatus }
   | { kind: "invalid"; issues: FlowGraphIssue[] };
@@ -352,6 +366,11 @@ export type ActivateFlowResult =
  * Aktivasi: validasi graf menyeluruh dulu (di luar transaksi tulis).
  * Ada ERROR → ditolak utuh dengan daftar masalah; WARNING diteruskan
  * ke pemanggil bersama hasil sukses.
+ *
+ * G3: aktivasi yang sukses juga menulis SNAPSHOT versi (baris
+ * `flow_versions` yang tidak bisa diubah) di transaksi yang sama —
+ * run baru mem-pin versi itu dan menyelesaikannya dari snapshot,
+ * bukan dari graf live.
  */
 export async function activateFlow(
   db: Database,
@@ -381,14 +400,24 @@ export async function activateFlow(
       )
       .returning();
     if (!row) return { kind: "invalid_state" as const, status: existing.status };
+    const snapshot = await snapshotFlowVersion(tx, input.tenantId, {
+      flow: row,
+      graph,
+      userId: input.userId,
+    });
     await flowAudit(tx, input.tenantId, {
       actorType: "user",
       actorId: input.userId,
       action: "flow.activated",
       flowId: row.id,
-      meta: { warnings: warnings.map((w) => w.code) },
+      meta: { warnings: warnings.map((w) => w.code), version: snapshot.version },
     });
-    return { kind: "activated" as const, flow: row, warnings };
+    return {
+      kind: "activated" as const,
+      flow: row,
+      warnings,
+      version: snapshot.version,
+    };
   });
 }
 
@@ -499,5 +528,213 @@ export async function deleteFlow(
       meta: { deleted: true, name: existing.name },
     });
     return { kind: "deleted" as const };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Riwayat & pemulihan versi (G3)
+// ---------------------------------------------------------------------------
+
+export type FlowVersionSummary = {
+  version: FlowVersion;
+  nodeCount: number;
+  edgeCount: number;
+  /** Versi terbaru DAN flow sedang aktif (graf live = snapshot ini). */
+  isCurrent: boolean;
+};
+
+export type ListFlowVersionsResult =
+  | { kind: "ok"; versions: FlowVersionSummary[] }
+  | { kind: "not_found" };
+
+/**
+ * Riwayat versi satu flow, terbaru dulu. Ringkasan saja (graf penuh
+ * snapshot tidak keluar): jumlah node/edge diturunkan dari snapshot.
+ * Flow tenant lain / tak ada → not_found (isolasi tenant).
+ */
+export async function listFlowVersions(
+  db: Database,
+  input: { tenantId: string; flowId: string },
+): Promise<ListFlowVersionsResult> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const [flow] = await tx
+      .select()
+      .from(flows)
+      .where(
+        and(eq(flows.tenantId, input.tenantId), eq(flows.id, input.flowId)),
+      )
+      .limit(1);
+    if (!flow) return { kind: "not_found" as const };
+    const rows = await tx
+      .select()
+      .from(flowVersions)
+      .where(
+        and(
+          eq(flowVersions.tenantId, input.tenantId),
+          eq(flowVersions.flowId, input.flowId),
+        ),
+      )
+      .orderBy(desc(flowVersions.version));
+    const latest = rows.length > 0 ? rows[0].version : null;
+    return {
+      kind: "ok" as const,
+      versions: rows.map((row) => {
+        const graph = normalizeFlowGraph(row.graph);
+        return {
+          version: row,
+          nodeCount: graph.nodes.length,
+          edgeCount: graph.edges.length,
+          isCurrent: flow.status === "active" && row.version === latest,
+        };
+      }),
+    };
+  });
+}
+
+export type RestoreFlowVersionResult =
+  | { kind: "restored"; flow: Flow; version: FlowVersion }
+  | { kind: "not_found" }
+  | { kind: "version_not_found" }
+  | { kind: "invalid_state"; status: FlowStatus }
+  | { kind: "dirty_draft"; latestVersion: number }
+  | { kind: "invalid"; issues: FlowGraphIssue[] };
+
+/**
+ * Pemulihan versi: mengaktifkan kembali isi snapshot `version`
+ * sebagai versi BARU (nomor lanjut, `restored_from_version` =
+ * sumber) — sejarah append-only, baris sumber tidak berubah.
+ *
+ * Semantik draft vs published mengikuti aturan yang ada:
+ * - flow `active` → boleh: graf live saat aktif selalu sama dengan
+ *   versi terbaru (edit hanya draft), jadi tidak ada kerja yang
+ *   hilang;
+ * - flow `draft` → hanya bila graf draft PERSIS versi terbaru (baru
+ *   dinonaktifkan, belum disunting). Draft yang sudah disunting
+ *   ditolak `dirty_draft`: menimpanya diam-diam akan menghapus kerja
+ *   yang belum pernah teraktivasi — pengguna mengaktifkan draft itu
+ *   dulu (menyimpannya sebagai versi) sebelum memulihkan;
+ * - flow `archived` → invalid_state (keluar arsip dulu lewat jalur
+ *   yang ada).
+ * Graf snapshot divalidasi penuh seperti aktivasi biasa: snapshot
+ * yang sejak itu menjadi tidak sah (mis. rujukan sequence terhapus)
+ * ditolak `invalid` dengan daftar masalah, bukan dipaksakan aktif.
+ * Run yang sudah ter-pin tidak terpengaruh; run baru mem-pin versi
+ * hasil pemulihan.
+ */
+export async function restoreFlowVersion(
+  db: Database,
+  input: {
+    tenantId: string;
+    flowId: string;
+    version: number;
+    userId: string;
+  },
+): Promise<RestoreFlowVersionResult> {
+  const pre = await withTenantDb(db, input.tenantId, async (tx) => {
+    const [flow] = await tx
+      .select()
+      .from(flows)
+      .where(
+        and(eq(flows.tenantId, input.tenantId), eq(flows.id, input.flowId)),
+      )
+      .limit(1);
+    if (!flow) return { kind: "not_found" as const };
+    const [source] = await tx
+      .select()
+      .from(flowVersions)
+      .where(
+        and(
+          eq(flowVersions.tenantId, input.tenantId),
+          eq(flowVersions.flowId, input.flowId),
+          eq(flowVersions.version, input.version),
+        ),
+      )
+      .limit(1);
+    if (!source) return { kind: "version_not_found" as const };
+    const latest = await latestFlowVersion(tx, input.tenantId, input.flowId);
+    return { kind: "ok" as const, flow, source, latest };
+  });
+  if (pre.kind !== "ok") return pre;
+  const { flow, source, latest } = pre;
+  if (flow.status === "archived") {
+    return { kind: "invalid_state", status: flow.status };
+  }
+  if (flow.status === "draft") {
+    if (
+      !latest ||
+      !flowGraphsEqual(
+        normalizeFlowGraph(flow.graph),
+        normalizeFlowGraph(latest.graph),
+      )
+    ) {
+      return {
+        kind: "dirty_draft",
+        latestVersion: latest?.version ?? source.version,
+      };
+    }
+  }
+  const snapshotGraph = normalizeFlowGraph(source.graph);
+  const issues = await validateFlowGraph(db, input.tenantId, snapshotGraph, {
+    selfFlowId: input.flowId,
+  });
+  const errors = issues.filter((i) => i.severity === "error");
+  if (errors.length > 0) return { kind: "invalid", issues };
+
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    // Periksa ulang di dalam transaksi tulis: keadaan bisa berubah
+    // sejak pemeriksaan awal (aktivasi/nonaktif balapan).
+    const [fresh] = await tx
+      .select()
+      .from(flows)
+      .where(
+        and(eq(flows.tenantId, input.tenantId), eq(flows.id, input.flowId)),
+      )
+      .limit(1);
+    if (!fresh) return { kind: "not_found" as const };
+    if (fresh.status === "archived") {
+      return { kind: "invalid_state" as const, status: fresh.status };
+    }
+    if (fresh.status === "draft") {
+      const freshLatest = await latestFlowVersion(
+        tx,
+        input.tenantId,
+        input.flowId,
+      );
+      if (
+        !freshLatest ||
+        !flowGraphsEqual(
+          normalizeFlowGraph(fresh.graph),
+          normalizeFlowGraph(freshLatest.graph),
+        )
+      ) {
+        return {
+          kind: "dirty_draft" as const,
+          latestVersion: freshLatest?.version ?? source.version,
+        };
+      }
+    }
+    const [row] = await tx
+      .update(flows)
+      .set({
+        graph: copyFlowGraph(snapshotGraph),
+        status: "active",
+        updatedAt: new Date(),
+      })
+      .where(eq(flows.id, input.flowId))
+      .returning();
+    const version = await snapshotFlowVersion(tx, input.tenantId, {
+      flow: row,
+      graph: snapshotGraph,
+      userId: input.userId,
+      restoredFromVersion: source.version,
+    });
+    await flowAudit(tx, input.tenantId, {
+      actorType: "user",
+      actorId: input.userId,
+      action: "flow.version_restored",
+      flowId: row.id,
+      meta: { fromVersion: source.version, newVersion: version.version },
+    });
+    return { kind: "restored" as const, flow: row, version };
   });
 }

@@ -96,6 +96,10 @@ import {
 import {
   flowAudit,
 } from "./crud";
+import {
+  latestFlowVersion,
+  resolveRunGraph,
+} from "./versions";
 
 // ---------------------------------------------------------------------------
 // Pemicu: evaluasi flow untuk satu pesan masuk (dipanggil automations.ts)
@@ -1421,13 +1425,13 @@ async function resumeParkedFlowRuns(
   for (const run of waiting) {
     const ctx = runContextOf(run);
     if (!ctx.wait || run.currentNodeId !== ctx.wait.nodeId) continue;
-    const [flow] = await tx
-      .select()
-      .from(flows)
-      .where(and(eq(flows.tenantId, tenantId), eq(flows.id, run.flowId)))
-      .limit(1);
-    if (!flow) continue;
-    const graph = normalizeFlowGraph(flow.graph);
+    // G3: run terparkir melanjutkan SNAPSHOT versinya (resolveRunGraph),
+    // bukan graf live — flow yang dinonaktifkan→disunting→diaktifkan
+    // selama parkir tidak mengubah sisa perjalanan run ini. Run
+    // warisan tanpa pin jatuh ke graf live (fallback jujur).
+    const resolved = await resolveRunGraph(tx, tenantId, run);
+    if (!resolved) continue;
+    const graph = resolved.graph;
     const node = graph.nodes.find((n) => n.id === ctx.wait!.nodeId);
     if (!node) continue;
     if (node.type === "questionnaire") {
@@ -1683,11 +1687,17 @@ export async function startFlowRunsForInboundMessage(
 
       const firstNodeId = firstNodeAfterTrigger(graph);
       const now = new Date();
+      // G3: pin versi terbaru flow ke run. Flow aktif warisan yang
+      // belum pernah diaktifkan ulang sejak G3 belum punya baris
+      // versi → pin NULL (run warisan; eksekutor membaca graf live).
+      const latest = await latestFlowVersion(tx, tenantId, flow.id);
       const [run] = await tx
         .insert(flowRuns)
         .values({
           tenantId,
           flowId: flow.id,
+          flowVersionId: latest?.id ?? null,
+          flowVersion: latest?.version ?? null,
           conversationId,
           contactId: input.contact!.id,
           triggerMessageId: messageId,
@@ -1708,6 +1718,7 @@ export async function startFlowRunsForInboundMessage(
           flowRunId: run.id,
           triggerMessageId: messageId,
           conversationId,
+          flowVersion: latest?.version ?? null,
         },
       });
       if (!firstNodeId) {

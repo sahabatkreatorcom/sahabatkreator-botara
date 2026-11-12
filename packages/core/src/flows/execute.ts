@@ -114,6 +114,10 @@ import {
   flowAudit,
 } from "./crud";
 import {
+  latestFlowVersion,
+  resolveRunGraph,
+} from "./versions";
+import {
   exitParkedAppointment,
   exitParkedCatalog,
   exitParkedQuestionnaire,
@@ -217,10 +221,15 @@ async function loadRunContext(
         and(eq(contacts.tenantId, tenantId), eq(contacts.id, run.contactId)),
       )
       .limit(1);
+    // G3: graf eksekusi berasal dari SNAPSHOT versi ter-pin run
+    // (resolveRunGraph) — BUKAN graf live flow. Run warisan tanpa pin
+    // jatuh ke graf live secara jujur (pinned: false di resolver).
+    const resolved = await resolveRunGraph(tx, tenantId, run);
+    if (!resolved) return null;
     return {
       run,
       flow,
-      graph: normalizeFlowGraph(flow.graph),
+      graph: resolved.graph,
       conversation: conversation ?? null,
       contact: contact ?? null,
     };
@@ -1038,7 +1047,14 @@ async function executeNodeInTx(
           "goto_target_unavailable",
         );
       }
-      const targetGraph = normalizeFlowGraph(target.graph);
+      // G3: run anak goto mem-pin versi terbaru flow tujuan; node
+      // pertama ditentukan dari SNAPSHOT itu juga (tujuan aktif →
+      // snapshot terbaru == graf live menurut invarian aktivasi).
+      // Tujuan warisan tanpa baris versi → pin NULL + graf live.
+      const targetLatest = await latestFlowVersion(tx, tenantId, target.id);
+      const targetGraph = targetLatest
+        ? normalizeFlowGraph(targetLatest.graph)
+        : normalizeFlowGraph(target.graph);
       const firstNodeId = firstNodeAfterTrigger(targetGraph);
       const now = new Date();
       const rootTriggerMessageId = effectiveTriggerMessageId(run);
@@ -1047,6 +1063,8 @@ async function executeNodeInTx(
         .values({
           tenantId,
           flowId: target.id,
+          flowVersionId: targetLatest?.id ?? null,
+          flowVersion: targetLatest?.version ?? null,
           conversationId: run.conversationId,
           contactId: run.contactId,
           // Run goto tidak dipicu pesan masuk (migrasi 0038).
@@ -1080,6 +1098,7 @@ async function executeNodeInTx(
           fromRunId: run.id,
           fromFlowId: run.flowId,
           gotoDepth: depth + 1,
+          flowVersion: targetLatest?.version ?? null,
         },
       });
       if (!firstNodeId) {
