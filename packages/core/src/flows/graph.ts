@@ -90,6 +90,9 @@ export const NODE_TYPES = new Set([
   "cart_checkout",
   // Fase 13G
   "book_appointment",
+  // G12 — aksi deals
+  "create_deal",
+  "move_deal_stage",
 ]);
 
 const FLOW_BRANCHES: readonly FlowBranch[] = [

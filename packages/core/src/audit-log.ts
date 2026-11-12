@@ -140,6 +140,9 @@ const TARGET_KEYS: ReadonlyArray<readonly [string, string]> = [
   ["flowRunId", "flow_run"],
   ["flowId", "flow"],
   ["savedReplyId", "saved_reply"],
+  // G12: aksi deal.* menargetkan deal-nya (meta juga membawa contactId;
+  // dealId didahulukan karena deal adalah subjek aksinya).
+  ["dealId", "deal"],
   // Fase 9C: aksi tim menargetkan undangan/member; noteId sebelum
   // conversationId agar aksi catatan menargetkan catatannya sendiri.
   ["invitationId", "invitation"],

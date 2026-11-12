@@ -14,8 +14,10 @@ import {
 import {
   automations,
   contacts,
+  dealStages,
   flows,
   products,
+  tenantMembers,
   type Database,
 } from "@sahabat-kreator/db";
 import {
@@ -174,6 +176,36 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
     case "enroll_sequence":
       if (!isNonEmptyString(c.automationId)) {
         err("SEQUENCE_ID_REQUIRED", "Node enroll_sequence membutuhkan config.automationId");
+      }
+      break;
+    case "create_deal": {
+      // G12: judul = templat teks (dirender seperti send_message);
+      // dealStageId wajib; value opsional ≥ 0; assigneeUserId opsional
+      // uuid. Keberadaan tahap & keanggotaan assignee diperiksa di
+      // bagian referensi DB di bawah.
+      if (!isNonEmptyString(c.title)) {
+        err("DEAL_TITLE_REQUIRED", "Node create_deal membutuhkan config.title (templat judul deal)");
+      }
+      if (!isNonEmptyString(c.dealStageId)) {
+        err("DEAL_STAGE_ID_REQUIRED", "Node create_deal membutuhkan config.dealStageId");
+      }
+      if (
+        c.value !== undefined &&
+        (typeof c.value !== "number" ||
+          !Number.isFinite(c.value) ||
+          c.value < 0 ||
+          c.value > 999_999_999_999)
+      ) {
+        err("DEAL_VALUE_INVALID", "Node create_deal: config.value harus bilangan 0..999999999999");
+      }
+      if (c.assigneeUserId !== undefined && !isNonEmptyString(c.assigneeUserId)) {
+        err("DEAL_ASSIGNEE_INVALID", "Node create_deal: config.assigneeUserId harus uuid member tenant");
+      }
+      break;
+    }
+    case "move_deal_stage":
+      if (!isNonEmptyString(c.dealStageId)) {
+        err("DEAL_STAGE_ID_REQUIRED", "Node move_deal_stage membutuhkan config.dealStageId");
       }
       break;
     case "set_field": {
@@ -819,6 +851,53 @@ export async function validateFlowGraph(
           err("SEQUENCE_WRONG_KIND", node.id, "Automation rujukan bukan sequence");
         } else if (!target.isActive) {
           err("SEQUENCE_INACTIVE", node.id, "Sequence rujukan tidak aktif");
+        }
+      }
+    });
+  }
+
+  // Referensi deals (G12, butuh DB, konteks tenant): tahap tujuan
+  // create_deal/move_deal_stage harus ada di tenant ini; assignee
+  // create_deal harus member tenant. Tahap yang dihapus SESUDAH
+  // aktivasi bukan error aktivasi — eksekutor mencatatnya sebagai
+  // langkah terlewat beralasan (deal_stage_unavailable).
+  const dealStageRefs = graph.nodes.filter(
+    (n) =>
+      (n.type === "create_deal" || n.type === "move_deal_stage") &&
+      isNonEmptyString(n.config.dealStageId),
+  );
+  const dealAssigneeRefs = graph.nodes.filter(
+    (n) => n.type === "create_deal" && isNonEmptyString(n.config.assigneeUserId),
+  );
+  if (dealStageRefs.length > 0 || dealAssigneeRefs.length > 0) {
+    await withTenantDb(db, tenantId, async (tx) => {
+      for (const node of dealStageRefs) {
+        const stageId = node.config.dealStageId as string;
+        const [stage] = await tx
+          .select({ id: dealStages.id })
+          .from(dealStages)
+          .where(
+            and(eq(dealStages.tenantId, tenantId), eq(dealStages.id, stageId)),
+          )
+          .limit(1);
+        if (!stage) {
+          err("DEAL_STAGE_NOT_FOUND", node.id, "Tahap deal rujukan tidak ada di workspace ini");
+        }
+      }
+      for (const node of dealAssigneeRefs) {
+        const userId = node.config.assigneeUserId as string;
+        const [member] = await tx
+          .select({ id: tenantMembers.id })
+          .from(tenantMembers)
+          .where(
+            and(
+              eq(tenantMembers.tenantId, tenantId),
+              eq(tenantMembers.userId, userId),
+            ),
+          )
+          .limit(1);
+        if (!member) {
+          err("DEAL_ASSIGNEE_NOT_MEMBER", node.id, "Penanggung jawab deal bukan member workspace ini");
         }
       }
     });

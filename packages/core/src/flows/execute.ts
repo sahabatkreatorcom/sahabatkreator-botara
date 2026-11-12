@@ -48,6 +48,7 @@ import {
 } from "../experiments";
 import { renderMessageText } from "../render-text";
 import { enrollContactInSequence } from "../sequence-enroll";
+import { createDealForContact, moveLatestOpenDealStage } from "../deals";
 import { respondToInboundMessage } from "../agent-runtime";
 import {
   buildPaymentUrl,
@@ -714,6 +715,106 @@ async function executeNodeInTx(
       }
       // Tidak tercapai: union hasil service tertutup oleh switch di atas.
       throw new FlowNodeError("enroll_sequence: hasil pendaftaran tidak dikenal");
+    }
+
+    case "create_deal": {
+      // G12: buat deal untuk kontak run lewat service bersama deals —
+      // implementasi yang sama dengan API dashboard (validasi rujukan,
+      // peristiwa pembuatan, audit). Judul dirender persis seperti
+      // send_message ({name} + spintax). Kegagalan lunak (tahap
+      // terhapus sesudah aktivasi, assignee keluar) = langkah
+      // terlewat beralasan; run lanjut — pola enroll_sequence.
+      if (!ctx.contact) throw new FlowNodeError("kontak run tidak ditemukan");
+      const stageId = String(c.dealStageId ?? "");
+      if (!stageId) {
+        throw new FlowNodeError("create_deal tanpa config.dealStageId");
+      }
+      const title = renderMessageText(
+        typeof c.title === "string" ? c.title : "",
+        { name: ctx.contact.name },
+      );
+      if (!title.trim()) {
+        throw new FlowNodeError("create_deal: judul hasil render kosong");
+      }
+      const result = await createDealForContact(tx, {
+        tenantId,
+        contactId: run.contactId,
+        conversationId: run.conversationId,
+        title,
+        value: typeof c.value === "number" ? c.value : undefined,
+        stageId,
+        assigneeUserId:
+          typeof c.assigneeUserId === "string" ? c.assigneeUserId : null,
+        actor: { type: "flow" },
+        auditMetaExtra: {
+          via: "flow",
+          viaFlowId: run.flowId,
+          viaFlowRunId: run.id,
+        },
+      });
+      switch (result.kind) {
+        case "created":
+          return {
+            detail: { outcome: "created", dealId: result.dealId, stageId },
+          };
+        case "skipped":
+          return {
+            detail: {
+              outcome: "skipped",
+              reason:
+                result.reason === "stage_unavailable"
+                  ? "deal_stage_unavailable"
+                  : result.reason,
+              stageId,
+            },
+          };
+      }
+      throw new FlowNodeError("create_deal: hasil pembuatan tidak dikenal");
+    }
+
+    case "move_deal_stage": {
+      // G12: pindahkan deal OPEN TERBARU kontak run ke tahap tujuan.
+      // Kontak tanpa deal open adalah keadaan sah (bukan kegagalan):
+      // langkah dicatat terlewat beralasan `no_open_deal`, run lanjut.
+      const stageId = String(c.dealStageId ?? "");
+      if (!stageId) {
+        throw new FlowNodeError("move_deal_stage tanpa config.dealStageId");
+      }
+      const result = await moveLatestOpenDealStage(tx, {
+        tenantId,
+        contactId: run.contactId,
+        stageId,
+        actor: { type: "flow" },
+        auditMetaExtra: {
+          via: "flow",
+          viaFlowId: run.flowId,
+          viaFlowRunId: run.id,
+        },
+      });
+      switch (result.kind) {
+        case "moved":
+          return {
+            detail: {
+              outcome: "moved",
+              dealId: result.dealId,
+              fromStageId: result.fromStageId,
+              toStageId: result.toStageId,
+              changed: result.changed,
+            },
+          };
+        case "skipped":
+          return {
+            detail: {
+              outcome: "skipped",
+              reason:
+                result.reason === "stage_unavailable"
+                  ? "deal_stage_unavailable"
+                  : result.reason,
+              stageId,
+            },
+          };
+      }
+      throw new FlowNodeError("move_deal_stage: hasil perpindahan tidak dikenal");
     }
 
     case "set_field": {

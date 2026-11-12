@@ -105,6 +105,8 @@ export type FlowSimEffectKind =
   | "set_stage"
   | "set_field"
   | "enroll_sequence"
+  | "create_deal"
+  | "move_deal_stage"
   | "goto_flow"
   | "handoff"
   | "ai_response"
@@ -530,6 +532,48 @@ export function simulateFlowRun(
           automationId,
         });
         pushEffect("enroll_sequence", node, "recorded", { automationId });
+        return { type: "advance" };
+      }
+
+      case "create_deal": {
+        const dealStageId = String(c.dealStageId ?? "");
+        if (!dealStageId) {
+          throw new SimNodeError("create_deal tanpa config.dealStageId");
+        }
+        // Pembuatan deal adalah tulisan DB — di simulasi hanya
+        // dicatat sebagai efek (judul dirender pada kontak tiruan
+        // agar pratinjau jujur), tidak ada baris deal yang lahir.
+        const title = renderMessageText(
+          typeof c.title === "string" ? c.title : "",
+          { name: contact.name },
+        );
+        pushStep(node, {
+          outcome: "simulated",
+          reason: "deal_not_created",
+          dealStageId,
+          title,
+        });
+        pushEffect("create_deal", node, "recorded", {
+          dealStageId,
+          title,
+          value: typeof c.value === "number" ? c.value : null,
+        });
+        return { type: "advance" };
+      }
+
+      case "move_deal_stage": {
+        const dealStageId = String(c.dealStageId ?? "");
+        if (!dealStageId) {
+          throw new SimNodeError("move_deal_stage tanpa config.dealStageId");
+        }
+        // Perpindahan tahap menyentuh deal sungguhan di DB — di
+        // simulasi hanya dicatat; keadaan deal kontak di luar graf.
+        pushStep(node, {
+          outcome: "simulated",
+          reason: "deal_move_not_executed",
+          dealStageId,
+        });
+        pushEffect("move_deal_stage", node, "recorded", { dealStageId });
         return { type: "advance" };
       }
 
