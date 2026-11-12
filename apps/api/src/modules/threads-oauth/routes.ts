@@ -31,7 +31,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  * Threads".
  *
  *   POST /tenants/:tenantId/threads-oauth/start              buat state + URL dialog
- *   GET  /threads/oauth/callback                             callback TUNGGAL platform (publik)
+ *   GET  /oauth/threads/callback                             callback TUNGGAL platform (publik)
  *   GET  /tenants/:tenantId/channels/threads-oauth-info      ketersediaan connect (owner/admin)
  *
  * Alur OAuth resmi Threads (dokumentasi threads.net):
@@ -163,7 +163,7 @@ export function createThreadsOAuthRoutes(
     app.get("/tenants/:tenantId/channels/threads-oauth-info", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
-    app.get("/threads/oauth/callback", (c) =>
+    app.get("/oauth/threads/callback", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -175,7 +175,7 @@ export function createThreadsOAuthRoutes(
   });
 
   const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
-  const redirectUri = `${webBase}/api/threads/oauth/callback`;
+  const redirectUri = `${webBase}/api/oauth/threads/callback`;
 
   /** Konfigurasi OAuth efektif (panel → env). */
   async function resolveThreadsConfig() {
@@ -304,7 +304,7 @@ export function createThreadsOAuthRoutes(
   // Callback TUNGGAL (publik; identitas dari state bertanda tangan).
   // Semua kegagalan → redirect error berkode TANPA membuat akun apa pun.
   // -------------------------------------------------------------------------
-  app.get("/threads/oauth/callback", async (c) => {
+  app.get("/oauth/threads/callback", async (c) => {
     const fail = (code: string) =>
       c.redirect(`${webBase}/channels?threads_oauth_error=${code}`, 302);
 

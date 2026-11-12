@@ -29,7 +29,9 @@
  *       avatar yang GAGAL diunduh TIDAK menggagalkan connect
  *       (fail-soft — akun tetap connected, foto kosong);
  *  [12] backfill: akun tanpa foto tersimpan memicu pengambilan
- *       avatar saat daftar channel dibaca → avatarUrl muncul.
+ *       avatar saat daftar channel dibaca → avatarUrl muncul;
+ *  [13] path callback lama /threads/oauth/callback → 404
+ *       (penyeragaman URL tanpa alias — kanonis /oauth/threads/callback).
  *
  * Token tiruan di skrip ini BUKAN kredensial sungguhan.
  *
@@ -255,7 +257,7 @@ async function startAndGetState(
   assert.equal(body.appIdConfigured, false);
   assert.equal(body.appSecretConfigured, false);
   assert.equal(body.appId, null);
-  assert.equal(body.oauthRedirectUri, "https://app.test/api/threads/oauth/callback");
+  assert.equal(body.oauthRedirectUri, "https://app.test/api/oauth/threads/callback");
 
   const start = await app.request(`/tenants/${TENANT_A}/threads-oauth/start`, {
     method: "POST",
@@ -301,7 +303,7 @@ let happyState = "";
   assert.equal(dialog.searchParams.get("response_type"), "code");
   assert.equal(
     dialog.searchParams.get("redirect_uri"),
-    "https://app.test/api/threads/oauth/callback",
+    "https://app.test/api/oauth/threads/callback",
   );
   happyState = dialog.searchParams.get("state")!;
   assert.ok(happyState.length > 10);
@@ -311,7 +313,7 @@ let happyState = "";
 // ---------- [3] State rusak ditolak ----------
 {
   const res = await app.request(
-    `/threads/oauth/callback?code=apapun&state=${happyState}x`,
+    `/oauth/threads/callback?code=apapun&state=${happyState}x`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -323,7 +325,7 @@ let happyState = "";
 // ---------- [4] Callback sukses → akun tersimpan + sasaran /posts ----------
 {
   const res = await app.request(
-    `/threads/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/threads/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -391,7 +393,7 @@ let happyState = "";
 
   // ---------- [5] Replay state yang sama ditolak ----------
   const replay = await app.request(
-    `/threads/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/threads/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(replay.status, 302);
   assert.ok(
@@ -405,7 +407,7 @@ let happyState = "";
 // ---------- [6] User membatalkan di dialog ----------
 {
   const res = await app.request(
-    `/threads/oauth/callback?error=access_denied&error_description=dibatalkan`,
+    `/oauth/threads/callback?error=access_denied&error_description=dibatalkan`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -419,7 +421,7 @@ let happyState = "";
   exchangeShouldFail = true;
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/threads/oauth/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
+    `/oauth/threads/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
   );
   exchangeShouldFail = false;
   assert.equal(res.status, 302);
@@ -439,7 +441,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/threads/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/threads/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -462,7 +464,7 @@ let happyState = "";
   );
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/threads/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/threads/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -486,7 +488,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/threads/oauth/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
+    `/oauth/threads/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -574,6 +576,17 @@ let happyState = "";
   assert.equal(body.available, true);
   assert.equal(body.appId, "threads-app-env");
   console.log("[10] tanpa panel → env fallback membuat connect tersedia: OK");
+}
+
+// ---------- [13] Path callback lama TIDAK terdaftar lagi (pemotongan bersih) ----------
+// Aturan pemilik 2026-11-12: penyeragaman URL TANPA alias — callback
+// kanonis adalah /oauth/threads/callback; path lama
+// /threads/oauth/callback harus menjawab 404 agar tidak ada permukaan
+// ganda yang tersembunyi.
+{
+  const res = await app.request(`/threads/oauth/callback?code=apapun&state=apapun`);
+  assert.equal(res.status, 404);
+  console.log("[13] path callback lama /threads/oauth/callback → 404 (tanpa alias): OK");
 }
 
 fake.closeAllConnections();

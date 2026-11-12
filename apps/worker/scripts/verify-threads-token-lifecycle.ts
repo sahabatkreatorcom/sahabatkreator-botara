@@ -148,7 +148,7 @@ function check(name: string, ok: boolean): void {
     clientId: "app-uji",
     clientSecret: "secret-uji",
     code: "kode-uji",
-    redirectUri: "https://app.test/api/threads/oauth/callback",
+    redirectUri: "https://app.test/api/oauth/threads/callback",
   });
   check("exchange code → token pendek + user_id terkonversi string", short.accessToken === "token-pendek" && short.userId === "777");
   const form = new URLSearchParams(calls[1]!.body ?? "");
@@ -159,7 +159,7 @@ function check(name: string, ok: boolean): void {
       form.get("client_id") === "app-uji" &&
       form.get("client_secret") === "secret-uji" &&
       form.get("code") === "kode-uji" &&
-      form.get("redirect_uri") === "https://app.test/api/threads/oauth/callback",
+      form.get("redirect_uri") === "https://app.test/api/oauth/threads/callback",
   );
   const long = await anon.exchangeThreadsLongLivedToken({
     clientSecret: "secret-uji",

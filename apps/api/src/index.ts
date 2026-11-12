@@ -601,7 +601,7 @@ routes.route(
 );
 // Modul Threads OAuth Connect (integrasi Threads) — "Hubungkan dengan
 // Threads": start ber-state sekali pakai + callback tunggal publik
-// /threads/oauth/callback + info ketersediaan. Kredensial aplikasi
+// /oauth/threads/callback + info ketersediaan. Kredensial aplikasi
 // dari Panel Admin (threads_app_id/secret; env hanya fallback) —
 // diselesaikan per request oleh modul lewat platformOptions.
 routes.route(
