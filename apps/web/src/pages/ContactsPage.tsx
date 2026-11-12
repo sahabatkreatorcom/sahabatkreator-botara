@@ -10,7 +10,9 @@ import type {
   ContactConversation,
   ContactDuplicatesResponse,
   ContactImportResponse,
+  ContactNoteResponse,
   ContactResponse,
+  ContactTimelineEvent,
   EffectiveOptInStatus,
   OptInStatus,
   SegmentCondition,
@@ -53,6 +55,96 @@ function effectiveOptInLabel(
   status: EffectiveOptInStatus,
 ): string {
   return t(`contacts.optInEffective.${status}` as TranslationKey);
+}
+
+const TIMELINE_KIND_KEYS: Record<ContactTimelineEvent["kind"], TranslationKey> =
+  {
+    contact_created: "contacts.timeline.kindContactCreated",
+    first_message: "contacts.timeline.kindFirstMessage",
+    last_message: "contacts.timeline.kindLastMessage",
+    opt_in_changed: "contacts.timeline.kindOptInChanged",
+    merged_in: "contacts.timeline.kindMergedIn",
+    sequence_enrolled: "contacts.timeline.kindSequenceEnrolled",
+    sequence_completed: "contacts.timeline.kindSequenceCompleted",
+    sequence_cancelled: "contacts.timeline.kindSequenceCancelled",
+    handoff: "contacts.timeline.kindHandoff",
+    contact_note_added: "contacts.timeline.kindContactNoteAdded",
+    conversation_note_added: "contacts.timeline.kindConversationNoteAdded",
+  };
+
+function asEffectiveStatus(value: unknown): EffectiveOptInStatus | null {
+  return value === "opted_in" || value === "none" || value === "opted_out"
+    ? value
+    : null;
+}
+
+/**
+ * Baris detail satu peristiwa linimasa (di bawah label jenisnya):
+ * merender hanya detail yang dikenal per jenis; detail lain diabaikan.
+ */
+function timelineEventDetail(
+  t: Translate,
+  event: ContactTimelineEvent,
+): string | null {
+  const d = event.detail;
+  switch (event.kind) {
+    case "contact_created":
+      return typeof d.source === "string" && d.source
+        ? `${t("contacts.timeline.sourcePrefix")}: ${d.source}`
+        : null;
+    case "first_message":
+    case "last_message": {
+      const parts: string[] = [];
+      if (typeof d.provider === "string" && d.provider) {
+        parts.push(t(`inbox.providers.${d.provider}` as TranslationKey));
+      }
+      if (d.direction === "inbound" || d.direction === "outbound") {
+        parts.push(
+          t(
+            d.direction === "inbound"
+              ? "contacts.timeline.directionInbound"
+              : "contacts.timeline.directionOutbound",
+          ),
+        );
+      }
+      return parts.length > 0 ? parts.join(" · ") : null;
+    }
+    case "opt_in_changed": {
+      const from = asEffectiveStatus(d.from);
+      const to = asEffectiveStatus(d.to);
+      const parts: string[] = [];
+      if (from && to) {
+        parts.push(
+          `${effectiveOptInLabel(t, from)} → ${effectiveOptInLabel(t, to)}`,
+        );
+      }
+      if (d.source === "keyword") parts.push(t("contacts.optInSourceKeyword"));
+      else if (d.source === "manual") parts.push(t("contacts.optInSourceManual"));
+      return parts.length > 0 ? parts.join(" · ") : null;
+    }
+    case "merged_in":
+      return typeof d.mergedContactName === "string" && d.mergedContactName
+        ? t("contacts.timeline.mergedFrom", { name: d.mergedContactName })
+        : null;
+    case "sequence_enrolled":
+    case "sequence_completed":
+      return typeof d.automationName === "string" ? d.automationName : null;
+    case "sequence_cancelled": {
+      const parts: string[] = [];
+      if (typeof d.automationName === "string") parts.push(d.automationName);
+      if (d.reason === "reply") {
+        parts.push(t("contacts.timeline.cancelledReasonReply"));
+      } else if (d.reason === "opt_out") {
+        parts.push(t("contacts.timeline.cancelledReasonOptOut"));
+      }
+      return parts.length > 0 ? parts.join(" · ") : null;
+    }
+    case "handoff":
+      return typeof d.reason === "string" && d.reason ? d.reason : null;
+    case "contact_note_added":
+    case "conversation_note_added":
+      return null;
+  }
 }
 
 const PROVIDER_VALUES = [
@@ -1122,6 +1214,84 @@ function ContactDetailModal({
     };
   }, [tenantId, contact.id]);
 
+  // Catatan LEVEL KONTAK (G8) — keluarga terpisah dari catatan
+  // percakapan di Inbox; dimuat sekali saat panel dibuka, ditambah &
+  // dihapus di tempat (aturan hapus ditegakkan server).
+  const [contactNotes, setContactNotes] = useState<
+    ContactNoteResponse[] | null
+  >(null);
+  const [contactNotesError, setContactNotesError] = useState(false);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteSaving, setNoteSaving] = useState(false);
+  const [noteError, setNoteError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const rows = await api.contacts.listNotes(tenantId, contact.id);
+        if (!cancelled) setContactNotes(rows);
+      } catch {
+        if (!cancelled) setContactNotesError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, contact.id]);
+
+  const handleAddNote = async (e: FormEvent) => {
+    e.preventDefault();
+    const body = noteDraft.trim();
+    if (!body) return;
+    setNoteError(null);
+    setNoteSaving(true);
+    try {
+      const created = await api.contacts.createNote(tenantId, contact.id, {
+        body,
+      });
+      setContactNotes((prev) => [...(prev ?? []), created]);
+      setNoteDraft("");
+    } catch (err) {
+      setNoteError(translateApiError(t, err));
+    } finally {
+      setNoteSaving(false);
+    }
+  };
+
+  const handleDeleteNote = async (noteId: string) => {
+    setNoteError(null);
+    try {
+      await api.contacts.deleteNote(tenantId, contact.id, noteId);
+      setContactNotes((prev) =>
+        (prev ?? []).filter((note) => note.id !== noteId),
+      );
+    } catch (err) {
+      setNoteError(translateApiError(t, err));
+    }
+  };
+
+  // Linimasa aktivitas (G8): perakitan baca-saja server; dimuat
+  // sekali saat panel dibuka.
+  const [timeline, setTimeline] = useState<{
+    events: ContactTimelineEvent[];
+    truncated: boolean;
+  } | null>(null);
+  const [timelineError, setTimelineError] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await api.contacts.timeline(tenantId, contact.id);
+        if (!cancelled) setTimeline(body);
+      } catch {
+        if (!cancelled) setTimelineError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, contact.id]);
+
   // Editor field kustom: pasangan kunci–nilai dari peta tersimpan.
   // Kunci asli diingat agar yang dihapus dari formulir bisa dikirim
   // sebagai penghapusan eksplisit (gabung API tidak bisa menghapus).
@@ -1437,6 +1607,133 @@ function ContactDetailModal({
               {conversations.some((conv) => conv.kind === "channel") ? (
                 <p className="mt-2 text-[11px] text-muted">
                   {t("contacts.detail.channelNote")}
+                </p>
+              ) : null}
+            </>
+          )}
+        </div>
+
+        {/* Catatan LEVEL KONTAK (G8): ingatan tim tentang kontak ini
+            sebagai orang — terpisah dari catatan percakapan di Inbox
+            (yang menempel pada satu utas), dan daftarnya tidak pernah
+            dicampur dengan daftar itu. */}
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold text-ink">
+            {t("contacts.notes.title")}
+          </h3>
+          <p className="mt-1 text-[11px] text-muted">
+            {t("contacts.notes.hint")}
+          </p>
+          {contactNotesError ? (
+            <p className="mt-2 text-xs text-danger">
+              {t("contacts.notes.loadError")}
+            </p>
+          ) : contactNotes === null ? (
+            <p className="mt-2 text-xs text-muted">{t("common.loading")}</p>
+          ) : contactNotes.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">
+              {t("contacts.notes.empty")}
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-2">
+              {contactNotes.map((note) => (
+                <li
+                  key={note.id}
+                  className="rounded-lg border border-line px-3 py-2"
+                >
+                  <p className="whitespace-pre-wrap text-sm text-ink">
+                    {note.body}
+                  </p>
+                  <p className="mt-1 flex items-center gap-2 text-[11px] text-muted">
+                    <span>
+                      {note.authorName ?? t("contacts.notes.formerMember")}
+                      {" · "}
+                      {new Date(note.createdAt).toLocaleString()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => void handleDeleteNote(note.id)}
+                      className="font-medium text-danger"
+                    >
+                      {t("contacts.notes.deleteButton")}
+                    </button>
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form onSubmit={handleAddNote} className="mt-3">
+            <textarea
+              value={noteDraft}
+              onChange={(e) => setNoteDraft(e.target.value)}
+              placeholder={t("contacts.notes.placeholder")}
+              rows={2}
+              className={`${inputClassName} w-full`}
+            />
+            <FieldError message={noteError} />
+            <button
+              type="submit"
+              disabled={noteSaving || !noteDraft.trim()}
+              className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-60"
+            >
+              {noteSaving
+                ? t("contacts.notes.adding")
+                : t("contacts.notes.addButton")}
+            </button>
+          </form>
+        </div>
+
+        {/* Linimasa aktivitas (G8): peristiwa yang DIRAKIT server dari
+            data yang sudah tercatat — bukan log baru. Jenis yang
+            sumbernya tidak tercatat (mis. perubahan tahap/tag) memang
+            tidak tampil, bukan dikarang. */}
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold text-ink">
+            {t("contacts.timeline.title")}
+          </h3>
+          {timelineError ? (
+            <p className="mt-2 text-xs text-danger">
+              {t("contacts.timeline.loadError")}
+            </p>
+          ) : timeline === null ? (
+            <p className="mt-2 text-xs text-muted">{t("common.loading")}</p>
+          ) : timeline.events.length <= 1 ? (
+            <p className="mt-2 text-xs text-muted">
+              {t("contacts.timeline.empty")}
+            </p>
+          ) : (
+            <>
+              <ul className="mt-2 space-y-2">
+                {timeline.events.map((event, idx) => {
+                  const detail = timelineEventDetail(t, event);
+                  return (
+                    <li
+                      key={`${event.kind}-${event.occurredAt}-${idx}`}
+                      className="flex gap-3 text-sm"
+                    >
+                      <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-accent" />
+                      <span className="min-w-0">
+                        <span className="block font-medium text-ink">
+                          {t(TIMELINE_KIND_KEYS[event.kind])}
+                        </span>
+                        {detail ? (
+                          <span className="block truncate text-xs text-muted">
+                            {detail}
+                          </span>
+                        ) : null}
+                        <span className="block text-[11px] text-muted">
+                          {new Date(event.occurredAt).toLocaleString()}
+                        </span>
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {timeline.truncated ? (
+                <p className="mt-2 text-[11px] text-muted">
+                  {t("contacts.timeline.truncatedNote", {
+                    count: timeline.events.length,
+                  })}
                 </p>
               ) : null}
             </>

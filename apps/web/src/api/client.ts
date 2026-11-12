@@ -50,7 +50,11 @@ import type {
   ContactDuplicatesResponse,
   ContactImportResponse,
   ContactListResponse,
+  ContactNoteListResponse,
+  ContactNoteResponse,
   ContactResponse,
+  ContactTimelineResponse,
+  CreateContactNoteRequest,
   ConversationListResponse,
   ConversationResponse,
   ConversationStatus,
@@ -616,6 +620,49 @@ export const api = {
       return request<ContactResponse>(
         `/api/tenants/${tenantId}/contacts/${survivorId}/merge`,
         { method: "POST", body: JSON.stringify({ mergedId }) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/contacts/:id/notes → catatan LEVEL KONTAK (G8; terpisah dari catatan percakapan). */
+    async listNotes(
+      tenantId: string,
+      contactId: string,
+    ): Promise<ContactNoteResponse[]> {
+      const body = await request<ContactNoteListResponse>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/notes`,
+        { method: "GET" },
+      );
+      return body.notes;
+    },
+    /** POST /api/tenants/:tenantId/contacts/:id/notes {body} → catatan kontak baru. */
+    createNote(
+      tenantId: string,
+      contactId: string,
+      input: CreateContactNoteRequest,
+    ): Promise<ContactNoteResponse> {
+      return request<ContactNoteResponse>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/notes`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE /api/tenants/:tenantId/contacts/:id/notes/:noteId (penulis / owner / admin). */
+    deleteNote(
+      tenantId: string,
+      contactId: string,
+      noteId: string,
+    ): Promise<void> {
+      return request<void>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/notes/${noteId}`,
+        { method: "DELETE" },
+      );
+    },
+    /** GET /api/tenants/:tenantId/contacts/:id/timeline → linimasa aktivitas kontak (baca-saja, G8). */
+    timeline(
+      tenantId: string,
+      contactId: string,
+    ): Promise<ContactTimelineResponse> {
+      return request<ContactTimelineResponse>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/timeline`,
+        { method: "GET" },
       );
     },
   },
