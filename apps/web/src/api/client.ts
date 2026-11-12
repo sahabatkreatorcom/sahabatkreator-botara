@@ -3,6 +3,11 @@ import type {
   AiUsageReportResponse,
   MessageReactionResponse,
   ReplyTimeReportResponse,
+  SlaReportResponse,
+  MemberWorkScheduleResponse,
+  TenantSlaSettingsResponse,
+  UpdateMemberWorkScheduleRequest,
+  UpdateTenantSlaSettingsRequest,
   WhatsAppNumberHealthResponse,
   ApiKeyListResponse,
   AuditLogListResponse,
@@ -3208,6 +3213,33 @@ export const api = {
         { method: "GET" },
       );
     },
+    /** GET /api/tenants/:tenantId/analytics/sla?days= → laporan SLA jam kerja (G15). */
+    sla(tenantId: string, days?: number): Promise<SlaReportResponse> {
+      const qs = days !== undefined ? `?days=${days}` : "";
+      return request<SlaReportResponse>(
+        `/api/tenants/${tenantId}/analytics/sla${qs}`,
+        { method: "GET" },
+      );
+    },
+  },
+  sla: {
+    /** GET /api/tenants/:tenantId/sla/settings → target + jadwal bawaan tenant (G15). */
+    getSettings(tenantId: string): Promise<TenantSlaSettingsResponse> {
+      return request<TenantSlaSettingsResponse>(
+        `/api/tenants/${tenantId}/sla/settings`,
+        { method: "GET" },
+      );
+    },
+    /** PATCH /api/tenants/:tenantId/sla/settings → ubah target/jadwal bawaan (owner/admin). */
+    updateSettings(
+      tenantId: string,
+      input: UpdateTenantSlaSettingsRequest,
+    ): Promise<TenantSlaSettingsResponse> {
+      return request<TenantSlaSettingsResponse>(
+        `/api/tenants/${tenantId}/sla/settings`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
   },
   growthLinks: {
     /** GET /api/tenants/:tenantId/growth-links → tautan + statistik (Fase 13B). */
@@ -3400,6 +3432,34 @@ export const api = {
         { method: "GET" },
       );
       return body.members;
+    },
+    /** GET /api/tenants/:tenantId/team/members/:userId/work-schedule → jadwal kerja anggota (G15). */
+    getWorkSchedule(
+      tenantId: string,
+      userId: string,
+    ): Promise<MemberWorkScheduleResponse> {
+      return request<MemberWorkScheduleResponse>(
+        `/api/tenants/${tenantId}/team/members/${userId}/work-schedule`,
+        { method: "GET" },
+      );
+    },
+    /** PUT …/work-schedule → simpan jadwal (diri sendiri / owner-admin; ditegakkan server). */
+    updateWorkSchedule(
+      tenantId: string,
+      userId: string,
+      input: UpdateMemberWorkScheduleRequest,
+    ): Promise<MemberWorkScheduleResponse> {
+      return request<MemberWorkScheduleResponse>(
+        `/api/tenants/${tenantId}/team/members/${userId}/work-schedule`,
+        { method: "PUT", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE …/work-schedule → hapus jadwal pribadi (jatuh ke jadwal bawaan tenant). */
+    async deleteWorkSchedule(tenantId: string, userId: string): Promise<void> {
+      await request<unknown>(
+        `/api/tenants/${tenantId}/team/members/${userId}/work-schedule`,
+        { method: "DELETE" },
+      );
     },
     /** GET /api/tenants/:tenantId/team/invitations → daftar undangan (owner/admin). */
     async listInvitations(tenantId: string): Promise<InvitationResponse[]> {

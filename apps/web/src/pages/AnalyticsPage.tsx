@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   AiUsageReportResponse,
   ReplyTimeReportResponse,
+  SlaReportResponse,
 } from "@sahabat-kreator/contracts";
 import {
   formatNumber,
@@ -9,6 +10,7 @@ import {
   type TranslationKey,
 } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
+import { formatWorkMinutes } from "../utils/format";
 import { translateApiError } from "../api/errorText";
 import { FieldError } from "../components/AuthLayout";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
@@ -267,6 +269,10 @@ export function AnalyticsPage({ t, locale }: AnalyticsPageProps) {
       {tenantId ? (
         <ReplyTimeSection t={t} tenantId={tenantId} days={days} />
       ) : null}
+
+      {tenantId ? (
+        <SlaSection t={t} locale={locale} tenantId={tenantId} days={days} />
+      ) : null}
     </section>
   );
 }
@@ -395,6 +401,126 @@ function ReplyTimeSection({
             data.agent.previous,
           )}
         </div>
+      ) : (
+        <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Seksi SLA manusia (G15) — anggaran waktu tanggap dalam menit JAM
+ * KERJA dari GET /tenants/:id/analytics/sla. Sengaja terpisah dari
+ * ReplyTimeSection di atas: subjudulnya menyatakan definisi jendela
+ * dan perbedaan keduanya agar tidak dibaca sebagai angka yang sama.
+ */
+function SlaSection({
+  t,
+  locale,
+  tenantId,
+  days,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  days: number;
+}) {
+  const [data, setData] = useState<SlaReportResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    void (async () => {
+      try {
+        const body = await api.analytics.sla(tenantId, days);
+        if (!cancelled) setData(body);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, days]);
+
+  const stat = (label: string, value: number, danger = false) => (
+    <div className="rounded-xl border border-line bg-surface p-4">
+      <p className="text-xs font-medium text-muted">{label}</p>
+      <p
+        className={`mt-1 text-2xl font-bold ${danger && value > 0 ? "text-danger" : "text-ink"}`}
+      >
+        {formatNumber(value, locale)}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-base font-semibold text-ink">
+        {t("analytics.sla.title")}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        {t("analytics.sla.subtitle")}
+      </p>
+      {failed ? (
+        <p className="mt-3 text-sm text-danger">
+          {t("analytics.sla.loadError")}
+        </p>
+      ) : data ? (
+        data.targetMinutes === null ? (
+          <p className="mt-3 max-w-2xl rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+            {t("analytics.sla.notConfigured")}
+          </p>
+        ) : (
+          <>
+            <p className="mt-3 text-sm text-muted">
+              {t("analytics.sla.targetLabel", {
+                value: formatWorkMinutes(data.targetMinutes, locale),
+              })}
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              {stat(t("analytics.sla.openedLabel"), data.windowsOpened)}
+              {stat(t("analytics.sla.closedOnTimeLabel"), data.closedOnTime)}
+              {stat(
+                t("analytics.sla.closedBreachedLabel"),
+                data.closedBreached,
+                true,
+              )}
+              {stat(t("analytics.sla.openWithinLabel"), data.openWithinTarget)}
+              {stat(
+                t("analytics.sla.openBreachedLabel"),
+                data.openBreached,
+                true,
+              )}
+              {stat(t("analytics.sla.unmeasuredLabel"), data.unmeasured)}
+            </div>
+            <div className="mt-3 max-w-md rounded-xl border border-line bg-surface p-4">
+              <p className="text-xs font-medium text-muted">
+                {t("analytics.sla.medianLabel")}
+              </p>
+              {data.medianWorkingResponseMinutes !== null ? (
+                <>
+                  <p className="mt-1 text-2xl font-bold text-ink">
+                    {formatWorkMinutes(
+                      data.medianWorkingResponseMinutes,
+                      locale,
+                    )}
+                  </p>
+                  <p className="mt-1 text-xs text-muted">
+                    {t("analytics.sla.medianSamples", {
+                      count: data.closedMeasuredSamples,
+                    })}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-muted">
+                  {t("analytics.sla.noMedian")}
+                </p>
+              )}
+            </div>
+          </>
+        )
       ) : (
         <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
       )}

@@ -34,10 +34,12 @@ import {
 import { useNudgeSubscription } from "../hooks/useRealtime";
 import { useUnreadBadge } from "../inbox/UnreadBadgeProvider";
 import {
+  formatDateTime,
   formatFileSize,
   formatListTime,
   formatRelativeTime,
   formatTime,
+  formatWorkMinutes,
 } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
@@ -88,6 +90,62 @@ interface InboxPageProps {
  *   klik daftar menavigasi (push), membuka URL langsung memilih
  *   percakapan itu, id tak valid jatuh lembut kembali ke /inbox.
  */
+/**
+ * Penanda SLA (G15) untuk jendela menunggu balasan manusia yang
+ * terbuka: sisa menit JAM KERJA (merah bila sudah terlewat), atau
+ * penanda redup "tanpa jadwal" bila jam SLA tidak berjalan karena
+ * tidak ada jadwal yang berlaku — tidak terukur, bukan patuh.
+ * Definisi lengkap: contracts/sla.ts + teks Analitik.
+ */
+function SlaChip({
+  t,
+  locale,
+  sla,
+}: {
+  t: Translate;
+  locale: Locale;
+  sla: NonNullable<ConversationResponse["sla"]>;
+}) {
+  if (!sla.measured || sla.remainingWorkingMinutes === null) {
+    return (
+      <span
+        className="rounded-full bg-elevated px-2 py-0.5 text-[11px] font-medium text-muted"
+        title={t("inbox.sla.unmeasuredTitle")}
+      >
+        {t("inbox.sla.unmeasured")}
+      </span>
+    );
+  }
+  if (sla.breached) {
+    return (
+      <span
+        className="rounded-full bg-danger/15 px-2 py-0.5 text-[11px] font-semibold text-danger"
+        title={t("inbox.sla.chipTitle")}
+      >
+        {t("inbox.sla.breached", {
+          value: formatWorkMinutes(-sla.remainingWorkingMinutes, locale),
+        })}
+      </span>
+    );
+  }
+  return (
+    <span
+      className="rounded-full bg-accent/15 px-2 py-0.5 text-[11px] font-medium text-accent"
+      title={
+        sla.deadlineAt
+          ? `${t("inbox.sla.chipTitle")} ${t("inbox.sla.deadline", {
+              time: formatDateTime(sla.deadlineAt, locale),
+            })}`
+          : t("inbox.sla.chipTitle")
+      }
+    >
+      {t("inbox.sla.remaining", {
+        value: formatWorkMinutes(sla.remainingWorkingMinutes, locale),
+      })}
+    </span>
+  );
+}
+
 export function InboxPage({ t, locale, conversationId, onConversationChange }: InboxPageProps) {
   const { user } = useAuth();
   const { status, tenants, active, reload } = useWorkspace();
@@ -1385,6 +1443,9 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                               @{conv.assigneeName ?? "—"}
                             </span>
                           ) : null}
+                          {conv.sla ? (
+                            <SlaChip t={t} locale={locale} sla={conv.sla} />
+                          ) : null}
                         </span>
                       </span>
                       {conv.unreadCount > 0 ? (
@@ -1436,6 +1497,11 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                         ? ` · ${t("inbox.unreadLabel", { count: selected.unreadCount })}`
                         : ""}
                     </div>
+                    {selected.sla ? (
+                      <div className="mt-1">
+                        <SlaChip t={t} locale={locale} sla={selected.sla} />
+                      </div>
+                    ) : null}
                   </div>
                   {/* Fase 9C + 16C: status kerja, penerima tugas, AI */}
                   <div className="ml-auto flex shrink-0 flex-wrap items-end justify-end gap-2">

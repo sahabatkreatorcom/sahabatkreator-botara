@@ -170,6 +170,22 @@ export function formatIdrId(amount: number): string {
   }).format(amount);
 }
 
+/**
+ * Durasi menit jam-kerja untuk penanda SLA (G15): "45 mnt", "2 j 5 mnt"
+ * (en: "45 min", "2 h 5 min"). Dibulatkan ke menit terdekat; nilai
+ * negatif diperlakukan sebagai 0 oleh pemanggil (tanda lewat dihitung
+ * dari sisa yang negatif sebelum diformat).
+ */
+export function formatWorkMinutes(minutes: number, locale: Locale): string {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (locale === "id") {
+    return hours > 0 ? `${hours} j ${mins} mnt` : `${mins} mnt`;
+  }
+  return hours > 0 ? `${hours} h ${mins} min` : `${mins} min`;
+}
+
 /** Jam menit untuk meta gelembung pesan; `timeZone` opsional seperti formatDateTime. */
 export function formatTime(iso: string, locale: Locale, timeZone?: string): string {
   const d = new Date(iso);

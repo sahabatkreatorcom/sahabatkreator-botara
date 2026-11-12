@@ -23,6 +23,7 @@ import {
   type PaymentSettingsResponse,
   type TeamMemberResponse,
   type UpdatePaymentSettingsRequest,
+  type WorkSchedule,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
@@ -643,7 +644,23 @@ export function SettingsPage({ t, locale }: SettingsPageProps) {
 
       {/* Fase 9C: seksi Tim — member, peran, undangan */}
       {tenantId ? (
-        <TeamSection t={t} locale={locale} tenantId={tenantId} canManage={canManage} />
+        <TeamSection
+          t={t}
+          locale={locale}
+          tenantId={tenantId}
+          tenantTimezone={active?.timezone ?? "UTC"}
+          canManage={canManage}
+        />
+      ) : null}
+
+      {/* G15: seksi SLA — target waktu tanggap + jadwal bawaan workspace */}
+      {tenantId ? (
+        <SlaSettingsSection
+          t={t}
+          tenantId={tenantId}
+          tenantTimezone={active?.timezone ?? "UTC"}
+          canManage={canManage}
+        />
       ) : null}
 
       {formOpen && tenantId ? (
@@ -1076,15 +1093,439 @@ function roleLabelKey(role: MemberRole): TranslationKey {
 
 const INVITABLE_ROLES: InvitableRole[] = ["admin", "agent", "viewer"];
 
+// ---------------------------------------------------------------------------
+// Jadwal kerja & SLA (G15) — editor mingguan bersama + modal per anggota
+// + seksi pengaturan SLA tenant. Definisi yang diukur tertulis di teks
+// UI (settings.sla.body / settings.workSchedule.body) dan di kontrak.
+// ---------------------------------------------------------------------------
+
+const WORK_DAYS = [0, 1, 2, 3, 4, 5, 6] as const;
+const WORK_DAY_LABEL_KEYS = [
+  "settings.workSchedule.day0",
+  "settings.workSchedule.day1",
+  "settings.workSchedule.day2",
+  "settings.workSchedule.day3",
+  "settings.workSchedule.day4",
+  "settings.workSchedule.day5",
+  "settings.workSchedule.day6",
+] as const;
+
+interface WorkDayDraft {
+  enabled: boolean;
+  start: string;
+  end: string;
+}
+
+type WorkScheduleDraft = Record<string, WorkDayDraft>;
+
+/** Draf editor: satu rentang per hari (rentang pertama jadwal tersimpan). */
+function scheduleToDraft(schedule: WorkSchedule | null): WorkScheduleDraft {
+  const draft: WorkScheduleDraft = {};
+  for (const day of WORK_DAYS) {
+    const first = schedule?.days[String(day)]?.[0];
+    draft[String(day)] = first
+      ? { enabled: true, start: first.start, end: first.end }
+      : { enabled: false, start: "09:00", end: "17:00" };
+  }
+  return draft;
+}
+
+function draftToSchedule(draft: WorkScheduleDraft): WorkSchedule {
+  const days: WorkSchedule["days"] = {};
+  for (const day of WORK_DAYS) {
+    const d = draft[String(day)];
+    if (d?.enabled) days[String(day)] = [{ start: d.start, end: d.end }];
+  }
+  return { days };
+}
+
+function WorkScheduleEditor({
+  t,
+  draft,
+  onChange,
+  disabled,
+}: {
+  t: Translate;
+  draft: WorkScheduleDraft;
+  onChange: (draft: WorkScheduleDraft) => void;
+  disabled?: boolean;
+}) {
+  const setDay = (day: number, patch: Partial<WorkDayDraft>) => {
+    const key = String(day);
+    const current = draft[key] ?? { enabled: false, start: "09:00", end: "17:00" };
+    onChange({ ...draft, [key]: { ...current, ...patch } });
+  };
+  return (
+    <div className="space-y-1.5">
+      {WORK_DAYS.map((day) => {
+        const d = draft[String(day)] ?? {
+          enabled: false,
+          start: "09:00",
+          end: "17:00",
+        };
+        return (
+          <div key={day} className="flex flex-wrap items-center gap-2">
+            <label className="flex w-28 items-center gap-2 text-sm text-ink">
+              <input
+                type="checkbox"
+                checked={d.enabled}
+                disabled={disabled}
+                onChange={(e) => setDay(day, { enabled: e.target.checked })}
+                className="h-4 w-4"
+              />
+              {t(WORK_DAY_LABEL_KEYS[day]!)}
+            </label>
+            <input
+              type="time"
+              value={d.start}
+              disabled={disabled || !d.enabled}
+              onChange={(e) => setDay(day, { start: e.target.value })}
+              aria-label={t("settings.workSchedule.startLabel")}
+              className={`${inputClassName} w-32`}
+            />
+            <span className="text-muted">–</span>
+            <input
+              type="time"
+              value={d.end}
+              disabled={disabled || !d.enabled}
+              onChange={(e) => setDay(day, { end: e.target.value })}
+              aria-label={t("settings.workSchedule.endLabel")}
+              className={`${inputClassName} w-32`}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function MemberScheduleModal({
+  t,
+  tenantId,
+  tenantTimezone,
+  member,
+  canManage,
+  onClose,
+}: {
+  t: Translate;
+  tenantId: string;
+  tenantTimezone: string;
+  member: TeamMemberResponse;
+  canManage: boolean;
+  onClose: () => void;
+}) {
+  const editable = member.isSelf || canManage;
+  const [draft, setDraft] = useState<WorkScheduleDraft>(() =>
+    scheduleToDraft(null),
+  );
+  const [timezone, setTimezone] = useState("");
+  const [hasOwn, setHasOwn] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const view = await api.team.getWorkSchedule(tenantId, member.userId);
+        if (cancelled) return;
+        setDraft(scheduleToDraft(view.schedule));
+        setTimezone(view.timezone ?? "");
+        setHasOwn(view.schedule !== null);
+      } catch (err) {
+        if (!cancelled) setError(translateApiError(t, err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, member.userId, t]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const view = await api.team.updateWorkSchedule(tenantId, member.userId, {
+        timezone: timezone.trim() === "" ? null : timezone.trim(),
+        schedule: draftToSchedule(draft),
+      });
+      setHasOwn(view.schedule !== null);
+      onClose();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await api.team.deleteWorkSchedule(tenantId, member.userId);
+      setHasOwn(false);
+      setDraft(scheduleToDraft(null));
+      onClose();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <h2 className="text-lg font-bold text-ink">
+            {t("settings.workSchedule.title", {
+              name: member.name ?? member.email,
+            })}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+          >
+            {t("settings.workSchedule.closeButton")}
+          </button>
+        </div>
+        <p className="mt-2 text-sm text-muted">
+          {t("settings.workSchedule.body")}
+        </p>
+        {!editable ? (
+          <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+            {t("settings.workSchedule.readOnlyNote")}
+          </p>
+        ) : null}
+        {!loading && !hasOwn ? (
+          <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+            {t("settings.workSchedule.noOwnSchedule")}
+          </p>
+        ) : null}
+        <FieldError message={error} />
+        {loading ? (
+          <p className="mt-4 text-sm text-muted">{t("common.loading")}</p>
+        ) : (
+          <>
+            <div className="mt-4">
+              <WorkScheduleEditor
+                t={t}
+                draft={draft}
+                onChange={setDraft}
+                disabled={!editable || saving}
+              />
+            </div>
+            <label className="mt-4 block">
+              <span className="mb-1 block text-xs font-medium text-muted">
+                {t("settings.workSchedule.timezoneLabel")}
+              </span>
+              <input
+                value={timezone}
+                onChange={(e) => setTimezone(e.target.value)}
+                disabled={!editable || saving}
+                placeholder={tenantTimezone}
+                className={inputClassName}
+              />
+              <span className="mt-1 block text-xs text-muted">
+                {t("settings.workSchedule.timezoneHint", { tz: tenantTimezone })}
+              </span>
+            </label>
+            {editable ? (
+              <div className="mt-5 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => void handleSave()}
+                  disabled={saving}
+                  className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                >
+                  {saving
+                    ? t("settings.workSchedule.saving")
+                    : t("settings.workSchedule.saveButton")}
+                </button>
+                {hasOwn ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDelete()}
+                    disabled={saving}
+                    className="rounded-lg bg-elevated px-3 py-2 text-sm font-medium text-danger"
+                  >
+                    {t("settings.workSchedule.deleteButton")}
+                  </button>
+                ) : null}
+              </div>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SlaSettingsSection({
+  t,
+  tenantId,
+  tenantTimezone,
+  canManage,
+}: {
+  t: Translate;
+  tenantId: string;
+  tenantTimezone: string;
+  canManage: boolean;
+}) {
+  const [targetText, setTargetText] = useState("");
+  const [draft, setDraft] = useState<WorkScheduleDraft>(() =>
+    scheduleToDraft(null),
+  );
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await api.sla.getSettings(tenantId);
+        if (cancelled) return;
+        setTargetText(
+          settings.targetMinutes === null
+            ? ""
+            : String(settings.targetMinutes),
+        );
+        setDraft(scheduleToDraft(settings.defaultSchedule));
+      } catch (err) {
+        if (!cancelled) setError(translateApiError(t, err));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, t]);
+
+  const handleSave = async () => {
+    const trimmed = targetText.trim();
+    const targetMinutes = trimmed === "" ? null : Number(trimmed);
+    if (
+      targetMinutes !== null &&
+      (!Number.isInteger(targetMinutes) || targetMinutes < 1)
+    ) {
+      setError(t("settings.sla.saveError"));
+      return;
+    }
+    setSaving(true);
+    setSaved(false);
+    setError(null);
+    try {
+      const updated = await api.sla.updateSettings(tenantId, {
+        targetMinutes,
+        defaultSchedule: draftToSchedule(draft),
+      });
+      setTargetText(
+        updated.targetMinutes === null ? "" : String(updated.targetMinutes),
+      );
+      setDraft(scheduleToDraft(updated.defaultSchedule));
+      setSaved(true);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section className="mt-10">
+      <h2 className="text-base font-semibold text-ink">
+        {t("settings.sla.title")}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        {t("settings.sla.body")}
+      </p>
+      {!canManage ? (
+        <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-muted">
+          {t("settings.sla.managerNote")}
+        </p>
+      ) : null}
+      <FieldError message={error} />
+      {loading ? (
+        <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
+      ) : (
+        <div className="mt-4 max-w-2xl rounded-xl bg-surface p-4">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("settings.sla.targetLabel")}
+            </span>
+            <input
+              type="number"
+              min={1}
+              value={targetText}
+              onChange={(e) => setTargetText(e.target.value)}
+              disabled={!canManage || saving}
+              className={`${inputClassName} w-48`}
+            />
+            <span className="mt-1 block text-xs text-muted">
+              {t("settings.sla.targetHint")}
+            </span>
+          </label>
+          <h3 className="mt-5 text-sm font-semibold text-ink">
+            {t("settings.sla.defaultScheduleLabel")}
+          </h3>
+          <p className="mt-1 text-sm text-muted">
+            {t("settings.sla.defaultScheduleBody")} ({tenantTimezone})
+          </p>
+          <div className="mt-3">
+            <WorkScheduleEditor
+              t={t}
+              draft={draft}
+              onChange={setDraft}
+              disabled={!canManage || saving}
+            />
+          </div>
+          {canManage ? (
+            <div className="mt-5 flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {saving
+                  ? t("settings.sla.saving")
+                  : t("settings.sla.saveButton")}
+              </button>
+              {saved ? (
+                <span className="text-sm text-success">
+                  {t("settings.sla.savedLabel")}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+      )}
+    </section>
+  );
+}
+
 function TeamSection({
   t,
   locale,
   tenantId,
+  tenantTimezone,
   canManage,
 }: {
   t: Translate;
   locale: Locale;
   tenantId: string;
+  tenantTimezone: string;
   canManage: boolean;
 }) {
   const [members, setMembers] = useState<TeamMemberResponse[]>([]);
@@ -1105,6 +1546,8 @@ function TeamSection({
   const [removeTarget, setRemoveTarget] = useState<TeamMemberResponse | null>(
     null,
   );
+  const [scheduleTarget, setScheduleTarget] =
+    useState<TeamMemberResponse | null>(null);
   const requestSeq = useRef(0);
 
   const load = useCallback(async () => {
@@ -1278,6 +1721,16 @@ function TeamSection({
                   {t(roleLabelKey(member.role))}
                 </span>
               )}
+              {/* Jadwal kerja anggota (G15) — modal editor; diri
+                  sendiri selalu boleh, orang lain hanya owner/admin
+                  (ditegakkan juga di server). */}
+              <button
+                type="button"
+                onClick={() => setScheduleTarget(member)}
+                className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+              >
+                {t("settings.team.scheduleButton")}
+              </button>
             </li>
           ))}
         </ul>
@@ -1437,6 +1890,17 @@ function TeamSection({
             setRemoveTarget(null);
             void load();
           }}
+        />
+      ) : null}
+
+      {scheduleTarget ? (
+        <MemberScheduleModal
+          t={t}
+          tenantId={tenantId}
+          tenantTimezone={tenantTimezone}
+          member={scheduleTarget}
+          canManage={canManage}
+          onClose={() => setScheduleTarget(null)}
         />
       ) : null}
     </section>
