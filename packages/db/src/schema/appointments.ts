@@ -244,6 +244,71 @@ export const googleCalendarConnections = pgTable(
   (t) => [uniqueIndex("google_calendar_connections_tenant_unique").on(t.tenantId)],
 );
 
+/** Layanan Google pemilik satu baris `google_connections`. */
+export const googleServiceEnum = pgEnum("google_service", [
+  "calendar",
+  "youtube",
+  "business",
+]);
+
+/**
+ * Koneksi Google PER LAYANAN per tenant (gelombang Pemisahan Google,
+ * migrasi 0023) — SATU baris per (tenant, layanan): calendar /
+ * youtube / business masing-masing hasil consent OAuth-nya sendiri
+ * dengan klien OAuth proyek Cloud-nya sendiri, agar billing, kuota,
+ * dan persetujuan API tiap layanan benar-benar terpisah (insiden
+ * pemicu: API yang belum aktif di proyek bersama menjatuhkan
+ * Calendar + sinkron YouTube/GBP bersama-sama).
+ *
+ * Bentuk kolom meniru `google_calendar_connections` persis (token
+ * TERENKRIPSI envelope `v1:` yang sama, secret env
+ * CHANNEL_TOKEN_SECRET) + kolom `service` dan unik (tenant, service).
+ * `calendar_id` hanya bermakna untuk baris calendar (kalender tujuan
+ * event janji temu); baris youtube/business mengabaikannya.
+ * `google_calendar_connections` tetap ada sebagai arsip koneksi
+ * gabungan lama — migrasi 0023 menyemai tabel ini darinya dan semua
+ * pembaca/penulis beralih ke sini.
+ */
+export const googleConnections = pgTable(
+  "google_connections",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Layanan pemilik koneksi ini; token HANYA sah untuk layanan itu. */
+    service: googleServiceEnum("service").notNull(),
+    /** Email akun Google terhubung (dari profil token); nullable seperti tabel lama. */
+    accountEmail: varchar("account_email", { length: 320 }),
+    /** Kalender tujuan event — hanya bermakna untuk service='calendar'. */
+    calendarId: varchar("calendar_id", { length: 255 })
+      .notNull()
+      .default("primary"),
+    /** Envelope terenkripsi `v1:` — token mentah TIDAK PERNAH tersimpan. */
+    accessTokenEncrypted: text("access_token_encrypted").notNull(),
+    /** Envelope terenkripsi `v1:`; NULL bila Google tidak menerbitkan refresh token pada consent ini. */
+    refreshTokenEncrypted: text("refresh_token_encrypted"),
+    /** Kedaluwarsa akses token berjalan (untuk keputusan refresh per layanan). */
+    tokenExpiresAt: timestamp("token_expires_at", { withTimezone: true })
+      .notNull(),
+    /** Scope OAuth yang diberikan consent layanan ini (string spasi-terpisah dari Google). */
+    scopes: text("scopes").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("google_connections_tenant_service_unique").on(
+      t.tenantId,
+      t.service,
+    ),
+    index("google_connections_tenant_id_idx").on(t.tenantId),
+  ],
+);
+
 export type AppointmentServiceRow = typeof appointmentServices.$inferSelect;
 export type AppointmentSettingRow = typeof appointmentSettings.$inferSelect;
 export type AppointmentAvailabilityRow =
@@ -251,3 +316,4 @@ export type AppointmentAvailabilityRow =
 export type BookingRow = typeof bookings.$inferSelect;
 export type GoogleCalendarConnectionRow =
   typeof googleCalendarConnections.$inferSelect;
+export type GoogleConnectionRow = typeof googleConnections.$inferSelect;

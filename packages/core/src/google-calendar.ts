@@ -3,10 +3,10 @@ import {
   appointmentServices,
   bookings,
   contacts,
-  googleCalendarConnections,
+  googleConnections,
   type BookingRow,
   type Database,
-  type GoogleCalendarConnectionRow,
+  type GoogleConnectionRow,
 } from "@sahabat-kreator/db";
 import {
   decryptChannelSecret,
@@ -14,6 +14,7 @@ import {
 } from "./channel-secrets";
 import {
   getProviderSecret,
+  type PlatformSettingKey,
   type PlatformSettingsOptions,
 } from "./platform-settings";
 import { withTenantDb, type DbTx } from "./tx";
@@ -33,6 +34,17 @@ import { withTenantDb, type DbTx } from "./tx";
  *   Admin dengan resolusi panel → env yang sama seperti Resend
  *   (Fase 11B). Tanpa keduanya, Hubungkan Google menjawab
  *   GOOGLE_NOT_CONFIGURED secara jujur — bukan tombol mati.
+ * - PEMISAHAN PER LAYANAN (keputusan pemilik 2026-11-12): sejak
+ *   gelombang ini Calendar, YouTube, dan Google Business adalah tiga
+ *   koneksi MANDIRI — consent sempit per layanan, token per layanan
+ *   di `google_connections` (migrasi 0023, disemai dari koneksi
+ *   gabungan lama di `google_calendar_connections` yang kini arsip),
+ *   dan klien OAuth per layanan (Panel Admin google_calendar_* /
+ *   google_youtube_* / google_business_*) dengan pasangan bersama
+ *   Fase 13G sebagai fallback berjenjang. Alasannya operasional:
+ *   billing/kuota/persetujuan API tiap layanan harus bisa terpisah
+ *   per proyek Cloud — insiden pemicunya adalah API yang belum aktif
+ *   di proyek bersama menjatuhkan ketiga layanan sekaligus.
  * - Token TENANT (access + refresh) disimpan TERENKRIPSI envelope
  *   `v1:` AES-256-GCM dengan secret env CHANNEL_TOKEN_SECRET (pola
  *   kredensial channel Fase 6A) — DB tidak pernah memegang token
@@ -67,16 +79,48 @@ export const YOUTUBE_READONLY_SCOPE =
 export const GOOGLE_BUSINESS_MANAGE_SCOPE =
   "https://www.googleapis.com/auth/business.manage";
 
+/** Layanan Google yang kini punya koneksi OAuth mandiri per tenant. */
+export type GoogleService = "calendar" | "youtube" | "business";
+
+export const GOOGLE_SERVICES: readonly GoogleService[] = [
+  "calendar",
+  "youtube",
+  "business",
+];
+
+export function isGoogleService(value: string): value is GoogleService {
+  return (GOOGLE_SERVICES as readonly string[]).includes(value);
+}
+
 /**
- * Scope yang diminta: tulis event + baca kalender/freebusy + email akun
- * + YouTube (Gelombang 2) + Google Business (Gelombang 3). SATU koneksi
- * Google per tenant melayani Calendar, YouTube, DAN Business Profile —
- * tidak ada jalur OAuth kedua; consent yang sama (access_type=offline +
- * include_granted_scopes) menerbitkan refresh token yang mencakup
- * semuanya. Koneksi lama yang terhubung sebelum scope baru ditambahkan
- * TIDAK memilikinya: penerbitan platform terkait menjawab
- * `*_scope_missing` sampai pemilik menghubungkan ulang Google (consent
- * inkremental menambahkan scope baru).
+ * Scope consent PER LAYANAN (pemisahan Google): tiap consent hanya
+ * meminta scope layanannya sendiri (+ identitas akun openid/email),
+ * supaya persetujuan API, kuota, dan billing proyek Cloud tiap
+ * layanan tidak lagi tercampur. Ini MEMBATALKAN model lama "satu
+ * consent melayani Calendar + YouTube + Business" dari Fase 13G /
+ * Gelombang 2 / Gelombang 3.
+ */
+export const GOOGLE_SERVICE_SCOPES: Record<GoogleService, string[]> = {
+  calendar: [
+    "openid",
+    "email",
+    "https://www.googleapis.com/auth/calendar.events",
+    "https://www.googleapis.com/auth/calendar.readonly",
+  ],
+  youtube: ["openid", "email", YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE],
+  business: ["openid", "email", GOOGLE_BUSINESS_MANAGE_SCOPE],
+};
+
+/** Scope consent satu layanan sebagai string spasi-terpisah (bentuk dialog OAuth). */
+export function googleServiceScopes(service: GoogleService): string {
+  return GOOGLE_SERVICE_SCOPES[service].join(" ");
+}
+
+/**
+ * Gabungan scope model LAMA (satu consent untuk tiga layanan).
+ * TIDAK lagi diminta oleh consent mana pun — dipertahankan hanya
+ * sebagai kosakata untuk membaca grant koneksi gabungan warisan
+ * (baris arsip + hasil penyemaian migrasi 0023 membawa string ini).
  */
 export const GOOGLE_OAUTH_SCOPES = [
   "openid",
@@ -140,20 +184,92 @@ export interface GoogleOAuthClientConfig {
   clientSecret: string;
 }
 
+interface GoogleClientKeyPair {
+  clientIdKey: PlatformSettingKey;
+  clientSecretKey: PlatformSettingKey;
+}
+
+/** Pasangan kunci Panel Admin klien BERSAMA (Fase 13G) — fallback semua layanan. */
+const GOOGLE_SHARED_CLIENT_KEYS: GoogleClientKeyPair = {
+  clientIdKey: "google_oauth_client_id",
+  clientSecretKey: "google_oauth_client_secret",
+};
+
+/** Pasangan kunci Panel Admin klien PER LAYANAN (pemisahan Google). */
+const GOOGLE_SERVICE_CLIENT_KEYS: Record<GoogleService, GoogleClientKeyPair> =
+  {
+    calendar: {
+      clientIdKey: "google_calendar_client_id",
+      clientSecretKey: "google_calendar_client_secret",
+    },
+    youtube: {
+      clientIdKey: "google_youtube_client_id",
+      clientSecretKey: "google_youtube_client_secret",
+    },
+    business: {
+      clientIdKey: "google_business_client_id",
+      clientSecretKey: "google_business_client_secret",
+    },
+  };
+
 /**
- * Klien OAuth Google efektif, atau null bila TIDAK TERKONFIGURASI
- * (client id atau secret kosong di panel & env — keduanya wajib).
+ * Satu pasangan klien dari sepasang kunci (panel → env per kunci
+ * lewat resolver panel yang sama). Null bila salah satu kosong —
+ * pasangan TIDAK pernah dicampur antar sumber: client id dari satu
+ * proyek dengan secret proyek lain selalu ditolak Google, jadi
+ * setengah pasangan dianggap tidak terkonfigurasi, bukan ditebak.
+ */
+async function resolveGoogleClientPair(
+  db: Database,
+  opts: PlatformSettingsOptions,
+  keys: GoogleClientKeyPair,
+): Promise<GoogleOAuthClientConfig | null> {
+  const [clientId, clientSecret] = await Promise.all([
+    getProviderSecret(db, keys.clientIdKey, opts),
+    getProviderSecret(db, keys.clientSecretKey, opts),
+  ]);
+  if (!clientId || !clientSecret) return null;
+  return { clientId, clientSecret };
+}
+
+/**
+ * Klien OAuth efektif SATU LAYANAN, atau null bila TIDAK
+ * TERKONFIGURASI. Rantai resolusi berjenjang: pasangan per-layanan
+ * (panel → env) lebih dulu, lalu pasangan bersama Fase 13G
+ * (panel → env) sebagai fallback — koneksi yang dibuat dengan
+ * kredensial bersama tetap bisa di-refresh dan dihubungkan ulang
+ * persis seperti sebelumnya; pemilik memisahkan proyek satu layanan
+ * cukup dengan mengisi pasangan layanannya di Panel Admin.
+ *
+ * Resolver ini dipakai SEMUA jalur klien: dialog connect, penukaran
+ * code di callback, DAN refresh token (getValidGoogleServiceAccess)
+ * — refresh WAJIB memakai klien layanan penerbit tokennya; memakai
+ * klien proyek lain akan ditolak Google (invalid_client / grant
+ * tidak cocok).
+ */
+export async function resolveGoogleServiceClient(
+  db: Database,
+  opts: PlatformSettingsOptions,
+  service: GoogleService,
+): Promise<GoogleOAuthClientConfig | null> {
+  const perService = await resolveGoogleClientPair(
+    db,
+    opts,
+    GOOGLE_SERVICE_CLIENT_KEYS[service],
+  );
+  if (perService) return perService;
+  return resolveGoogleClientPair(db, opts, GOOGLE_SHARED_CLIENT_KEYS);
+}
+
+/**
+ * Klien OAuth Google BERSAMA (Fase 13G) — dipertahankan untuk
+ * pemanggil warisan; jalur baru memakai `resolveGoogleServiceClient`.
  */
 export async function resolveGoogleOAuthClient(
   db: Database,
   opts: PlatformSettingsOptions,
 ): Promise<GoogleOAuthClientConfig | null> {
-  const [clientId, clientSecret] = await Promise.all([
-    getProviderSecret(db, "google_oauth_client_id", opts),
-    getProviderSecret(db, "google_oauth_client_secret", opts),
-  ]);
-  if (!clientId || !clientSecret) return null;
-  return { clientId, clientSecret };
+  return resolveGoogleClientPair(db, opts, GOOGLE_SHARED_CLIENT_KEYS);
 }
 
 /** URL dialog OAuth Google (consent + akses offline agar refresh token terbit). */
@@ -161,6 +277,8 @@ export function buildGoogleAuthorizeUrl(input: {
   clientId: string;
   redirectUri: string;
   state: string;
+  /** Scope consent; bawaan warisan gabungan — pemanggil baru WAJIB meneruskan scope layanannya. */
+  scopes?: string;
   authBase?: string;
 }): string {
   const base = (input.authBase ?? GOOGLE_DEFAULT_AUTH_BASE).replace(/\/+$/, "");
@@ -168,7 +286,7 @@ export function buildGoogleAuthorizeUrl(input: {
     client_id: input.clientId,
     redirect_uri: input.redirectUri,
     response_type: "code",
-    scope: GOOGLE_OAUTH_SCOPES,
+    scope: input.scopes ?? GOOGLE_OAUTH_SCOPES,
     access_type: "offline",
     prompt: "consent",
     include_granted_scopes: "true",
@@ -282,44 +400,85 @@ export async function fetchGoogleAccountEmail(
 // Koneksi tenant: simpan / baca / putus (token selalu terenkripsi)
 // ---------------------------------------------------------------------------
 
-export async function getGoogleConnection(
+/** Koneksi SATU layanan Google tenant (baris `google_connections`); null bila belum terhubung. */
+export async function getGoogleServiceConnection(
   db: Database,
   tenantId: string,
-): Promise<GoogleCalendarConnectionRow | null> {
+  service: GoogleService,
+): Promise<GoogleConnectionRow | null> {
   return withTenantDb(db, tenantId, async (tx) => {
     const [row] = await tx
       .select()
-      .from(googleCalendarConnections)
-      .where(eq(googleCalendarConnections.tenantId, tenantId))
+      .from(googleConnections)
+      .where(
+        and(
+          eq(googleConnections.tenantId, tenantId),
+          eq(googleConnections.service, service),
+        ),
+      )
       .limit(1);
     return row ?? null;
   });
 }
 
-/**
- * Simpan koneksi dari grant OAuth baru (upsert per tenant). Refresh
- * token baru menggantikan yang lama; bila grant tidak membawa refresh
- * token baru, yang lama dipertahankan (Google hanya menerbitkannya
- * pada consent penuh — kita selalu meminta prompt=consent).
- */
-export async function saveGoogleConnection(
+/** Semua koneksi Google tenant (satu baris per layanan yang terhubung). */
+export async function listGoogleServiceConnections(
   db: Database,
   tenantId: string,
+): Promise<GoogleConnectionRow[]> {
+  return withTenantDb(db, tenantId, async (tx) =>
+    tx
+      .select()
+      .from(googleConnections)
+      .where(eq(googleConnections.tenantId, tenantId)),
+  );
+}
+
+/**
+ * Koneksi Calendar tenant — bentuk warisan Fase 13G di atas baris
+ * layanan calendar tabel baru (pemanggil lama tidak berubah).
+ */
+export async function getGoogleConnection(
+  db: Database,
+  tenantId: string,
+): Promise<GoogleConnectionRow | null> {
+  return getGoogleServiceConnection(db, tenantId, "calendar");
+}
+
+/**
+ * Simpan koneksi SATU layanan dari grant OAuth baru (upsert per
+ * tenant + layanan). Refresh token baru menggantikan yang lama; bila
+ * grant tidak membawa refresh token baru, yang lama dipertahankan
+ * (Google hanya menerbitkannya pada consent penuh — kita selalu
+ * meminta prompt=consent). Baris layanan LAIN tidak disentuh:
+ * menghubungkan YouTube tidak mengubah koneksi Calendar, dan
+ * sebaliknya — itulah inti pemisahan ini.
+ */
+export async function saveGoogleServiceConnection(
+  db: Database,
+  tenantId: string,
+  service: GoogleService,
   input: {
     tokens: GoogleTokenSet;
     accountEmail: string | null;
     tokenSecret: string;
   },
-): Promise<GoogleCalendarConnectionRow> {
+): Promise<GoogleConnectionRow> {
   const expiresAt = new Date(Date.now() + input.tokens.expiresInSec * 1000);
   return withTenantDb(db, tenantId, async (tx) => {
     const [existing] = await tx
       .select()
-      .from(googleCalendarConnections)
-      .where(eq(googleCalendarConnections.tenantId, tenantId))
+      .from(googleConnections)
+      .where(
+        and(
+          eq(googleConnections.tenantId, tenantId),
+          eq(googleConnections.service, service),
+        ),
+      )
       .limit(1);
     const values = {
       tenantId,
+      service,
       accountEmail: input.accountEmail ?? existing?.accountEmail ?? null,
       calendarId: existing?.calendarId ?? "primary",
       accessTokenEncrypted: encryptChannelSecret(
@@ -334,10 +493,10 @@ export async function saveGoogleConnection(
       updatedAt: new Date(),
     };
     const [row] = await tx
-      .insert(googleCalendarConnections)
+      .insert(googleConnections)
       .values(values)
       .onConflictDoUpdate({
-        target: googleCalendarConnections.tenantId,
+        target: [googleConnections.tenantId, googleConnections.service],
         set: values,
       })
       .returning();
@@ -345,31 +504,63 @@ export async function saveGoogleConnection(
   });
 }
 
-/** Putus koneksi (baris dihapus; booking lama mempertahankan jejak sinkronnya). */
-export async function deleteGoogleConnection(
+/** Simpan koneksi Calendar — bentuk warisan di atas `saveGoogleServiceConnection`. */
+export async function saveGoogleConnection(
   db: Database,
   tenantId: string,
+  input: {
+    tokens: GoogleTokenSet;
+    accountEmail: string | null;
+    tokenSecret: string;
+  },
+): Promise<GoogleConnectionRow> {
+  return saveGoogleServiceConnection(db, tenantId, "calendar", input);
+}
+
+/** Putus koneksi SATU layanan (baris layanan itu saja yang dihapus). */
+export async function deleteGoogleServiceConnection(
+  db: Database,
+  tenantId: string,
+  service: GoogleService,
 ): Promise<boolean> {
   return withTenantDb(db, tenantId, async (tx) => {
     const deleted = await tx
-      .delete(googleCalendarConnections)
-      .where(eq(googleCalendarConnections.tenantId, tenantId))
-      .returning({ id: googleCalendarConnections.id });
+      .delete(googleConnections)
+      .where(
+        and(
+          eq(googleConnections.tenantId, tenantId),
+          eq(googleConnections.service, service),
+        ),
+      )
+      .returning({ id: googleConnections.id });
     return deleted.length > 0;
   });
 }
 
-/** Ganti kalender tujuan event pada koneksi yang ada. */
+/** Putus koneksi Calendar (baris dihapus; booking lama mempertahankan jejak sinkronnya). */
+export async function deleteGoogleConnection(
+  db: Database,
+  tenantId: string,
+): Promise<boolean> {
+  return deleteGoogleServiceConnection(db, tenantId, "calendar");
+}
+
+/** Ganti kalender tujuan event pada koneksi calendar yang ada. */
 export async function setGoogleConnectionCalendar(
   db: Database,
   tenantId: string,
   calendarId: string,
-): Promise<GoogleCalendarConnectionRow | null> {
+): Promise<GoogleConnectionRow | null> {
   return withTenantDb(db, tenantId, async (tx) => {
     const [row] = await tx
-      .update(googleCalendarConnections)
+      .update(googleConnections)
       .set({ calendarId, updatedAt: new Date() })
-      .where(eq(googleCalendarConnections.tenantId, tenantId))
+      .where(
+        and(
+          eq(googleConnections.tenantId, tenantId),
+          eq(googleConnections.service, "calendar"),
+        ),
+      )
       .returning();
     return row ?? null;
   });
@@ -383,24 +574,29 @@ const REFRESH_SKEW_MS = 60_000;
 
 export interface GoogleAccess {
   accessToken: string;
-  connection: GoogleCalendarConnectionRow;
+  connection: GoogleConnectionRow;
 }
 
 /**
- * Access token tenant yang masih berlaku; me-refresh (dan menyimpan
- * hasilnya) bila kedaluwarsa dalam 60 detik. Null bila: tidak ada
- * koneksi, secret enkripsi tak tersedia, klien platform tak
- * terkonfigurasi, atau refresh gagal (grant dicabut) — pemanggil
- * memperlakukan null sebagai "Google tidak tersedia" (fail-soft),
- * BUKAN sebagai kegagalan operasi utamanya.
+ * Access token SATU layanan yang masih berlaku; me-refresh (dan
+ * menyimpan hasilnya ke baris layanan itu) bila kedaluwarsa dalam
+ * 60 detik. Refresh memakai klien LAYANAN ITU
+ * (`resolveGoogleServiceClient`) — token yang diterbitkan proyek
+ * YouTube hanya bisa di-refresh oleh klien proyek YouTube. Null
+ * bila: tidak ada koneksi layanan itu, secret enkripsi tak
+ * tersedia, klien layanan tak terkonfigurasi, atau refresh gagal
+ * (grant dicabut) — pemanggil memperlakukan null sebagai "layanan
+ * tidak tersedia" (fail-soft), BUKAN kegagalan operasi utamanya,
+ * dan layanan Google lain tidak ikut terpengaruh.
  */
-export async function getValidGoogleAccess(
+export async function getValidGoogleServiceAccess(
   db: Database,
   tenantId: string,
+  service: GoogleService,
   deps: GoogleDeps,
 ): Promise<GoogleAccess | null> {
   if (!deps.tokenSecret) return null;
-  const connection = await getGoogleConnection(db, tenantId);
+  const connection = await getGoogleServiceConnection(db, tenantId, service);
   if (!connection) return null;
   if (connection.tokenExpiresAt.getTime() - Date.now() > REFRESH_SKEW_MS) {
     const accessToken = decryptChannelSecret(
@@ -415,7 +611,7 @@ export async function getValidGoogleAccess(
     connection.refreshTokenEncrypted,
   );
   if (!refreshToken) return null;
-  const client = await resolveGoogleOAuthClient(db, deps.platform);
+  const client = await resolveGoogleServiceClient(db, deps.platform, service);
   if (!client) return null;
   let tokens: GoogleTokenSet;
   try {
@@ -423,12 +619,21 @@ export async function getValidGoogleAccess(
   } catch {
     return null;
   }
-  const updated = await saveGoogleConnection(db, tenantId, {
+  const updated = await saveGoogleServiceConnection(db, tenantId, service, {
     tokens,
     accountEmail: connection.accountEmail,
     tokenSecret: deps.tokenSecret,
   });
   return { accessToken: tokens.accessToken, connection: updated };
+}
+
+/** Access token Calendar yang sah — bentuk warisan di atas akses per layanan. */
+export async function getValidGoogleAccess(
+  db: Database,
+  tenantId: string,
+  deps: GoogleDeps,
+): Promise<GoogleAccess | null> {
+  return getValidGoogleServiceAccess(db, tenantId, "calendar", deps);
 }
 
 // ---------------------------------------------------------------------------

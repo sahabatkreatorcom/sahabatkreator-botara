@@ -6,7 +6,7 @@ import {
   auditLogs,
   bookings,
   contacts,
-  googleCalendarConnections,
+  googleConnections,
   outboxEvents,
   type AppointmentAvailabilityRow,
   type AppointmentServiceRow,
@@ -757,10 +757,18 @@ export async function createBookingTx(
   const endsAt = new Date(
     input.startsAt.getTime() + service.durationMinutes * 60_000,
   );
+  // Koneksi yang menentukan status sinkron booking adalah koneksi
+  // layanan CALENDAR (pemisahan Google) — koneksi YouTube/Business
+  // tenant tidak membuat booking berstatus pending.
   const [connection] = await tx
-    .select({ id: googleCalendarConnections.id })
-    .from(googleCalendarConnections)
-    .where(eq(googleCalendarConnections.tenantId, tenantId))
+    .select({ id: googleConnections.id })
+    .from(googleConnections)
+    .where(
+      and(
+        eq(googleConnections.tenantId, tenantId),
+        eq(googleConnections.service, "calendar"),
+      ),
+    )
     .limit(1);
   const googleSyncStatus = connection ? "pending" : "not_connected";
   let booking: BookingRow;

@@ -107,7 +107,8 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 2 tabel migrasi 0011 (platform_admins, backup_runs — global, tanpa RLS)
 // + 2 tabel Fase 23 / migrasi 0012 (posts, post_media)
 // + 1 tabel Gelombang 0 / migrasi 0013 (post_groups)
-assert.equal(Number(tablesRes.rows[0].count), 63);
+// + 1 tabel Pemisahan Google / migrasi 0023 (google_connections)
+assert.equal(Number(tablesRes.rows[0].count), 64);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -259,7 +260,10 @@ const policies = await db.query<{ count: string }>(
 //
 // 2026-11-12: migrasi 0013 menambah `post_groups` dengan
 // tenant_isolation → 88.
-assert.equal(Number(policies.rows[0].count), 88);
+//
+// 2026-11-12: migrasi 0023 (pemisahan Google per layanan) menambah
+// `google_connections` dengan tenant_isolation → 89.
+assert.equal(Number(policies.rows[0].count), 89);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -288,7 +292,8 @@ await db.exec(`
     appointment_services, appointment_settings, appointment_availability,
     bookings, google_calendar_connections,
     payment_provider_configs,
-    posts, post_media, post_groups
+    posts, post_media, post_groups,
+    google_connections
   TO app_user;
 `);
 
@@ -2400,8 +2405,12 @@ function oneHotVector(index: number): string {
   // post_media beserta tenant_isolation-nya → tabel 62, policy 87.
   // 2026-11-12: migrasi 0013 (grup multi-target) menambah post_groups
   // beserta tenant_isolation-nya → tabel 63, policy 88.
-  assert.equal(counts.rows[0].tables, "63");
-  assert.equal(counts.rows[0].policies, "88");
+  // 2026-11-12: migrasi 0023 (pemisahan Google per layanan) menambah
+  // google_connections beserta tenant_isolation-nya → tabel 64,
+  // policy 89. Tabel lama google_calendar_connections TIDAK di-drop
+  // (arsip), jadi hitungan tabel bertambah, bukan bergeser.
+  assert.equal(counts.rows[0].tables, "64");
+  assert.equal(counts.rows[0].policies, "89");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
