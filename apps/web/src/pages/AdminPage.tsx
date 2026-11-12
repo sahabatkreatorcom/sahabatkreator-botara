@@ -790,8 +790,18 @@ export function AdminPage({ t, locale }: AdminPageProps) {
             </div>
             <CopyableUrlRow
               t={t}
-              label={t("admin.googleOauthRedirectLabel")}
-              url={googleInfo.oauthRedirectUri}
+              label={`${t("admin.googleServiceCalendarName")} — ${t("admin.googleOauthRedirectLabel")}`}
+              url={googleInfo.services.calendar.redirectUri}
+            />
+            <CopyableUrlRow
+              t={t}
+              label={`${t("admin.googleServiceYoutubeName")} — ${t("admin.googleOauthRedirectLabel")}`}
+              url={googleInfo.services.youtube.redirectUri}
+            />
+            <CopyableUrlRow
+              t={t}
+              label={`${t("admin.googleServiceBusinessName")} — ${t("admin.googleOauthRedirectLabel")}`}
+              url={googleInfo.services.business.redirectUri}
             />
             <div className="rounded-xl bg-surface p-3">
               <dt className="text-xs text-muted">

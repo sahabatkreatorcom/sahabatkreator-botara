@@ -117,6 +117,25 @@ export function googleServiceScopes(service: GoogleService): string {
 }
 
 /**
+ * Segmen path callback OAuth per layanan (keputusan pemilik
+ * 2026-11-12: skema seragam `/api/oauth/<layanan>/callback` dengan
+ * nama produk Google berskala panjang) — calendar memakai
+ * `google_calendar`, business `google_business`, youtube tetap
+ * `youtube`. URI kanonis inilah yang ditampilkan Panel Admin/docs
+ * dan didaftarkan pemilik di proyek Cloud layanannya masing-masing.
+ */
+export const GOOGLE_OAUTH_CALLBACK_SEGMENTS: Record<GoogleService, string> = {
+  calendar: "google_calendar",
+  youtube: "youtube",
+  business: "google_business",
+};
+
+/** Path callback kanonis satu layanan, mis. `/api/oauth/youtube/callback`. */
+export function googleOAuthCallbackPath(service: GoogleService): string {
+  return `/api/oauth/${GOOGLE_OAUTH_CALLBACK_SEGMENTS[service]}/callback`;
+}
+
+/**
  * Gabungan scope model LAMA (satu consent untuk tiga layanan).
  * TIDAK lagi diminta oleh consent mana pun — dipertahankan hanya
  * sebagai kosakata untuk membaca grant koneksi gabungan warisan

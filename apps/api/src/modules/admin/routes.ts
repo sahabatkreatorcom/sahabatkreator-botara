@@ -56,11 +56,17 @@ export interface AdminRoutesOptions {
    */
   resendApiBase?: string;
   /**
-   * Redirect URI OAuth Google (Fase 13G) — callback yang ditampilkan
-   * read-only di grup Google panel agar pemilik mendaftarkannya persis
-   * di Google Cloud Console. Dihitung dari BETTER_AUTH_URL oleh pemanggil.
+   * Redirect URI OAuth Google KANONIS per layanan (keputusan pemilik
+   * 2026-11-12: `/api/oauth/<layanan>/callback`) — ditampilkan
+   * read-only di grup Google panel agar pemilik mendaftarkannya
+   * persis di proyek Cloud tiap layanan. Dihitung dari
+   * BETTER_AUTH_URL oleh pemanggil.
    */
-  googleOAuthRedirectUri?: string;
+  googleOAuthRedirectUris?: {
+    calendar: string;
+    youtube: string;
+    business: string;
+  };
 }
 
 function serializeStatus(s: CorePlatformSettingStatus): PlatformSettingStatus {
@@ -297,26 +303,30 @@ export function createAdminRoutes(
       // URI yang harus didaftarkan persis di Google Cloud Console.
       // Gelombang Pemisahan Google: `services` menampilkan client ID
       // EFEKTIF per layanan (per-layanan → bersama) — nilai yang
-      // benar-benar dipakai dialog OAuth layanan itu; redirect URI
-      // tetap SATU untuk semua proyek.
+      // benar-benar dipakai dialog OAuth layanan itu — dan redirect
+      // URI KANONIS per layanan (/api/oauth/<layanan>/callback)
+      // untuk didaftarkan di proyek Cloud layanan itu masing-masing.
       google: {
         clientId: publicConfig.google_oauth_client_id,
-        oauthRedirectUri: options.googleOAuthRedirectUri ?? "",
+        oauthRedirectUri: options.googleOAuthRedirectUris?.calendar ?? "",
         services: {
           calendar: {
             clientId:
               publicConfig.google_calendar_client_id ??
               publicConfig.google_oauth_client_id,
+            redirectUri: options.googleOAuthRedirectUris?.calendar ?? "",
           },
           youtube: {
             clientId:
               publicConfig.google_youtube_client_id ??
               publicConfig.google_oauth_client_id,
+            redirectUri: options.googleOAuthRedirectUris?.youtube ?? "",
           },
           business: {
             clientId:
               publicConfig.google_business_client_id ??
               publicConfig.google_oauth_client_id,
+            redirectUri: options.googleOAuthRedirectUris?.business ?? "",
           },
         },
       },

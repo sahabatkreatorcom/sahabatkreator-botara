@@ -24,7 +24,11 @@
  *   [8] refresh token memakai klien layanan penerbit (youtube);
  *   [9] migrasi 0023 menyemai koneksi gabungan lama: scope lengkap
  *       → tiga baris google_connections; calendar-saja → satu baris;
- *  [10] callback ber-state rusak → redirect error, tanpa koneksi.
+ *  [10] callback ber-state rusak → redirect error, tanpa koneksi;
+ *  [11] callback KANONIS per layanan (/api/oauth/google_calendar|
+ *       youtube|google_business/callback) adalah satu-satunya jalur
+ *       — callback gabungan lama /api/google/oauth/callback sudah
+ *       dihapus (404), tanpa alias (keputusan pemilik 2026-11-12).
  *
  * Token tiruan di skrip ini BUKAN kredensial sungguhan.
  *
@@ -267,7 +271,7 @@ let stateBusiness = "";
   assert.equal(cal.searchParams.get("client_id"), "google-client-bersama");
   assert.equal(
     cal.searchParams.get("redirect_uri"),
-    "https://app.test/api/google/oauth/callback",
+    "https://app.test/api/oauth/google_calendar/callback",
   );
   assert.deepEqual(
     scopeSet(cal),
@@ -286,6 +290,10 @@ let stateBusiness = "";
   );
   // Pasangan per-layanan MENANG atas pasangan bersama.
   assert.equal(yt.searchParams.get("client_id"), "google-client-youtube");
+  assert.equal(
+    yt.searchParams.get("redirect_uri"),
+    "https://app.test/api/oauth/youtube/callback",
+  );
   assert.deepEqual(
     scopeSet(yt),
     new Set([
@@ -302,6 +310,10 @@ let stateBusiness = "";
     `/tenants/${TENANT_A}/google/business/connect`,
   );
   assert.equal(biz.searchParams.get("client_id"), "google-client-bisnis");
+  assert.equal(
+    biz.searchParams.get("redirect_uri"),
+    "https://app.test/api/oauth/google_business/callback",
+  );
   assert.deepEqual(
     scopeSet(biz),
     new Set([
@@ -317,7 +329,7 @@ let stateBusiness = "";
 // ---------- [3] Callback calendar: hanya koneksi calendar ----------
 {
   const res = await app.request(
-    `/google/oauth/callback?code=kode-kalender&state=${encodeURIComponent(stateCalendar)}`,
+    `/oauth/google_calendar/callback?code=kode-kalender&state=${encodeURIComponent(stateCalendar)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -341,15 +353,20 @@ let stateBusiness = "";
 // ---------- [4] Callback youtube: koneksi youtube + kanal + handle + foto ----------
 {
   const res = await app.request(
-    `/google/oauth/callback?code=kode-youtube&state=${encodeURIComponent(stateYoutube)}`,
+    `/oauth/youtube/callback?code=kode-youtube&state=${encodeURIComponent(stateYoutube)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
     res.headers.get("location"),
     "https://app.test/channels?google_oauth=connected&google_service=youtube",
   );
-  // Kode ditukar dengan KLIEN YOUTUBE, bukan klien bersama.
+  // Kode ditukar dengan KLIEN YOUTUBE, bukan klien bersama — dan
+  // redirect_uri pertukaran persis URI kanonis youtube.
   assert.equal(lastTokenForm?.get("client_id"), "google-client-youtube");
+  assert.equal(
+    lastTokenForm?.get("redirect_uri"),
+    "https://app.test/api/oauth/youtube/callback",
+  );
   assert.deepEqual(
     (await serviceConnections()).map((r) => r.service),
     ["calendar", "youtube"],
@@ -388,7 +405,7 @@ let stateBusiness = "";
 // ---------- [5] Callback business: koneksi business + lokasi ----------
 {
   const res = await app.request(
-    `/google/oauth/callback?code=kode-bisnis&state=${encodeURIComponent(stateBusiness)}`,
+    `/oauth/google_business/callback?code=kode-bisnis&state=${encodeURIComponent(stateBusiness)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -557,12 +574,21 @@ let stateBusiness = "";
     `/tenants/${TENANT_A}/google/youtube/connect`,
   );
   const res = await app.request(
-    `/google/oauth/callback?code=kode-youtube&state=${fresh.searchParams.get("state")}x`,
+    `/oauth/youtube/callback?code=kode-youtube&state=${fresh.searchParams.get("state")}x`,
   );
   assert.equal(res.status, 302);
   assert.ok((res.headers.get("location") ?? "").includes("google=error"));
   assert.equal((await serviceConnections()).length, before10);
   console.log("[10] state rusak → redirect error, jumlah koneksi tidak berubah: OK");
+}
+
+// ---------- [11] Jalur lama gabungan sudah dihapus (tanpa alias) ----------
+{
+  const res = await app.request(
+    `/google/oauth/callback?code=kode-youtube&state=apa-saja`,
+  );
+  assert.equal(res.status, 404);
+  console.log("[11] callback lama /api/google/oauth/callback → 404 (dihapus, hanya path kanonis per layanan): OK");
 }
 
 fake.closeAllConnections();

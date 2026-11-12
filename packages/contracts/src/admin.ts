@@ -234,17 +234,38 @@ export type PlatformEmailInfo = z.infer<typeof PlatformEmailInfoSchema>;
 export const PlatformGoogleInfoSchema = z.object({
   /** Client ID klien BERSAMA (fallback semua layanan) — efektif panel → env. */
   clientId: z.string().nullable(),
+  /**
+   * Redirect URI kanonis layanan CALENDAR
+   * (`/api/oauth/google_calendar/callback`) — dipertahankan di
+   * tingkat atas untuk kompatibilitas; URI resmi TIAP layanan ada
+   * di `services.<layanan>.redirectUri`.
+   */
   oauthRedirectUri: z.string(),
   /**
-   * Client ID efektif PER LAYANAN (gelombang Pemisahan Google):
-   * resolusi berjenjang per-layanan → bersama — nilai yang benar-benar
-   * akan dipakai dialog OAuth layanan itu. null = layanan berjalan
-   * tanpa klien terkonfigurasi (connect menjawab NOT_CONFIGURED).
+   * Info efektif PER LAYANAN (gelombang Pemisahan Google): Client ID
+   * hasil resolusi berjenjang per-layanan → bersama — nilai yang
+   * benar-benar akan dipakai dialog OAuth layanan itu (null =
+   * layanan berjalan tanpa klien terkonfigurasi, connect menjawab
+   * NOT_CONFIGURED) — dan redirect URI KANONIS layanan itu
+   * (`/api/oauth/<layanan>/callback`, keputusan pemilik 2026-11-12)
+   * yang harus didaftarkan PERSIS di proyek Cloud layanan itu.
+   * Callback gabungan lama `/api/google/oauth/callback` sudah
+   * DIHAPUS tanpa alias — URI baru wajib didaftarkan sebelum
+   * connect diuji lagi.
    */
   services: z.object({
-    calendar: z.object({ clientId: z.string().nullable() }),
-    youtube: z.object({ clientId: z.string().nullable() }),
-    business: z.object({ clientId: z.string().nullable() }),
+    calendar: z.object({
+      clientId: z.string().nullable(),
+      redirectUri: z.string(),
+    }),
+    youtube: z.object({
+      clientId: z.string().nullable(),
+      redirectUri: z.string(),
+    }),
+    business: z.object({
+      clientId: z.string().nullable(),
+      redirectUri: z.string(),
+    }),
   }),
 });
 export type PlatformGoogleInfo = z.infer<typeof PlatformGoogleInfoSchema>;

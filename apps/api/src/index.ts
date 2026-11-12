@@ -73,6 +73,7 @@ import {
 import {
   createDiskMediaStore,
   getProviderSecret,
+  googleOAuthCallbackPath,
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
 
@@ -339,8 +340,9 @@ routes.route("/", createGrowthRoutes(authBundle));
 routes.route("/", createSegmentsRoutes(authBundle));
 // Modul appointments (Fase 13G) — janji temu /tenants/:tenantId/appointments
 // (layanan, ketersediaan, booking, pratinjau slot) + koneksi Google
-// Calendar tenant (OAuth platform dari Panel Admin; callback publik
-// /google/oauth/callback). Base URL Google dioverride env untuk mock.
+// tenant (OAuth platform dari Panel Admin; callback publik kanonis
+// per layanan /api/oauth/<layanan>/callback). Base URL Google
+// dioverride env untuk mock.
 routes.route(
   "/",
   createAppointmentsRoutes(authBundle, {
@@ -566,8 +568,14 @@ routes.route(
     metaOAuthRedirectUri: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}/api/meta/oauth/callback`,
     // Fase 11B: base URL API Resend untuk probe uji koneksi panel.
     resendApiBase: env.RESEND_API_BASE,
-    // Fase 13G: redirect URI OAuth Google ditampilkan read-only di panel.
-    googleOAuthRedirectUri: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}/api/google/oauth/callback`,
+    // Redirect URI OAuth Google KANONIS per layanan ditampilkan
+    // read-only di panel (/api/oauth/<layanan>/callback, keputusan
+    // pemilik 2026-11-12) — satu per proyek Cloud layanan.
+    googleOAuthRedirectUris: {
+      calendar: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("calendar")}`,
+      youtube: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("youtube")}`,
+      business: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("business")}`,
+    },
   }),
 );
 // Modul Meta OAuth Connect (Fase 7D) — "Lanjutkan dengan Facebook":

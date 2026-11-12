@@ -39,6 +39,7 @@ import {
   getBooking,
   getContact,
   getGoogleConnection,
+  GOOGLE_OAUTH_CALLBACK_SEGMENTS,
   googleServiceScopes,
   isGoogleService,
   listAppointmentAvailability,
@@ -89,13 +90,18 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   GET    /tenants/:tenantId/appointments/google/calendars     daftar kalender akun
  *   PUT    /tenants/:tenantId/appointments/google/calendar      pilih kalender (owner/admin)
  *   DELETE /tenants/:tenantId/appointments/google         putus koneksi (owner/admin)
- *   GET    /google/oauth/callback                         callback publik (state bertanda tangan)
+ *   GET    /oauth/google_calendar/callback                callback publik calendar (state bertanda tangan)
+ *   GET    /oauth/youtube/callback                        callback publik youtube (state bertanda tangan)
+ *   GET    /oauth/google_business/callback                callback publik business (state bertanda tangan)
  *
  * Pemisahan Google per layanan (2026-11-12): modul ini juga rumah
  * bagi OAuth tiga layanan Google — state bertanda tangan kini memuat
- * LAYANAN (calendar/youtube/business) dan halaman asal, dan SATU
- * callback yang sama melayani ketiganya (satu redirect URI untuk
- * semua proyek Cloud):
+ * LAYANAN (calendar/youtube/business) dan halaman asal. Tiap layanan
+ * punya callback KANONIS sendiri (/api/oauth/google_calendar|
+ * youtube|google_business/callback, keputusan pemilik) yang
+ * dilayani SATU handler yang sama; callback gabungan lama Fase 13G
+ * (/google/oauth/callback) SENGAJA dihapus tanpa alias — pemilik
+ * mendaftarkan URI baru di proyeknya sebelum connect diuji lagi:
  *   GET    /tenants/:tenantId/google/status               status tiga layanan
  *   POST   /tenants/:tenantId/google/:service/connect     mulai OAuth layanan itu (owner/admin)
  * Rute appointments/google/* di atas adalah bentuk Calendar-nya
@@ -239,7 +245,14 @@ export function createAppointmentsRoutes(
     ttlSeconds: STATE_TTL_SECONDS,
   });
   const webBase = (options.publicBaseUrl ?? "").replace(/\/+$/, "");
-  const redirectUri = `${webBase}/api/google/oauth/callback`;
+  /**
+   * Redirect URI KANONIS per layanan (keputusan pemilik 2026-11-12:
+   * `/api/oauth/<layanan>/callback` — google_calendar / youtube /
+   * google_business). Dialog dan pertukaran kode WAJIB memakai URI
+   * layanan yang sama persis.
+   */
+  const redirectUriFor = (service: GoogleService): string =>
+    `${webBase}/api/oauth/${GOOGLE_OAUTH_CALLBACK_SEGMENTS[service]}/callback`;
 
   if (!bundle) {
     const unavailable = (c: AppContext) =>
@@ -263,7 +276,9 @@ export function createAppointmentsRoutes(
     app.delete(`${base}/google`, unavailable);
     app.get("/tenants/:tenantId/google/status", unavailable);
     app.post("/tenants/:tenantId/google/:service/connect", unavailable);
-    app.get("/google/oauth/callback", unavailable);
+    app.get("/oauth/google_calendar/callback", unavailable);
+    app.get("/oauth/youtube/callback", unavailable);
+    app.get("/oauth/google_business/callback", unavailable);
     return app;
   }
 
@@ -629,11 +644,11 @@ export function createAppointmentsRoutes(
 
   /**
    * Mulai OAuth SATU layanan Google: dialog dibangun dari klien
-   * LAYANAN itu (resolusi berjenjang per-layanan → bersama) dan
-   * scope SEMPIT layanannya; state bertanda tangan memuat layanan +
-   * halaman asal agar SATU callback melayani semua alur. Dipakai
-   * rute janji temu (calendar, asal appointments) dan rute Channels
-   * per layanan (asal channels).
+   * LAYANAN itu (resolusi berjenjang per-layanan → bersama), scope
+   * SEMPIT layanannya, dan redirect URI KANONIS layanannya
+   * (/api/oauth/<layanan>/callback); state bertanda tangan memuat
+   * layanan + halaman asal. Dipakai rute janji temu (calendar, asal
+   * appointments) dan rute Channels per layanan (asal channels).
    */
   async function startGoogleServiceConnect(
     c: AppContext,
@@ -693,7 +708,7 @@ export function createAppointmentsRoutes(
     });
     const url = buildGoogleAuthorizeUrl({
       clientId: client.clientId,
-      redirectUri,
+      redirectUri: redirectUriFor(service),
       state,
       scopes: googleServiceScopes(service),
       authBase: options.googleBases?.authBase,
@@ -805,11 +820,16 @@ export function createAppointmentsRoutes(
   });
 
   // --- Callback OAuth publik (identitas dari state bertanda tangan) -----
-  // SATU callback untuk tiga layanan + tiga proyek Cloud: layanan dan
-  // halaman asal dibaca dari state bertanda tangan (bukan dari query
-  // yang bisa dipalsukan), token ditukar dengan klien LAYANAN ITU, dan
-  // koneksi disimpan ke baris layanan itu saja.
-  app.get("/google/oauth/callback", async (c) => {
+  // Callback KANONIS per layanan (keputusan pemilik 2026-11-12):
+  // /oauth/google_calendar/callback, /oauth/youtube/callback,
+  // /oauth/google_business/callback — satu handler yang sama untuk
+  // ketiganya; layanan dan halaman asal dibaca dari STATE bertanda
+  // tangan (bukan dari path/query yang bisa dipalsukan), token
+  // ditukar dengan klien LAYANAN ITU dan redirect URI kanonis
+  // layanan itu, dan koneksi disimpan ke baris layanan itu saja.
+  // Path gabungan lama /google/oauth/callback (Fase 13G) TIDAK lagi
+  // dilayani — tanpa alias/fallback, sesuai keputusan pemilik.
+  const handleGoogleOAuthCallback = async (c: AppContext) => {
     const failAppointments = (code: string) =>
       c.redirect(
         `${webBase}/appointments?google=error&reason=${encodeURIComponent(code)}`,
@@ -842,7 +862,9 @@ export function createAppointmentsRoutes(
     try {
       const tokens = await exchangeGoogleAuthCode(googleDeps, client, {
         code,
-        redirectUri,
+        // Redirect URI pertukaran = URI KANONIS layanan yang sama
+        // dengan dialog awal (Google memvalidasi persis).
+        redirectUri: redirectUriFor(state.service),
       });
       const email = await fetchGoogleAccountEmail(
         googleDeps,
@@ -886,7 +908,11 @@ export function createAppointmentsRoutes(
       );
     }
     return c.redirect(`${webBase}/appointments?google=connected`, 302);
-  });
+  };
+
+  app.get("/oauth/google_calendar/callback", handleGoogleOAuthCallback);
+  app.get("/oauth/youtube/callback", handleGoogleOAuthCallback);
+  app.get("/oauth/google_business/callback", handleGoogleOAuthCallback);
 
   return app;
 }

@@ -454,15 +454,20 @@ koneksi mandiri agar billing/kuota/persetujuan API per layanan
 tidak saling menyandera (insiden pemicu: API yang belum aktif di
 proyek bersama membuat Calendar 502 dan sinkron YouTube/GBP gagal
 bersama). Yang SUDAH dibangun & terverifikasi (verify:
-google-channels per layanan, 10 grup; migrasi 0023):
+google-channels per layanan, 11 grup; migrasi 0023):
 
 - **Tiga koneksi per tenant** (`google_connections`): Calendar,
   YouTube, Business — masing-masing consent SEMPIT (calendar:
   calendar.events+readonly; youtube: youtube.upload+readonly;
   business: business.manage) dan tombol Hubungkan sendiri di blok
   Google halaman Channels; Calendar juga tetap terhubung dari
-  halaman Janji Temu. Satu callback URI yang sama untuk ketiganya:
-  `https://botara.my.id/api/google/oauth/callback`.
+  halaman Janji Temu. Tiap layanan punya callback SENDIRI:
+  `https://botara.my.id/api/oauth/google_calendar/callback`
+  (Calendar), `https://botara.my.id/api/oauth/youtube/callback`
+  (YouTube), `https://botara.my.id/api/oauth/google_business/callback`
+  (Business). Callback gabungan lama
+  `https://botara.my.id/api/google/oauth/callback` SUDAH DIHAPUS
+  tanpa alias (keputusan pemilik — tidak ada fallback jalur lama).
 - **Koneksi lama TIDAK putus**: migrasi menyemai koneksi gabungan
   yang ada menjadi baris calendar (selalu), youtube, dan business
   (bila scope lama mencakup) dengan token yang sama; tabel lama
@@ -484,8 +489,15 @@ Tindakan pemilik yang dianjurkan (billing bersih):
    (proyek Calendar), YouTube Data API v3 (proyek YouTube), dan
    Business Profile API + ajukan aksesnya (proyek Business).
 2. Di SETIAP proyek buat klien OAuth (Web application) dan
-   daftarkan redirect URI yang SAMA di ketiganya:
-   `https://botara.my.id/api/google/oauth/callback`.
+   daftarkan redirect URI LAYANANNYA — WAJIB dilakukan sebelum
+   connect diuji lagi (callback lama tidak lagi dilayani):
+   proyek Calendar → `https://botara.my.id/api/oauth/google_calendar/callback`;
+   proyek YouTube → `https://botara.my.id/api/oauth/youtube/callback`;
+   proyek Business → `https://botara.my.id/api/oauth/google_business/callback`.
+   Bila memakai satu proyek bersama, daftarkan KETIGA URI itu pada
+   klien bersama tersebut. Ketiga URI juga tampil di Panel Admin
+   grup Google untuk disalin persis. URI lama
+   `/api/google/oauth/callback` boleh dihapus dari proyek.
 3. Isi Client ID/Secret tiap proyek ke Panel Admin grup Google
    pada baris layanannya (Calendar / YouTube / Business). Bila
    hanya memakai SATU proyek bersama seperti sekarang, biarkan

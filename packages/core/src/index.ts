@@ -619,6 +619,8 @@ export {
   GOOGLE_SERVICES,
   GOOGLE_SERVICE_SCOPES,
   googleServiceScopes,
+  GOOGLE_OAUTH_CALLBACK_SEGMENTS,
+  googleOAuthCallbackPath,
   isGoogleService,
   YOUTUBE_UPLOAD_SCOPE,
   YOUTUBE_READONLY_SCOPE,
