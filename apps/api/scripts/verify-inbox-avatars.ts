@@ -4,17 +4,21 @@
  * Dijalankan di CI sebagai bagian `verify:ci`.
  *
  * Membuktikan laporan pemilik "inbox avatar masih placeholder":
- *   [1] percakapan kind='channel' sasaran linimasa (kasus produksi:
- *       akun terhubung yang barisnya mewakili akun itu sendiri) tanpa
- *       foto kontak menyajikan URL FOTO AKUN CHANNEL — bukan null;
- *       hal yang sama pada daftar kontak untuk kontak jangkarnya;
- *   [2] prioritas tidak tertukar: baris channel yang kontaknya JUGA
- *       berfoto memakai foto kontak; percakapan DM berfoto kontak
- *       memakai foto kontak seperti sebelumnya;
+ *   [1] resolusi avatar efektif: kontak jangkar akun channel (kontak
+ *       akun-dirinya) tanpa foto kontak mewarisi URL FOTO AKUN CHANNEL
+ *       pada daftar kontak — bukan null. (Daftar inbox sendiri sejak
+ *       gelombang saringan Inbox hanya memuat percakapan pesan, jadi
+ *       baris kind='channel' TIDAK lagi muncul di sana — yang diuji di
+ *       sini untuk daftar inbox adalah ketiadaan baris channel itu,
+ *       dan cakupan saringannya sendiri ada di verify:inbox-filter.)
+ *   [2] prioritas tidak tertukar: kontak yang JUGA berfoto memakai
+ *       foto kontak (di atas foto akunnya); percakapan DM berfoto
+ *       kontak memakai foto kontak seperti sebelumnya;
  *   [3] kejujuran: baris channel Telegram (jangkarnya chat channel,
- *       bukan bot) TIDAK ditempeli foto bot; percakapan WhatsApp dan
- *       kontak tanpa identitas/foto tetap null (placeholder sah) dan
- *       tidak ada panggilan provider apa pun untuk WhatsApp;
+ *       bukan bot) tidak tampil di inbox sama sekali (dulu: tampil
+ *       tanpa ditempeli foto bot); percakapan WhatsApp dan kontak
+ *       tanpa identitas/foto tetap null (placeholder sah) dan tidak
+ *       ada panggilan provider apa pun untuk WhatsApp;
  *   [4] backfill malas foto kontak: kontak Telegram lama tanpa foto
  *       terisi lewat Bot API sesudah daftar kontak dibaca, kontak
  *       Messenger lama terisi lewat Graph sesudah daftar inbox dibaca
@@ -300,14 +304,13 @@ async function waitForContactPhoto(
   return false;
 }
 
-// ---------- [1] fallback foto akun untuk baris channel & kontak jangkar ----------
+// ---------- [1] fallback foto akun untuk kontak jangkar (baris channel tersaring dari inbox) ----------
 {
   const convs = await listConversations();
-  const vIg = convs.find((row) => row.id === V_IG);
   assert.equal(
-    vIg?.contactAvatarUrl,
-    channelUrl(ACC_IG),
-    "percakapan channel IG tanpa foto kontak harus menyajikan foto akun channel-nya",
+    convs.find((row) => row.id === V_IG),
+    undefined,
+    "baris channel IG tidak tampil di daftar inbox (saringan percakapan pesan)",
   );
   // Keadaan awal kontak DM lama pada respons yang sama: belum ada foto
   // tersimpan saat peta URL dihitung → null; backfill yang dijadwalkan
@@ -323,16 +326,22 @@ async function waitForContactPhoto(
     channelUrl(ACC_IG),
     "kontak jangkar akun IG harus mewarisi foto akun channel-nya",
   );
-  console.log("[1] fallback foto akun channel untuk baris channel & kontak jangkar: OK");
+  console.log("[1] fallback foto akun channel untuk kontak jangkar: OK");
 }
 
 // ---------- [2] prioritas foto kontak tidak tertukar ----------
 {
   const convs = await listConversations();
   assert.equal(
-    convs.find((row) => row.id === V_IG2)?.contactAvatarUrl,
+    convs.find((row) => row.id === V_IG2),
+    undefined,
+    "baris channel IG kedua juga tersaring dari daftar inbox",
+  );
+  const contacts = await listContacts();
+  assert.equal(
+    contacts.find((row) => row.id === C_IG2_SELF)?.avatarUrl,
     contactUrl(C_IG2_SELF),
-    "baris channel yang kontaknya berfoto tetap memakai foto kontak",
+    "kontak jangkar yang berfoto tetap memakai foto kontak, bukan foto akun",
   );
   assert.equal(
     convs.find((row) => row.id === V_TG_DM)?.contactAvatarUrl,
@@ -346,9 +355,9 @@ async function waitForContactPhoto(
 {
   const convs = await listConversations();
   assert.equal(
-    convs.find((row) => row.id === V_TG_CH)?.contactAvatarUrl,
-    null,
-    "baris channel Telegram tidak boleh ditempeli foto bot",
+    convs.find((row) => row.id === V_TG_CH),
+    undefined,
+    "baris channel Telegram tidak tampil di daftar inbox (tidak ditempeli foto bot)",
   );
   assert.equal(
     convs.find((row) => row.id === V_WA)?.contactAvatarUrl,
