@@ -10,7 +10,7 @@ import { z } from "zod";
 // workspace kendali: board tujuan dipilih dari daftar board akun
 // itu sendiri (GET /v5/boards) dan disimpan per akun channel
 // (kolom pinterest_board_id + snapshot pinterest_board_name,
-// migrasi 0023). Board baru juga bisa DIBUAT dari pemilih yang
+// migrasi 0025). Board baru juga bisa DIBUAT dari pemilih yang
 // sama (POST /v5/boards, scope boards:write yang sudah diminta
 // connect) dan otomatis menjadi pilihan.
 //
