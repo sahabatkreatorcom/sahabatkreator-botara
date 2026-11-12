@@ -8,21 +8,30 @@ import {
   ContactImportRequestSchema,
   ContactImportResponseSchema,
   ContactListResponseSchema,
+  ContactNoteListResponseSchema,
+  ContactNoteResponseSchema,
   ContactResponseSchema,
+  ContactTimelineResponseSchema,
+  CreateContactNoteRequestSchema,
   CreateContactRequestSchema,
   MergeContactRequestSchema,
   UpdateContactRequestSchema,
+  type ContactNoteResponse,
   type ContactResponse,
 } from "@sahabat-kreator/contracts";
 import {
   buildContactsCsv,
   bulkApplyContactsAction,
   createContact,
+  createContactNote,
+  deleteContactNote,
   effectiveOptInStatus,
   findDuplicateContacts,
   getContact,
+  getContactTimeline,
   importContactsFromCsv,
   listContactConversations,
+  listContactNotes,
   listContactPlatforms,
   listContactPhotoFetchCandidates,
   listContacts,
@@ -32,6 +41,7 @@ import {
   mapContactsToSelfChannelAccounts,
   mergeContacts,
   updateContact,
+  type ContactNoteWithAuthor,
 } from "@sahabat-kreator/core";
 import type { Contact } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
@@ -203,6 +213,16 @@ const ExportContactsQuerySchema = z.object({
  *   POST  /tenants/:tenantId/contacts/import           impor CSV (laporan per baris)
  *   POST  /tenants/:tenantId/contacts/bulk             satu aksi untuk banyak kontak
  *   GET   /tenants/:tenantId/contacts/:id/conversations  percakapan milik kontak
+ *
+ * Route tambahan Gelombang G8 (linimasa + catatan level kontak):
+ *   GET    /tenants/:tenantId/contacts/:id/notes          catatan KONTAK (semua member)
+ *   POST   /tenants/:tenantId/contacts/:id/notes          buat catatan kontak
+ *   DELETE /tenants/:tenantId/contacts/:id/notes/:noteId  hapus (penulis / owner / admin)
+ *   GET    /tenants/:tenantId/contacts/:id/timeline       linimasa aktivitas (baca-saja)
+ * Catatan kontak adalah keluarga TERPISAH dari catatan percakapan
+ * (modul notes, /conversations/:id/notes) — subjeknya kontak, dan
+ * kedua daftar tidak pernah dicampur; linimasa merakit peristiwa dari
+ * data yang sudah tercatat (core contact-timeline), tanpa menulis.
  * Wajib sesi + membership workspace (non-member → 404 TENANT_NOT_FOUND,
  * pola Fase 1B). Logika domain ada di @sahabat-kreator/core (RLS tenant).
  */
@@ -222,6 +242,10 @@ export function createContactsRoutes(
     app.post(`${base}/bulk`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/conversations`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/:id/notes`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:id/notes`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.delete(`${base}/:id/notes/:noteId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/:id/timeline`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/merge`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.patch(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
@@ -521,6 +545,136 @@ export function createContactsRoutes(
           lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
           createdAt: row.createdAt.toISOString(),
         })),
+      }),
+    );
+  });
+
+  // --- Catatan level kontak (G8) -----------------------------------
+  // Keluarga terpisah dari catatan percakapan (modul notes): subjek
+  // di sini KONTAK. Hapus ditegakkan di core (penulis atau
+  // owner/admin; selain itu 403). Kontak tenant lain → 404 NOT_FOUND;
+  // non-member → 404 TENANT_NOT_FOUND.
+  const serializeContactNote = (
+    note: ContactNoteWithAuthor,
+  ): ContactNoteResponse =>
+    ContactNoteResponseSchema.parse({
+      id: note.id,
+      contactId: note.contactId,
+      authorUserId: note.authorUserId,
+      authorName: note.authorName,
+      body: note.body,
+      createdAt: note.createdAt.toISOString(),
+      updatedAt: note.updatedAt.toISOString(),
+    });
+
+  app.get(`${base}/:id/notes`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    const notes = await listContactNotes(bundle.db, {
+      tenantId: tenant.id,
+      contactId: id,
+    });
+    if (!notes) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    return c.json(
+      ContactNoteListResponseSchema.parse({
+        notes: notes.map(serializeContactNote),
+      }),
+    );
+  });
+
+  app.post(`${base}/:id/notes`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = CreateContactNoteRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid note payload");
+    }
+    const result = await createContactNote(bundle.db, {
+      tenantId: tenant.id,
+      userId: c.get("appUser").id,
+      contactId: id,
+      body: parsed.data.body,
+    });
+    if (result.kind === "contact_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    return c.json(serializeContactNote(result.note), 201);
+  });
+
+  app.delete(`${base}/:id/notes/:noteId`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    const noteId = c.req.param("noteId");
+    if (
+      !z.string().uuid().safeParse(id).success ||
+      !z.string().uuid().safeParse(noteId).success
+    ) {
+      return apiError(c, 404, "NOT_FOUND", "Note not found");
+    }
+    const result = await deleteContactNote(bundle.db, {
+      tenantId: tenant.id,
+      userId: c.get("appUser").id,
+      role: tenant.role,
+      contactId: id,
+      noteId,
+    });
+    if (result.kind === "not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Note not found");
+    }
+    if (result.kind === "forbidden") {
+      return apiError(
+        c,
+        403,
+        "FORBIDDEN",
+        "Only the note's author or a workspace owner/admin can delete this note",
+      );
+    }
+    return c.body(null, 204);
+  });
+
+  // GET /tenants/:tenantId/contacts/:id/timeline — linimasa aktivitas
+  // kontak, dirakit baca-saja di core dari data yang sudah tercatat.
+  app.get(`${base}/:id/timeline`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    const rawLimit = c.req.query("limit");
+    const limit =
+      rawLimit !== undefined && /^\d+$/.test(rawLimit)
+        ? Number(rawLimit)
+        : undefined;
+    const timeline = await getContactTimeline(
+      bundle.db,
+      { tenantId: tenant.id, contactId: id },
+      limit !== undefined ? { limit } : undefined,
+    );
+    if (!timeline) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    return c.json(
+      ContactTimelineResponseSchema.parse({
+        events: timeline.events.map((event) => ({
+          kind: event.kind,
+          occurredAt: event.occurredAt.toISOString(),
+          detail: event.detail,
+        })),
+        truncated: timeline.truncated,
       }),
     );
   });
