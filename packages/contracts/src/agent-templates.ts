@@ -92,25 +92,14 @@ export function findAgentInstructionTemplate(
 }
 
 /**
- * Daftar penanda kurung siku yang belum diganti di dalam instruction,
- * mis. "[nama bisnis]". Mengembalikan ISI penanda (tanpa kurung),
- * terdedup, urut kemunculan pertama. Dipakai peringatan non-blokir di
- * formulir agent — peringatan ini TIDAK PERNAH menggagalkan simpan,
- * jadi fungsi ini murni informatif dan tidak punya padanan validasi
- * penolak di UI maupun API.
+ * Shim kompatibilitas (ekstraksi G1): `extractInstructionPlaceholders`
+ * kini hidup di modul netral `./placeholders` — konvensi penanda kurung
+ * sikunya dipakai teks templat lintas domain, bukan cuma instruction
+ * agent. Di-re-export di sini agar impor lama dari modul ini (dan dari
+ * barrel paket) tetap bekerja apa adanya; kode baru mengimpor langsung
+ * dari `./placeholders`. Lihat placeholders.ts untuk dokumentasi penuh.
  */
-export function extractInstructionPlaceholders(text: string): string[] {
-  const seen = new Set<string>();
-  const found: string[] = [];
-  for (const match of text.matchAll(/\[([^[\]\n]{1,80})\]/g)) {
-    const value = (match[1] ?? "").trim();
-    if (value && !seen.has(value)) {
-      seen.add(value);
-      found.push(value);
-    }
-  }
-  return found;
-}
+export { extractInstructionPlaceholders } from "./placeholders";
 
 // ---------------------------------------------------------------------------
 // Isi templat — kerangka lima bagian yang sama di semua templat.

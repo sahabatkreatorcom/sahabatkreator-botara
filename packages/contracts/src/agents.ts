@@ -199,6 +199,25 @@ export type AgentPlaygroundResponse = z.infer<
 // hanya dibatasi panjang (pola CreateAgentRequest) — instruction yang
 // masih memuat penanda "[...]" adalah keadaan sah yang peringatannya
 // hidup di UI; API tidak pernah menolaknya.
+//
+// POLA BERSAMA "SIMPAN TEMPLAT PRIBADI" (ekstraksi G1 — tiru pola ini
+// untuk domain templat lain, mis. templat sequence di gelombang G2;
+// yang dibagi adalah POLANYA, BUKAN tabelnya — tiap domain punya tabel
+// + skema payload sendiri, jangan buat satu tabel polimorfik):
+//   1. Kontrak: skema Create/List/Response di modul kontrak domain
+//      (di sini: berkas ini, bagian templat instruksi pribadi).
+//   2. DB: satu tabel tenant per domain dengan RLS + policy tenant
+//      (di sini: `agent_instruction_templates`,
+//      packages/db/src/schema/agents.ts, migrasi 0027).
+//   3. Core: service create/list/delete ber-scope tenantId eksplisit
+//      (di sini: packages/core/src/agent-templates.ts).
+//   4. API: rute CRUD ramping di bawah /tenants/:tenantId/<domain>
+//      (di sini: apps/api/src/modules/agents/routes.ts — buat 201,
+//      daftar, hapus; ubah = hapus + simpan ulang, tanpa endpoint ubah).
+//   5. Web: galeri menggabungkan katalog statis kontrak + baris
+//      templat pribadi tenant dalam komponen TemplateGallery bersama
+//      (apps/web/src/components/TemplateGallery.tsx), dengan klien API
+//      per domain (di sini: `agentTemplates` di apps/web/src/api/client.ts).
 // ---------------------------------------------------------------------------
 
 export const CreateAgentInstructionTemplateRequestSchema = z.object({

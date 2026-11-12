@@ -10,6 +10,7 @@
  * modul domain yang sesuai, lalu ekspor lewat `export *` di bawah.
  */
 export * from "./common";
+export * from "./placeholders";
 export * from "./tenants";
 export * from "./contacts";
 export * from "./inbox";

@@ -30,6 +30,13 @@ import { z } from "zod";
  * (`channelAccountId`), yang tidak bisa ditentukan katalog statis —
  * pemilik harus memilih akunnya sendiri. Menyertakannya berarti
  * menambah parameter wajib pada instantiate hanya untuk satu jenis.
+ *
+ * TEMPLAT PRIBADI sequence (gelombang G2): katalog ini tetap statis;
+ * bila tenant boleh menyimpan templat sequence-nya sendiri, tiru POLA
+ * BERSAMA "SIMPAN TEMPLAT PRIBADI" yang didokumentasikan di agents.ts
+ * (bagian templat instruksi pribadi) — tabel sendiri untuk domain ini,
+ * bukan tabel bersama. Penanda kurung siku pada draf langkah memakai
+ * `extractInstructionPlaceholders` dari modul netral ./placeholders.
  */
 export const AutomationTemplateCategorySchema = z.enum([
   "faq",
