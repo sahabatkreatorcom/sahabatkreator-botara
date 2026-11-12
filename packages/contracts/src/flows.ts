@@ -634,6 +634,9 @@ export const FlowRunResponseSchema = z.object({
   // Null untuk run yang lahir dari goto_flow (Fase 12A) — run semacam
   // itu tidak dipicu pesan masuk.
   triggerMessageId: z.string().uuid().nullable(),
+  // G3: nomor versi graf yang di-pin run ini (snapshot flow_versions).
+  // Null = run warisan tanpa pin — eksekutor membaca graf live.
+  flowVersion: z.number().int().positive().nullable(),
   status: FlowRunStatusSchema,
   currentNodeId: z.string().nullable(),
   stepCount: z.number().int().nonnegative(),
@@ -683,3 +686,45 @@ export const FlowRunStepListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 export type FlowRunStepListQuery = z.infer<typeof FlowRunStepListQuerySchema>;
+
+/**
+ * Satu snapshot versi flow (G3 — tabel `flow_versions`). Snapshot
+ * ditulis SETIAP aktivasi dan tidak pernah berubah; graf penuhnya
+ * tidak keluar di daftar (yang tampil ringkasan: nomor, nama saat
+ * aktivasi, jumlah node/edge). `isCurrent` = versi ini adalah versi
+ * terbaru DAN flow sedang aktif (graf live flow sama dengan snapshot
+ * ini). `restoredFromVersion` terisi bila versi lahir dari pemulihan.
+ */
+export const FlowVersionResponseSchema = z.object({
+  id: z.string().uuid(),
+  flowId: z.string().uuid(),
+  version: z.number().int().positive(),
+  name: z.string(),
+  nodeCount: z.number().int().nonnegative(),
+  edgeCount: z.number().int().nonnegative(),
+  restoredFromVersion: z.number().int().positive().nullable(),
+  activatedByUserId: z.string().uuid().nullable(),
+  isCurrent: z.boolean(),
+  createdAt: z.string().datetime(),
+});
+export type FlowVersionResponse = z.infer<typeof FlowVersionResponseSchema>;
+
+export const FlowVersionListResponseSchema = z.object({
+  versions: z.array(FlowVersionResponseSchema),
+});
+export type FlowVersionListResponse = z.infer<
+  typeof FlowVersionListResponseSchema
+>;
+
+/**
+ * Hasil pemulihan versi: flow yang kini aktif dengan isi snapshot
+ * lama + baris versi BARU yang melahirkannya (sejarah append-only —
+ * pemulihan tidak menulis ulang versi sumber).
+ */
+export const FlowVersionRestoreResponseSchema = z.object({
+  flow: FlowResponseSchema,
+  version: FlowVersionResponseSchema,
+});
+export type FlowVersionRestoreResponse = z.infer<
+  typeof FlowVersionRestoreResponseSchema
+>;

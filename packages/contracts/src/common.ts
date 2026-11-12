@@ -119,6 +119,11 @@ export const ErrorCodeSchema = z.enum([
   "FLOW_INVALID_STATE",
   // Fase 12B: instantiate galeri template dengan slug tak dikenal → 404.
   "FLOW_TEMPLATE_NOT_FOUND",
+  // G3 (versioning flow): pemulihan versi ditolak karena flow sedang
+  // draft dengan suntingan yang belum diaktifkan — memulihkan akan
+  // menimpa draft itu diam-diam. Pengguna harus mengaktifkan draft
+  // dulu (yang menyimpannya sebagai versi) sebelum memulihkan → 409.
+  "FLOW_RESTORE_DIRTY_DRAFT",
   // Fase 12C: lampiran berkas KB — berkas tanpa teks yang bisa
   // diekstrak (PDF hasil pindaian / berkas rusak) → 422 dan dokumen
   // TIDAK disimpan; tipe di luar PDF/TXT/MD → 422; ukuran di atas
