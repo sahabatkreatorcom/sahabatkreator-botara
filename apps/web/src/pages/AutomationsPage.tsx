@@ -24,6 +24,10 @@ import {
 import { api } from "../api/client";
 import { translateApiError } from "../api/errorText";
 import { FieldError, inputClassName } from "../components/AuthLayout";
+import {
+  TemplateGalleryGrid,
+  TemplateGalleryPanel,
+} from "../components/TemplateGallery";
 import { formatDateTime } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
@@ -258,61 +262,48 @@ export function AutomationsPage({ t, locale }: AutomationsPageProps) {
       </div>
 
       {galleryOpen ? (
-        <div className="mt-4 rounded-xl border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold text-ink">
-            {t("automations.tplGalleryTitle")}
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            {t("automations.tplGallerySubtitle")}
-          </p>
-          {templates === null ? (
-            <p className="mt-4 text-sm text-muted">{t("workspace.loading")}</p>
-          ) : templates.length === 0 ? (
-            <p className="mt-4 text-sm text-muted">
-              {t("automations.tplGalleryEmpty")}
-            </p>
-          ) : (
-            <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {templates.map((tpl) => (
-                <li
-                  key={tpl.slug}
-                  className="flex flex-col rounded-xl border border-line bg-elevated/40 p-4"
+        <TemplateGalleryPanel
+          title={t("automations.tplGalleryTitle")}
+          subtitle={t("automations.tplGallerySubtitle")}
+          loading={templates === null}
+          loadingLabel={t("workspace.loading")}
+          empty={(templates ?? []).length === 0}
+          emptyLabel={t("automations.tplGalleryEmpty")}
+        >
+          <TemplateGalleryGrid
+            variant="panel"
+            cards={(templates ?? []).map((tpl) => ({
+              key: tpl.slug,
+              name: t(tpl.nameKey as TranslationKey),
+              badges: (
+                <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                  {t(TPL_CATEGORY_KEYS[tpl.category])}
+                </span>
+              ),
+              description: t(tpl.descriptionKey as TranslationKey),
+              meta:
+                tpl.kind === "sequence"
+                  ? t("automations.tplSequenceMeta", {
+                      count: tpl.stepCount,
+                    })
+                  : t("automations.tplKeywordMeta", {
+                      count: tpl.keywordCount,
+                    }),
+              actions: (
+                <button
+                  type="button"
+                  disabled={usingSlug !== null}
+                  onClick={() => void applyTemplate(tpl)}
+                  className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-ink">
-                      {t(tpl.nameKey as TranslationKey)}
-                    </span>
-                    <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                      {t(TPL_CATEGORY_KEYS[tpl.category])}
-                    </span>
-                  </div>
-                  <p className="mt-2 flex-1 text-sm text-muted">
-                    {t(tpl.descriptionKey as TranslationKey)}
-                  </p>
-                  <p className="mt-2 text-xs text-muted">
-                    {tpl.kind === "sequence"
-                      ? t("automations.tplSequenceMeta", {
-                          count: tpl.stepCount,
-                        })
-                      : t("automations.tplKeywordMeta", {
-                          count: tpl.keywordCount,
-                        })}
-                  </p>
-                  <button
-                    type="button"
-                    disabled={usingSlug !== null}
-                    onClick={() => void applyTemplate(tpl)}
-                    className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-                  >
-                    {usingSlug === tpl.slug
-                      ? t("automations.tplUsing")
-                      : t("automations.tplUseButton")}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                  {usingSlug === tpl.slug
+                    ? t("automations.tplUsing")
+                    : t("automations.tplUseButton")}
+                </button>
+              ),
+            }))}
+          />
+        </TemplateGalleryPanel>
       ) : null}
 
       {templateNotice ? (

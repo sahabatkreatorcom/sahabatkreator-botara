@@ -7,6 +7,10 @@ import type {
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
+import {
+  TemplateGalleryGrid,
+  TemplateGalleryPanel,
+} from "../components/TemplateGallery";
 import { translateApiError } from "../api/errorText";
 import { formatRelativeTime } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
@@ -261,69 +265,56 @@ export function FlowsPage({ t, locale, onOpenBuilder }: FlowsPageProps) {
       </div>
 
       {galleryOpen ? (
-        <div className="mt-4 rounded-xl border border-line bg-surface p-4">
-          <h2 className="text-sm font-semibold text-ink">
-            {t("flows.tplGalleryTitle")}
-          </h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            {t("flows.tplGallerySubtitle")}
-          </p>
-          {templates === null ? (
-            <p className="mt-4 text-sm text-muted">{t("workspace.loading")}</p>
-          ) : (
-            <ul className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {templates.map((tpl) => (
-                <li
-                  key={tpl.slug}
-                  className="flex flex-col rounded-xl border border-line bg-elevated/40 p-4"
+        <TemplateGalleryPanel
+          title={t("flows.tplGalleryTitle")}
+          subtitle={t("flows.tplGallerySubtitle")}
+          loading={templates === null}
+          loadingLabel={t("workspace.loading")}
+        >
+          <TemplateGalleryGrid
+            variant="panel"
+            cards={(templates ?? []).map((tpl) => ({
+              key: tpl.slug,
+              name: t(tpl.nameKey as TranslationKey),
+              badges: (
+                <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                  {t(TPL_CATEGORY_KEYS[tpl.category])}
+                </span>
+              ),
+              description: t(tpl.descriptionKey as TranslationKey),
+              meta: t("flows.tplNodeCount", { count: tpl.nodeCount }),
+              afterMeta:
+                tpl.needs.length > 0 ? (
+                  <p className="mt-2">
+                    <span className="inline-flex items-center rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
+                      {t("flows.tplNeedsLabel")}{" "}
+                      {tpl.needs
+                        .map((n) =>
+                          n === "product"
+                            ? t("flows.tplNeedsProduct")
+                            : n === "service"
+                              ? t("flows.tplNeedsService")
+                              : n,
+                        )
+                        .join(", ")}
+                    </span>
+                  </p>
+                ) : null,
+              actions: canManage ? (
+                <button
+                  type="button"
+                  disabled={usingSlug !== null}
+                  onClick={() => void applyTemplate(tpl)}
+                  className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
                 >
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-semibold text-ink">
-                      {t(tpl.nameKey as TranslationKey)}
-                    </span>
-                    <span className="inline-flex items-center rounded-full bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
-                      {t(TPL_CATEGORY_KEYS[tpl.category])}
-                    </span>
-                  </div>
-                  <p className="mt-2 flex-1 text-sm text-muted">
-                    {t(tpl.descriptionKey as TranslationKey)}
-                  </p>
-                  <p className="mt-2 text-xs text-muted">
-                    {t("flows.tplNodeCount", { count: tpl.nodeCount })}
-                  </p>
-                  {tpl.needs.length > 0 ? (
-                    <p className="mt-2">
-                      <span className="inline-flex items-center rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">
-                        {t("flows.tplNeedsLabel")}{" "}
-                        {tpl.needs
-                          .map((n) =>
-                            n === "product"
-                              ? t("flows.tplNeedsProduct")
-                              : n === "service"
-                                ? t("flows.tplNeedsService")
-                                : n,
-                          )
-                          .join(", ")}
-                      </span>
-                    </p>
-                  ) : null}
-                  {canManage ? (
-                    <button
-                      type="button"
-                      disabled={usingSlug !== null}
-                      onClick={() => void applyTemplate(tpl)}
-                      className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
-                    >
-                      {usingSlug === tpl.slug
-                        ? t("flows.tplUsing")
-                        : t("flows.tplUseButton")}
-                    </button>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+                  {usingSlug === tpl.slug
+                    ? t("flows.tplUsing")
+                    : t("flows.tplUseButton")}
+                </button>
+              ) : undefined,
+            }))}
+          />
+        </TemplateGalleryPanel>
       ) : null}
 
       {!canManage ? (

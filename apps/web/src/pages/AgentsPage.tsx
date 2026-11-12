@@ -20,6 +20,7 @@ import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api } from "../api/client";
 import { translateApiError } from "../api/errorText";
 import { FieldError, inputClassName } from "../components/AuthLayout";
+import { TemplateGalleryGrid } from "../components/TemplateGallery";
 import { formatDateTime } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 import { usePendingApprovals } from "../agents/PendingApprovalsProvider";
@@ -532,111 +533,109 @@ function AgentFormModal({
             <p className="mt-1 text-xs leading-relaxed text-muted">
               {t("agents.templatesSubtitle")}
             </p>
-            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-              {!agent ? (
-                <li className="flex flex-col rounded-xl border border-line bg-surface p-3">
-                  <span className="text-sm font-semibold text-ink">
-                    {t("agents.templateBlankName")}
-                  </span>
-                  <p className="mt-1 flex-1 text-xs leading-relaxed text-muted">
-                    {t("agents.templateBlankDesc")}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={applyBlank}
-                    className="mt-2 self-start rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
-                  >
-                    {t("agents.templateApplyButton")}
-                  </button>
-                </li>
-              ) : null}
-              {AGENT_INSTRUCTION_TEMPLATES.map((def) => (
-                <li
-                  key={def.slug}
-                  className="flex flex-col rounded-xl border border-line bg-surface p-3"
-                >
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-semibold text-ink">
-                      {t(def.nameKey as TranslationKey)}
-                    </span>
-                    <span className="rounded-full bg-elevated px-2 py-0.5 text-[10px] font-semibold text-muted">
-                      {t("agents.templateBuiltInBadge")}
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        def.mode === "suggest"
-                          ? "bg-elevated text-ink"
-                          : "bg-accent/10 text-accent"
-                      }`}
-                    >
-                      {t(
-                        def.mode === "suggest"
-                          ? "agents.modeSuggest"
-                          : "agents.modeAuto",
-                      )}
-                    </span>
-                  </div>
-                  <p className="mt-1 flex-1 text-xs leading-relaxed text-muted">
-                    {t(def.descriptionKey as TranslationKey)}
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => applyBuiltInTemplate(def)}
-                    className="mt-2 self-start rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
-                  >
-                    {t("agents.templateApplyButton")}
-                  </button>
-                </li>
-              ))}
-              {myTemplates.map((tpl) => (
-                <li
-                  key={tpl.id}
-                  className="flex flex-col rounded-xl border border-line bg-surface p-3"
-                >
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-semibold text-ink">
-                      {tpl.name}
-                    </span>
-                    <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
-                      {t("agents.templateMineBadge")}
-                    </span>
-                    <span
-                      className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                        tpl.mode === "suggest"
-                          ? "bg-elevated text-ink"
-                          : "bg-accent/10 text-accent"
-                      }`}
-                    >
-                      {t(
-                        tpl.mode === "suggest"
-                          ? "agents.modeSuggest"
-                          : "agents.modeAuto",
-                      )}
-                    </span>
-                  </div>
-                  <p className="mt-1 line-clamp-3 flex-1 whitespace-pre-wrap text-xs leading-relaxed text-muted">
-                    {tpl.systemPrompt}
-                  </p>
-                  <div className="mt-2 flex gap-2">
+            <TemplateGalleryGrid
+              variant="compact"
+              cards={[
+                ...(!agent
+                  ? [
+                      {
+                        key: "blank",
+                        name: t("agents.templateBlankName"),
+                        description: t("agents.templateBlankDesc"),
+                        actions: (
+                          <button
+                            type="button"
+                            onClick={applyBlank}
+                            className="mt-2 self-start rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                          >
+                            {t("agents.templateApplyButton")}
+                          </button>
+                        ),
+                      },
+                    ]
+                  : []),
+                ...AGENT_INSTRUCTION_TEMPLATES.map((def) => ({
+                  key: def.slug,
+                  name: t(def.nameKey as TranslationKey),
+                  badges: (
+                    <>
+                      <span className="rounded-full bg-elevated px-2 py-0.5 text-[10px] font-semibold text-muted">
+                        {t("agents.templateBuiltInBadge")}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          def.mode === "suggest"
+                            ? "bg-elevated text-ink"
+                            : "bg-accent/10 text-accent"
+                        }`}
+                      >
+                        {t(
+                          def.mode === "suggest"
+                            ? "agents.modeSuggest"
+                            : "agents.modeAuto",
+                        )}
+                      </span>
+                    </>
+                  ),
+                  description: t(def.descriptionKey as TranslationKey),
+                  actions: (
                     <button
                       type="button"
-                      onClick={() => applyMyTemplate(tpl)}
-                      className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                      onClick={() => applyBuiltInTemplate(def)}
+                      className="mt-2 self-start rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
                     >
                       {t("agents.templateApplyButton")}
                     </button>
-                    <button
-                      type="button"
-                      disabled={deletingTemplateId === tpl.id}
-                      onClick={() => void handleDeleteTemplate(tpl)}
-                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-60"
-                    >
-                      {t("agents.templateDeleteButton")}
-                    </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  ),
+                })),
+                ...myTemplates.map((tpl) => ({
+                  key: tpl.id,
+                  name: tpl.name,
+                  badges: (
+                    <>
+                      <span className="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-semibold text-accent">
+                        {t("agents.templateMineBadge")}
+                      </span>
+                      <span
+                        className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                          tpl.mode === "suggest"
+                            ? "bg-elevated text-ink"
+                            : "bg-accent/10 text-accent"
+                        }`}
+                      >
+                        {t(
+                          tpl.mode === "suggest"
+                            ? "agents.modeSuggest"
+                            : "agents.modeAuto",
+                        )}
+                      </span>
+                    </>
+                  ),
+                  description: tpl.systemPrompt,
+                  descriptionClassName:
+                    "line-clamp-3 whitespace-pre-wrap",
+                  actions: (
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => applyMyTemplate(tpl)}
+                        className="rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+                      >
+                        {t("agents.templateApplyButton")}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={deletingTemplateId === tpl.id}
+                        onClick={() => void handleDeleteTemplate(tpl)}
+                        className="rounded-lg px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger/10 disabled:opacity-60"
+                      >
+                        {t("agents.templateDeleteButton")}
+                      </button>
+                    </div>
+                  ),
+                })),
+              ]}
+            />
             {myTemplatesError ? (
               <p className="mt-2 text-xs text-danger">
                 {t("agents.templatesLoadError")}
