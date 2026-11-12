@@ -29,7 +29,7 @@ import { api } from "../api/client";
 import { translateApiError } from "../api/errorText";
 import { FieldError, inputClassName } from "../components/AuthLayout";
 import { PasswordInput } from "../components/PasswordInput";
-import { formatDateTime } from "../utils/format";
+import { formatDateTime, formatRelativeTime } from "../utils/format";
 import { useWorkspace } from "../workspace/WorkspaceProvider";
 
 type Translate = (
@@ -1225,6 +1225,29 @@ function TeamSection({
                   ) : null}
                 </div>
                 <div className="truncate text-xs text-muted">{member.email}</div>
+                {/* Kehadiran tim (G13 butir 9): titik hijau bila detak
+                    terakhir ≤120 dtk (jendela sama dengan server),
+                    selain itu "aktif terakhir …" dari lastSeenAt. */}
+                <div className="mt-0.5 flex items-center gap-1.5 text-xs text-muted">
+                  <span
+                    aria-hidden
+                    className={`h-2 w-2 shrink-0 rounded-full ${
+                      member.lastSeenAt !== null &&
+                      Date.now() - new Date(member.lastSeenAt).getTime() <=
+                        120_000
+                        ? "bg-success"
+                        : "bg-line"
+                    }`}
+                  />
+                  {member.lastSeenAt !== null &&
+                  Date.now() - new Date(member.lastSeenAt).getTime() <= 120_000
+                    ? t("settings.team.presenceOnline")
+                    : member.lastSeenAt !== null
+                      ? t("settings.team.presenceLastActive", {
+                          time: formatRelativeTime(member.lastSeenAt, locale),
+                        })
+                      : t("settings.team.presenceNever")}
+                </div>
               </div>
               {canManage && member.role !== "owner" && !member.isSelf ? (
                 <>

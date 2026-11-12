@@ -1,6 +1,9 @@
 import type {
   AgentListResponse,
   AiUsageReportResponse,
+  MessageReactionResponse,
+  ReplyTimeReportResponse,
+  WhatsAppNumberHealthResponse,
   ApiKeyListResponse,
   AuditLogListResponse,
   DashboardSummaryResponse,
@@ -744,6 +747,21 @@ export const api = {
       );
     },
     /**
+     * GET /api/tenants/:tenantId/channels/:id/whatsapp-health (G13) —
+     * snapshot langsung rating kualitas + tier nomor WhatsApp dari
+     * Graph; available:false berarti Meta tidak memberi data (UI
+     * menampilkan "tidak diketahui", bukan menebak).
+     */
+    whatsappHealth(
+      tenantId: string,
+      channelId: string,
+    ): Promise<WhatsAppNumberHealthResponse> {
+      return request<WhatsAppNumberHealthResponse>(
+        `/api/tenants/${tenantId}/channels/${channelId}/whatsapp-health`,
+        { method: "GET" },
+      );
+    },
+    /**
      * GET /api/tenants/:tenantId/channels/meta-oauth-info — ketersediaan
      * OAuth Meta per provider (Fase 7D). Owner/admin saja; tidak pernah
      * membawa App Secret (App ID/config ID publik boleh tampil).
@@ -1064,6 +1082,22 @@ export const api = {
       return request<ConversationResponse>(
         `/api/tenants/${tenantId}/conversations/${conversationId}/agent`,
         { method: "POST", body: JSON.stringify({ agentEnabled }) },
+      );
+    },
+    /**
+     * POST .../conversations/:id/messages/:messageId/reaction {emoji}
+     * (G13) → ringkasan reaksi pesan sesudah penetapan. emoji null =
+     * cabut reaksi saya; provider tanpa API reaksi keluar menolak 422.
+     */
+    setReaction(
+      tenantId: string,
+      conversationId: string,
+      messageId: string,
+      emoji: string | null,
+    ): Promise<MessageReactionResponse> {
+      return request<MessageReactionResponse>(
+        `/api/tenants/${tenantId}/conversations/${conversationId}/messages/${messageId}/reaction`,
+        { method: "POST", body: JSON.stringify({ emoji }) },
       );
     },
     /**
@@ -3128,6 +3162,17 @@ export const api = {
         { method: "GET" },
       );
     },
+    /** GET /api/tenants/:tenantId/analytics/reply-times?days= → KPI waktu balas (G13). */
+    replyTimes(
+      tenantId: string,
+      days?: number,
+    ): Promise<ReplyTimeReportResponse> {
+      const qs = days !== undefined ? `?days=${days}` : "";
+      return request<ReplyTimeReportResponse>(
+        `/api/tenants/${tenantId}/analytics/reply-times${qs}`,
+        { method: "GET" },
+      );
+    },
   },
   growthLinks: {
     /** GET /api/tenants/:tenantId/growth-links → tautan + statistik (Fase 13B). */
@@ -3302,6 +3347,17 @@ export const api = {
     },
   },
   team: {
+    /**
+     * POST /api/tenants/:tenantId/team/heartbeat (G13) — detak
+     * kehadiran sesi ini; server menjinakkan tulisnya. Kegagalan
+     * ditelan pemanggil (kehadiran bukan fungsi kritis).
+     */
+    heartbeat(tenantId: string): Promise<{ ok: boolean }> {
+      return request<{ ok: boolean }>(
+        `/api/tenants/${tenantId}/team/heartbeat`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
     /** GET /api/tenants/:tenantId/team/members → member + peran (Fase 9C). */
     async listMembers(tenantId: string): Promise<TeamMemberResponse[]> {
       const body = await request<TeamMemberListResponse>(

@@ -21,6 +21,7 @@ import type {
   PinterestBoardPrivacy,
   PinterestBoardsResponse,
   ThreadsOAuthInfoResponse,
+  WhatsAppNumberHealthResponse,
 } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api, ApiClientError } from "../../api/client";
@@ -880,5 +881,123 @@ export function MetaWebhookInfoBlock({
         </p>
       ) : null}
     </>
+  );
+}
+
+/**
+ * Kesehatan nomor WhatsApp (G13 butir 5): snapshot LANGSUNG dari
+ * Graph saat kartu dirender — rating kualitas (GREEN/YELLOW/RED →
+ * chip Baik/Berisiko/Dibatasi) + tingkatan batas pesan nomor ini.
+ * Nilai yang tidak dikembalikan Meta tampil apa adanya sebagai
+ * "tidak diketahui" — tidak pernah ditebak. Tombol periksa memuat
+ * ulang snapshot (fetchedAt dari server menyatakan waktu ambilnya).
+ */
+export function WhatsAppHealthBlock({
+  t,
+  locale,
+  tenantId,
+  channelId,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  channelId: string;
+}) {
+  const [data, setData] = useState<WhatsAppNumberHealthResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setData(await api.channels.whatsappHealth(tenantId, channelId));
+    } catch {
+      setError(t("channels.waHealth.loadError"));
+    } finally {
+      setLoading(false);
+    }
+  }, [t, tenantId, channelId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const qualityChip = (rating: string) => {
+    const upper = rating.toUpperCase();
+    if (upper === "GREEN")
+      return {
+        cls: "bg-success/15 text-success",
+        label: t("channels.waHealth.qualityGreen"),
+      };
+    if (upper === "YELLOW")
+      return {
+        cls: "bg-warning/15 text-warning",
+        label: t("channels.waHealth.qualityYellow"),
+      };
+    if (upper === "RED")
+      return {
+        cls: "bg-danger/15 text-danger",
+        label: t("channels.waHealth.qualityRed"),
+      };
+    return { cls: "bg-elevated text-muted", label: rating };
+  };
+
+  return (
+    <div className="mt-3 space-y-2 border-t border-line pt-3">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium">{t("channels.waHealth.title")}</span>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading}
+          className="rounded-lg border border-line bg-surface px-2.5 py-1 text-xs font-medium text-ink hover:bg-elevated disabled:opacity-60"
+        >
+          {t("channels.waHealth.refresh")}
+        </button>
+      </div>
+      {loading && !data ? (
+        <p className="text-xs text-muted">{t("channels.waHealth.loading")}</p>
+      ) : error ? (
+        <p className="text-xs text-danger">{error}</p>
+      ) : data && !data.available ? (
+        <p className="text-xs text-muted">{t("channels.waHealth.unknown")}</p>
+      ) : data ? (
+        <div className="space-y-1.5 text-xs text-muted">
+          <div className="flex flex-wrap items-center gap-2">
+            <span>{t("channels.waHealth.qualityLabel")}:</span>
+            {data.qualityRating ? (
+              <span
+                className={`inline-flex items-center rounded-full px-2 py-0.5 font-medium ${qualityChip(data.qualityRating).cls}`}
+              >
+                {qualityChip(data.qualityRating).label} ({data.qualityRating})
+              </span>
+            ) : (
+              <span>{t("channels.waHealth.unknown")}</span>
+            )}
+            {data.messagingLimitTier ? (
+              <span className="inline-flex items-center rounded-full bg-elevated px-2 py-0.5 font-mono font-medium text-ink">
+                {t("channels.waHealth.tierLabel")}: {data.messagingLimitTier}
+              </span>
+            ) : null}
+          </div>
+          {data.throughputLevel ? (
+            <p>
+              {t("channels.waHealth.throughputLabel")}: {data.throughputLevel}
+            </p>
+          ) : null}
+          {data.nameStatus ? (
+            <p>
+              {t("channels.waHealth.nameStatusLabel")}: {data.nameStatus}
+            </p>
+          ) : null}
+          <p>
+            {t("channels.waHealth.fetchedAt", {
+              time: formatRelativeTime(data.fetchedAt, locale),
+            })}
+          </p>
+        </div>
+      ) : null}
+    </div>
   );
 }

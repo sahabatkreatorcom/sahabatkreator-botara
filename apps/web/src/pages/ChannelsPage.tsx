@@ -49,6 +49,7 @@ import {
   MetaWebhookInfoBlock,
   PinterestBoardPickerBlock,
   ProviderOAuthStepBlock,
+  WhatsAppHealthBlock,
   StatusPill,
   ThreadsOAuthStepBlock,
   type ConnectProvider,
@@ -1202,6 +1203,15 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                 {channel.provider === "pinterest" && channel.status === "connected" ? (
                   <PinterestBoardPickerBlock
                     t={t}
+                    tenantId={tenantId}
+                    channelId={channel.id}
+                  />
+                ) : null}
+
+                {channel.provider === "whatsapp" && channel.status === "connected" ? (
+                  <WhatsAppHealthBlock
+                    t={t}
+                    locale={locale}
                     tenantId={tenantId}
                     channelId={channel.id}
                   />

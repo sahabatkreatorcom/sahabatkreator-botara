@@ -20,6 +20,7 @@ import {
 } from "./navigation/registry";
 import { saveReturnTo } from "./navigation/returnTo";
 import { AuthProvider, useAuth } from "./auth/AuthProvider";
+import { PresenceHeartbeat } from "./components/PresenceHeartbeat";
 import { WorkspaceProvider } from "./workspace/WorkspaceProvider";
 import { Sidebar } from "./components/Sidebar";
 import { BrandLogo } from "./components/BrandLogo";
@@ -198,6 +199,7 @@ function Shell({ t, locale, controls, path, onNavigateTo, onReplaceTo }: ShellPr
 
   return (
     <WorkspaceProvider>
+      <PresenceHeartbeat />
       <UnreadBadgeProvider>
         <PendingApprovalsProvider>
           <ShellMain

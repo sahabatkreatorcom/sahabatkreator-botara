@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FailedMessageResponse } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api, ApiClientError } from "../api/client";
-import { translateApiError } from "../api/errorText";
+import { translateApiError, translateMessageError } from "../api/errorText";
 import { inputClassName } from "../components/AuthLayout";
 import { usePolling } from "../hooks/usePolling";
 import { formatDateTime } from "../utils/format";
@@ -233,7 +233,10 @@ export function FailedMessagesPanel({ t, locale }: FailedMessagesPanelProps) {
               {m.contentPreview ?? ""}
             </span>
             {m.errorCode ? (
-              <span className="inline-flex shrink-0 items-center rounded-full bg-danger/10 px-2 py-0.5 font-mono text-xs font-medium text-danger">
+              <span
+                title={translateMessageError(t, m.errorCode) ?? undefined}
+                className="inline-flex shrink-0 items-center rounded-full bg-danger/10 px-2 py-0.5 font-mono text-xs font-medium text-danger"
+              >
                 {m.errorCode}
               </span>
             ) : null}
@@ -285,13 +288,41 @@ export function FailedMessagesPanel({ t, locale }: FailedMessagesPanelProps) {
               </button>
             </div>
             <p className="mt-3 text-sm text-muted">{t("logs.retryBody")}</p>
-            {retryTarget.errorCode ? (
-              <p className="mt-3 text-sm text-muted">
-                {t("logs.errorCodeLabel")}:{" "}
-                <span className="font-mono text-danger">
-                  {retryTarget.errorCode}
-                </span>
+            {translateMessageError(t, retryTarget.errorCode) ? (
+              <p className="mt-3 rounded-lg bg-elevated px-3 py-2 text-sm text-ink">
+                {translateMessageError(t, retryTarget.errorCode)}
               </p>
+            ) : null}
+            {retryTarget.errorCode || retryTarget.errorDetail ? (
+              <div className="mt-3 rounded-lg border border-line px-3 py-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted">
+                  {t("logs.technicalTitle")}
+                </p>
+                {retryTarget.errorCode ? (
+                  <p className="mt-1 text-sm text-muted">
+                    {t("logs.errorCodeLabel")}:{" "}
+                    <span className="font-mono text-danger">
+                      {retryTarget.errorCode}
+                    </span>
+                  </p>
+                ) : null}
+                {retryTarget.errorDetail?.description ? (
+                  <p className="mt-1 text-sm text-muted">
+                    {t("logs.errorDescriptionLabel")}:{" "}
+                    <span className="text-ink">
+                      {retryTarget.errorDetail.description}
+                    </span>
+                  </p>
+                ) : null}
+                {retryTarget.errorDetail?.fbtraceId ? (
+                  <p className="mt-1 text-sm text-muted">
+                    {t("logs.fbtraceLabel")}:{" "}
+                    <span className="font-mono text-ink">
+                      {retryTarget.errorDetail.fbtraceId}
+                    </span>
+                  </p>
+                ) : null}
+              </div>
             ) : null}
             {retryError ? (
               <p className="mt-3 rounded-lg bg-danger/10 px-3 py-2 text-sm text-danger">

@@ -17,10 +17,14 @@ import type {
   TeamMemberResponse,
   WhatsAppTemplateResponse,
 } from "@sahabat-kreator/contracts";
+import {
+  MESSAGE_REACTION_EMOJIS,
+  PROVIDER_REACTION_SUPPORTED,
+} from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { api, ApiClientError, mediaUrl } from "../api/client";
 import { useAuth } from "../auth/AuthProvider";
-import { translateApiError } from "../api/errorText";
+import { translateApiError, translateMessageError } from "../api/errorText";
 import { FieldError, inputClassName } from "../components/AuthLayout";
 import { Avatar } from "../components/Avatar";
 import {
@@ -113,6 +117,20 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     useState<MediaUploadResponse | null>(null);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  // G13 butir 10: perekam catatan suara sisi klien (MediaRecorder).
+  // Hasil rekaman menjadi File lalu naik lewat jalur unggah media
+  // yang sama dengan lampiran berkas — tidak ada jalur kirim khusus.
+  const [recording, setRecording] = useState(false);
+  const [recordSeconds, setRecordSeconds] = useState(0);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recordChunksRef = useRef<Blob[]>([]);
+  const recordDiscardRef = useRef(false);
+  const recordTimerRef = useRef<number | null>(null);
+  const voiceSupported =
+    typeof navigator !== "undefined" &&
+    !!navigator.mediaDevices?.getUserMedia &&
+    typeof MediaRecorder !== "undefined";
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
 
@@ -136,6 +154,14 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
   // (chip di atas composer) + id pesan yang sedang disorot sesaat
   // setelah lompat dari klik blok kutipan.
   const [quoteTarget, setQuoteTarget] = useState<MessageResponse | null>(null);
+  // G13 butir 11: pemilih reaksi yang sedang terbuka + pesan yang
+  // reaksi terakhirnya gagal (kesalahan tampil di bawah pesan itu).
+  const [reactionPickerFor, setReactionPickerFor] = useState<string | null>(
+    null,
+  );
+  const [reactionErrorFor, setReactionErrorFor] = useState<string | null>(
+    null,
+  );
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   const highlightTimerRef = useRef<number | null>(null);
 
@@ -496,6 +522,48 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     [tenantId, t],
   );
 
+  // G13 butir 4: ambil alih percakapan dari AI — tugaskan ke saya
+  // (bila belum) lalu jeda AI, dua-duanya lewat mekanisme yang sudah
+  // ada (penugasan + POST .../agent). Menyerahkan kembali cukup
+  // menyalakan AI lagi; penugasan sengaja tidak diubah.
+  const handleTakeOver = useCallback(async () => {
+    if (!tenantId || !selectedId) return;
+    const selfId = members.find((m) => m.isSelf)?.userId ?? null;
+    const current = conversations.find((c) => c.id === selectedId) ?? null;
+    if (selfId && current && current.assigneeUserId !== selfId) {
+      await handleAssign(selectedId, selfId);
+    }
+    await handleAgentToggle(selectedId, false);
+  }, [tenantId, selectedId, members, conversations, handleAssign, handleAgentToggle]);
+
+  // G13 butir 11: tetapkan/cabut reaksi saya pada satu pesan. Server
+  // mengirim ke provider DULU baru menyimpan — bila provider menolak,
+  // tidak ada yang berubah dan kesalahan tampil di bawah pesan.
+  // Ringkasan balikan server menggantikan chip pesan itu apa adanya.
+  const handleReaction = useCallback(
+    async (msg: MessageResponse, emoji: string) => {
+      if (!tenantId || !selectedId) return;
+      setReactionErrorFor(null);
+      try {
+        const res = await api.conversations.setReaction(
+          tenantId,
+          selectedId,
+          msg.id,
+          emoji,
+        );
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === msg.id ? { ...m, reactions: res.reactions } : m,
+          ),
+        );
+        setReactionPickerFor(null);
+      } catch {
+        setReactionErrorFor(msg.id);
+      }
+    },
+    [tenantId, selectedId],
+  );
+
   // Fase 9C: catatan internal — dimuat saat percakapan berganti (tab
   // Catatan langsung siap) dan direset bersama pilihan.
   const loadNotes = useCallback(
@@ -807,6 +875,96 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
     }
   };
 
+  // G13 butir 10: mulai rekam — mime dipilih dari yang didukung
+  // browser, Ogg/Opus diutamakan (format suara WhatsApp); peramban
+  // yang hanya bisa WebM tetap bisa merekam dan hasilnya dikirim
+  // sebagai lampiran audio apa adanya.
+  const startRecording = async () => {
+    if (!tenantId || recording) return;
+    setVoiceError(null);
+    setSendError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: true,
+      });
+      const mimeType = [
+        "audio/ogg;codecs=opus",
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+      ].find((m) => MediaRecorder.isTypeSupported(m));
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined,
+      );
+      recordChunksRef.current = [];
+      recordDiscardRef.current = false;
+      recorder.ondataavailable = (ev) => {
+        if (ev.data.size > 0) recordChunksRef.current.push(ev.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        if (recordTimerRef.current !== null) {
+          window.clearInterval(recordTimerRef.current);
+          recordTimerRef.current = null;
+        }
+        recorderRef.current = null;
+        setRecording(false);
+        if (recordDiscardRef.current) return;
+        const type = recorder.mimeType || mimeType || "audio/webm";
+        const ext = type.includes("ogg")
+          ? "ogg"
+          : type.includes("mp4")
+            ? "m4a"
+            : "webm";
+        const blob = new Blob(recordChunksRef.current, { type });
+        if (blob.size === 0) return;
+        const file = new File([blob], `voice-${Date.now()}.${ext}`, {
+          type,
+        });
+        setUploading(true);
+        void (async () => {
+          try {
+            const uploaded = await api.media.upload(tenantId, file);
+            setPendingAttachment(uploaded);
+          } catch (err) {
+            setSendError(translateApiError(t, err));
+          } finally {
+            setUploading(false);
+          }
+        })();
+      };
+      recorderRef.current = recorder;
+      recorder.start();
+      setRecordSeconds(0);
+      setRecording(true);
+      recordTimerRef.current = window.setInterval(
+        () => setRecordSeconds((s) => s + 1),
+        1000,
+      );
+    } catch (err) {
+      setVoiceError(
+        err instanceof DOMException && err.name === "NotAllowedError"
+          ? t("inbox.voice.permissionError")
+          : t("inbox.voice.recordError"),
+      );
+    }
+  };
+
+  const stopRecording = (discard: boolean) => {
+    recordDiscardRef.current = discard;
+    recorderRef.current?.stop();
+  };
+
+  // Berpindah percakapan di tengah rekaman = buang rekaman (mikrofon
+  // tidak boleh tertinggal menyala untuk percakapan lain).
+  useEffect(() => {
+    if (recorderRef.current && recorderRef.current.state !== "inactive") {
+      recordDiscardRef.current = true;
+      recorderRef.current.stop();
+    }
+  }, [selectedId]);
+
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     const content = draft.trim();
@@ -893,6 +1051,13 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
 
   const selected =
     conversations.find((c) => c.id === selectedId) ?? null;
+
+  // G13 butir 11: reaksi keluar hanya untuk provider yang API-nya
+  // mendukung (WhatsApp + Telegram — peta kemampuan di kontrak);
+  // provider lain tidak menampilkan kontrol sama sekali.
+  const reactionsSupported =
+    selected !== null &&
+    PROVIDER_REACTION_SUPPORTED[selected.provider] === true;
 
   /**
    * Fase 16C: jendela pesan bebas tertutup (WhatsApp > 24 jam sejak pesan
@@ -1363,6 +1528,65 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                   </div>
                 </div>
 
+                {/* G13 butir 4: banner ambil-alih AI — status AI
+                    percakapan ini selalu terlihat; kontrolnya memakai
+                    mekanisme yang sudah ada (POST .../agent +
+                    penugasan), bukan status baru. Ambil alih =
+                    tugaskan ke saya + jeda AI; serahkan = nyalakan AI
+                    lagi (penugasan tidak diubah). */}
+                <div
+                  className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm ${
+                    selected.agentEnabled
+                      ? "bg-accent/10 text-ink"
+                      : "bg-warning/10 text-ink"
+                  }`}
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="font-semibold">
+                      {selected.agentEnabled
+                        ? t("inbox.takeover.aiActiveTitle")
+                        : t("inbox.takeover.humanTitle")}
+                    </span>{" "}
+                    <span className="text-muted">
+                      {selected.agentEnabled
+                        ? t("inbox.takeover.aiActiveBody")
+                        : selected.assigneeUserId
+                          ? t("inbox.takeover.humanBodyAssigned", {
+                              name:
+                                members.find(
+                                  (m) => m.userId === selected.assigneeUserId,
+                                )?.name ?? "—",
+                            })
+                          : t("inbox.takeover.humanBodyUnassigned")}
+                    </span>
+                  </span>
+                  {selected.agentEnabled ? (
+                    <button
+                      type="button"
+                      disabled={agentSaving}
+                      onClick={() => void handleTakeOver()}
+                      className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {agentSaving
+                        ? t("inbox.takeover.updating")
+                        : t("inbox.takeover.takeOverButton")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={agentSaving}
+                      onClick={() =>
+                        void handleAgentToggle(selected.id, true)
+                      }
+                      className="shrink-0 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-semibold text-ink disabled:opacity-60"
+                    >
+                      {agentSaving
+                        ? t("inbox.takeover.updating")
+                        : t("inbox.takeover.resumeButton")}
+                    </button>
+                  )}
+                </div>
+
                 {/* Fase 9C: tab panel — Pesan | Catatan internal */}
                 <div className="flex gap-1 border-b border-line bg-surface px-4 pt-2">
                   {(
@@ -1687,7 +1911,43 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                                 )
                               ) : null}
                             </div>
+                            {/* G13 butir 6: penjelasan bahasa awam
+                                kegagalan pada pesan gagal — kode mentah
+                                tetap di panel pesan gagal sbg detail
+                                teknis. */}
+                            {outbound &&
+                            msg.status === "failed" &&
+                            translateMessageError(t, msg.errorCode) ? (
+                              <p className="mt-1 rounded-md bg-black/20 px-1.5 py-1 text-[11px] leading-snug text-white">
+                                {t("inbox.failedReason", {
+                                  reason: translateMessageError(t, msg.errorCode) ?? "",
+                                })}
+                              </p>
+                            ) : null}
                           </div>
+                          {/* G13 butir 11: chip reaksi di bawah gelembung;
+                              klik chip = tetapkan/cabut reaksi saya. */}
+                          {msg.reactions.length > 0 ? (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {msg.reactions.map((r) => (
+                                <button
+                                  key={r.emoji}
+                                  type="button"
+                                  disabled={!reactionsSupported}
+                                  onClick={() => void handleReaction(msg, r.emoji)}
+                                  className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] ${
+                                    r.mine
+                                      ? "border-accent bg-accent/15 text-ink"
+                                      : "border-line bg-surface text-muted"
+                                  }`}
+                                >
+                                  <span>{r.emoji}</span>
+                                  <span>{r.count}</span>
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          <div className="flex items-center gap-1">
                           <button
                             type="button"
                             onClick={() => setQuoteTarget(msg)}
@@ -1695,6 +1955,41 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                           >
                             ↩ {t("inbox.replyWithQuote")}
                           </button>
+                          {reactionsSupported ? (
+                            <button
+                              type="button"
+                              aria-label={t("inbox.reaction.addLabel")}
+                              title={t("inbox.reaction.addLabel")}
+                              onClick={() =>
+                                setReactionPickerFor((cur) =>
+                                  cur === msg.id ? null : msg.id,
+                                )
+                              }
+                              className="mt-1 px-1 text-[11px] font-medium text-muted opacity-0 transition-opacity hover:text-accent focus-visible:opacity-100 group-hover:opacity-100"
+                            >
+                              ☺+
+                            </button>
+                          ) : null}
+                          </div>
+                          {reactionsSupported && reactionPickerFor === msg.id ? (
+                            <div className="mt-1 flex gap-1 rounded-full border border-line bg-surface px-2 py-1 shadow-sm">
+                              {MESSAGE_REACTION_EMOJIS.map((emoji) => (
+                                <button
+                                  key={emoji}
+                                  type="button"
+                                  onClick={() => void handleReaction(msg, emoji)}
+                                  className="rounded-full px-1 text-base hover:bg-elevated"
+                                >
+                                  {emoji}
+                                </button>
+                              ))}
+                            </div>
+                          ) : null}
+                          {reactionErrorFor === msg.id ? (
+                            <p className="mt-1 text-[11px] text-danger">
+                              {t("inbox.reaction.failed")}
+                            </p>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -2185,6 +2480,31 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                       </button>
                     </div>
                   ) : null}
+                  {recording ? (
+                    <div className="mb-1 flex items-center gap-2 rounded-lg bg-danger/10 px-2 py-1 text-xs text-ink">
+                      <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-danger" />
+                      <span className="flex-1">
+                        {t("inbox.voice.recording", { seconds: recordSeconds })}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => stopRecording(false)}
+                        className="shrink-0 rounded bg-accent px-2 py-1 font-medium text-white"
+                      >
+                        {t("inbox.voice.stopButton")}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => stopRecording(true)}
+                        className="shrink-0 rounded px-2 py-1 font-medium text-muted hover:text-ink"
+                      >
+                        {t("inbox.voice.discardButton")}
+                      </button>
+                    </div>
+                  ) : null}
+                  {voiceError ? (
+                    <p className="mb-1 text-xs text-danger">{voiceError}</p>
+                  ) : null}
                   <div className="flex items-end gap-2">
                     <input
                       ref={fileInputRef}
@@ -2201,6 +2521,22 @@ export function InboxPage({ t, locale, conversationId, onConversationChange }: I
                     >
                       {uploading ? t("inbox.attaching") : t("inbox.attachButton")}
                     </button>
+                    {!recording ? (
+                      <button
+                        type="button"
+                        disabled={uploading || windowClosed || !voiceSupported}
+                        onClick={() => void startRecording()}
+                        title={
+                          voiceSupported
+                            ? t("inbox.voice.recordButton")
+                            : t("inbox.voice.unsupported")
+                        }
+                        aria-label={t("inbox.voice.recordButton")}
+                        className="shrink-0 rounded-lg bg-elevated px-3 py-2 text-sm font-medium text-ink disabled:opacity-60"
+                      >
+                        🎤
+                      </button>
+                    ) : null}
                     <textarea
                       value={draft}
                       disabled={windowClosed}

@@ -48,6 +48,7 @@ const INLINE_SAFE = new Set([
   "audio/mp4",
   "audio/aac",
   "audio/amr",
+  "audio/webm",
   "video/mp4",
   "video/3gpp",
 ]);

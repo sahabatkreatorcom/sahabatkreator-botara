@@ -1,4 +1,5 @@
 import type { TranslationKey } from "@sahabat-kreator/i18n";
+import { messageErrorI18nKey } from "@sahabat-kreator/contracts";
 import { ApiClientError } from "./client";
 
 type Translate = (
@@ -214,4 +215,18 @@ export function translateApiError(t: Translate, err: unknown): string {
   if (err.status === 400 || err.status === 422)
     return t("errors.VALIDATION_ERROR");
   return t("errors.generic");
+}
+
+/**
+ * G13 butir 6: penjelasan bahasa awam untuk kode error pengiriman
+ * yang tersimpan pada pesan gagal. Pemetaan kode → kunci i18n murni
+ * ada di kontrak (`messageErrorI18nKey`); di sini hanya penerjemahan.
+ * Kode kosong → null (UI menampilkan label gagal generik saja).
+ */
+export function translateMessageError(
+  t: Translate,
+  errorCode: string | null | undefined,
+): string | null {
+  if (!errorCode) return null;
+  return t(messageErrorI18nKey(errorCode) as TranslationKey);
 }

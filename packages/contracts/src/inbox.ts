@@ -670,6 +670,13 @@ export const MEDIA_UPLOAD_ALLOWED_MIME = [
   "audio/mp4",
   "audio/aac",
   "audio/amr",
+  // G13 butir 10: hasil MediaRecorder Chrome hanya tersedia sebagai
+  // WebM/Opus — tanpa entri ini perekam suara tidak bisa mengunggah
+  // sama sekali di Chrome. Provider yang tidak menerima WebM (mis.
+  // WhatsApp) menolaknya saat KIRIM dan pesan masuk panel gagal
+  // dengan penjelasan — keadaan itu dinyatakan apa adanya, bukan
+  // disembunyikan dengan menolak unggahannya di sini.
+  "audio/webm",
   "application/pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import type { AiUsageReportResponse } from "@sahabat-kreator/contracts";
+import type {
+  AiUsageReportResponse,
+  ReplyTimeReportResponse,
+} from "@sahabat-kreator/contracts";
 import {
   formatNumber,
   type Locale,
@@ -260,6 +263,141 @@ export function AnalyticsPage({ t, locale }: AnalyticsPageProps) {
           </div>
         </>
       ) : null}
+
+      {tenantId ? (
+        <ReplyTimeSection t={t} tenantId={tenantId} days={days} />
+      ) : null}
     </section>
+  );
+}
+
+/** Format durasi median jadi teks ringkas yang bisa dibaca manusia. */
+function formatDuration(totalSeconds: number): string {
+  const seconds = Math.round(totalSeconds);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ${minutes % 60}m`;
+  return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+/**
+ * KPI waktu balas (G13 butir 8) — bagian mandiri di bawah laporan
+ * pemakaian AI: median waktu balas manusia vs AI untuk periode yang
+ * dipilih, dibandingkan periode sebelumnya yang sama panjang.
+ * Dimuat terpisah dari laporan AI agar kegagalannya tidak menyembunyikan
+ * bagian lain; definisi jujurnya (hanya balasan yang terjadi yang
+ * dihitung, bukan SLA) tertulis di subjudul.
+ */
+function ReplyTimeSection({
+  t,
+  tenantId,
+  days,
+}: {
+  t: Translate;
+  tenantId: string;
+  days: number;
+}) {
+  const [data, setData] = useState<ReplyTimeReportResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    void (async () => {
+      try {
+        const body = await api.analytics.replyTimes(tenantId, days);
+        if (!cancelled) setData(body);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, days]);
+
+  const cell = (
+    label: string,
+    stat: { medianSeconds: number | null; samples: number },
+    previous: { medianSeconds: number | null; samples: number },
+  ) => {
+    let delta: string | null = null;
+    if (
+      stat.medianSeconds !== null &&
+      previous.medianSeconds !== null &&
+      previous.medianSeconds > 0
+    ) {
+      const pct = Math.round(
+        ((stat.medianSeconds - previous.medianSeconds) /
+          previous.medianSeconds) *
+          100,
+      );
+      delta =
+        pct === 0
+          ? t("analytics.replyTime.same")
+          : pct < 0
+            ? t("analytics.replyTime.faster", { pct: Math.abs(pct) })
+            : t("analytics.replyTime.slower", { pct });
+    }
+    return (
+      <div className="rounded-xl border border-line bg-surface p-4">
+        <p className="text-xs font-medium text-muted">{label}</p>
+        {stat.medianSeconds !== null ? (
+          <>
+            <p className="mt-1 text-2xl font-bold text-ink">
+              {formatDuration(stat.medianSeconds)}
+            </p>
+            <p className="mt-1 text-xs text-muted">
+              {t("analytics.replyTime.samplesLabel", { count: stat.samples })}
+            </p>
+            {previous.medianSeconds !== null ? (
+              <p className="mt-1 text-xs text-muted">
+                {t("analytics.replyTime.previousLabel", {
+                  value: formatDuration(previous.medianSeconds),
+                })}
+                {delta ? <> · {delta}</> : null}
+              </p>
+            ) : null}
+          </>
+        ) : (
+          <p className="mt-1 text-sm text-muted">
+            {t("analytics.replyTime.noSamples")}
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-base font-semibold text-ink">
+        {t("analytics.replyTime.title")}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        {t("analytics.replyTime.subtitle")}
+      </p>
+      {failed ? (
+        <p className="mt-3 text-sm text-danger">
+          {t("analytics.replyTime.loadError")}
+        </p>
+      ) : data ? (
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {cell(
+            t("analytics.replyTime.humanLabel"),
+            data.human.current,
+            data.human.previous,
+          )}
+          {cell(
+            t("analytics.replyTime.agentLabel"),
+            data.agent.current,
+            data.agent.previous,
+          )}
+        </div>
+      ) : (
+        <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
+      )}
+    </div>
   );
 }

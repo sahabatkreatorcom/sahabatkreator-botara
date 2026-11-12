@@ -241,6 +241,59 @@ export function DashboardPage({ t, locale }: DashboardPageProps) {
             <p className="mt-6 text-sm text-muted">{t("dashboard.loadingSummary")}</p>
           ) : (
             <>
+              {/* ---- Checklist penyiapan (G13) --------------------------
+                  Hanya tampil selama ada langkah yang belum selesai;
+                  keadaan berasal dari data nyata server (summary.setup),
+                  jadi kartu hilang sendiri begitu semua beres — tidak
+                  ada status "sudah ditutup" yang disimpan. */}
+              {!summary.setup.allDone ? (
+                <section className="mt-8 rounded-xl border border-line bg-surface p-5">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <h2 className="text-base font-semibold text-ink">
+                      {t("dashboard.setup.title")}
+                    </h2>
+                    <span className="text-xs text-muted">
+                      {t("dashboard.setup.progress", {
+                        done: summary.setup.completedCount,
+                        total: summary.setup.totalCount,
+                      })}
+                    </span>
+                  </div>
+                  <ul className="mt-4 space-y-3">
+                    {summary.setup.steps.map((step) => (
+                      <li key={step.key} className="flex items-start gap-3">
+                        <span
+                          aria-hidden
+                          className={
+                            step.done
+                              ? "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-success/15 text-xs font-bold text-success"
+                              : "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-line text-xs text-muted"
+                          }
+                        >
+                          {step.done ? "✓" : ""}
+                        </span>
+                        <span className="min-w-0">
+                          <span
+                            className={
+                              step.done
+                                ? "block text-sm font-medium text-muted line-through"
+                                : "block text-sm font-medium text-ink"
+                            }
+                          >
+                            {t(`dashboard.setup.${step.key}` as TranslationKey)}
+                          </span>
+                          <span className="block text-xs text-muted">
+                            {t(
+                              `dashboard.setup.${step.key}Hint` as TranslationKey,
+                            )}
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </section>
+              ) : null}
+
               {/* ---- Butuh perhatian ------------------------------------ */}
               <h2 className="mt-8 text-sm font-semibold uppercase tracking-wide text-muted">
                 {t("dashboard.attentionTitle")}

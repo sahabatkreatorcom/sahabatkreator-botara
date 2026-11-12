@@ -114,6 +114,7 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "audio/mp4": "m4a",
   "audio/aac": "aac",
   "audio/amr": "amr",
+  "audio/webm": "webm",
   "application/pdf": "pdf",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
