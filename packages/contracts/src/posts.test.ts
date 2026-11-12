@@ -145,6 +145,50 @@ describe("capability post per provider", () => {
     expect(getPostProviderCapability("instagram")?.mediaRequired).toBe(true);
   });
 
+  it("opsi per postingan: hanya youtube & tiktok yang punya pilihan privasi/AI untuk dipilih pengguna", () => {
+    // Gelombang Pilihan Privasi & AI per Postingan: permukaan opsi
+    // inilah yang menggambar sub-formulir /posts dan yang ditegakkan
+    // core saat penjadwalan — provider lain TIDAK boleh menjanjikan
+    // pilihan yang tidak dikenal platformnya.
+    const youtube = getPostProviderCapability("youtube")!;
+    expect(youtube.publishOptions.privacyValues).toEqual([
+      "private",
+      "unlisted",
+      "public",
+    ]);
+    expect(youtube.publishOptions.supportsAiDisclosure).toBe(true);
+    expect(youtube.publishOptions.supportsMadeForKids).toBe(true);
+    expect(youtube.publishOptions.supportsInteractions).toBe(false);
+    expect(youtube.publishOptions.supportsCommercialDisclosure).toBe(false);
+
+    const tiktok = getPostProviderCapability("tiktok")!;
+    expect(tiktok.publishOptions.privacyValues).toEqual([
+      "PUBLIC_TO_EVERYONE",
+      "MUTUAL_FOLLOW_FRIENDS",
+      "FOLLOWER_OF_CREATOR",
+      "SELF_ONLY",
+    ]);
+    expect(tiktok.publishOptions.supportsAiDisclosure).toBe(true);
+    expect(tiktok.publishOptions.supportsMadeForKids).toBe(false);
+    expect(tiktok.publishOptions.supportsInteractions).toBe(true);
+    expect(tiktok.publishOptions.supportsCommercialDisclosure).toBe(true);
+
+    for (const provider of [
+      "telegram",
+      "instagram",
+      "messenger",
+      "threads",
+      "bluesky",
+      "linkedin",
+      "pinterest",
+      "google_business",
+    ] as const) {
+      const capability = getPostProviderCapability(provider)!;
+      expect(capability.publishOptions.privacyValues).toEqual([]);
+      expect(capability.publishOptions.supportsAiDisclosure).toBe(false);
+    }
+  });
+
   it("langit-langit skema permintaan mengikuti capability paling longgar", () => {
     expect(POST_CAPTION_HARD_MAX).toBe(
       Math.max(

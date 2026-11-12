@@ -216,6 +216,11 @@ export const ErrorCodeSchema = z.enum([
   "POST_MEDIA_REQUIRED",
   "POST_MEDIA_TOO_MANY",
   "POST_MEDIA_KIND_UNSUPPORTED",
+  // Gelombang Pilihan Privasi & AI per Postingan: pilihan penerbitan
+  // yang diwajibkan platform (privasi + pengungkapan AI) belum dibuat
+  // pengguna, atau kombinasinya tidak sah (konten bermerek privat).
+  "POST_PUBLISH_OPTIONS_REQUIRED",
+  "POST_PUBLISH_OPTIONS_INVALID",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",
