@@ -43,6 +43,7 @@ import type {
   ScheduleBroadcastRequest,
   UpdateBroadcastRequest,
   CreateWhatsAppTemplateRequest,
+  UpdateWhatsAppTemplateRequest,
   SyncWhatsAppTemplatesResponse,
   WhatsAppTemplateListResponse,
   WhatsAppTemplateResponse,
@@ -2490,6 +2491,17 @@ export const api = {
       return request<WhatsAppTemplateResponse>(
         `/api/tenants/${tenantId}/whatsapp-templates`,
         { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH /api/tenants/:tenantId/whatsapp-templates/:id → perbaiki template REJECTED di Meta + cermin (owner/admin, G10). */
+    update(
+      tenantId: string,
+      templateId: string,
+      input: UpdateWhatsAppTemplateRequest,
+    ): Promise<WhatsAppTemplateResponse> {
+      return request<WhatsAppTemplateResponse>(
+        `/api/tenants/${tenantId}/whatsapp-templates/${templateId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
       );
     },
     /** DELETE /api/tenants/:tenantId/whatsapp-templates/:id → hapus di Meta + cermin (owner/admin). */

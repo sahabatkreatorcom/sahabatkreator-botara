@@ -1,6 +1,7 @@
 /**
  * Seksi Template WhatsApp (Fase 10A) — cermin lokal template resmi Meta
  * per akun WhatsApp: sinkron dari Meta, buat baru (formulir sederhana),
+ * perbaiki template REJECTED (G10, formulir yang sama terisi awal),
  * hapus (dua langkah). Sengaja tinggal di halaman Broadcasts karena
  * konsumen utamanya adalah broadcast; Channels tetap halaman koneksi.
  */
@@ -8,6 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import type {
   ChannelAccountResponse,
   CreateWhatsAppTemplateRequest,
+  UpdateWhatsAppTemplateRequest,
   WhatsAppTemplateResponse,
 } from "@sahabat-kreator/contracts";
 import { api } from "../../api/client";
@@ -27,6 +29,80 @@ export interface TemplateButtonDraft {
   url: string;
 }
 
+type RawComponent = Record<string, unknown>;
+
+function componentText(comp: RawComponent | undefined): string {
+  return typeof comp?.text === "string" ? comp.text : "";
+}
+
+/**
+ * Apakah template bisa diwakili formulir sederhana ini (G10)? Hanya
+ * bila komponennya HEADER teks polos (tanpa variabel), BODY, FOOTER,
+ * dan tombol URL/QUICK_REPLY (maks 3). Template dengan header media
+ * atau tombol jenis lain tidak ditawari tombol Perbaiki — memaksanya
+ * lewat formulir ini akan membuang komponen yang tidak terbaca.
+ */
+export function isFormEditableTemplate(tpl: WhatsAppTemplateResponse): boolean {
+  const comps = tpl.components as RawComponent[];
+  let hasBody = false;
+  for (const comp of comps) {
+    if (comp.type === "BODY") {
+      hasBody = true;
+    } else if (comp.type === "HEADER") {
+      if (comp.format !== undefined && comp.format !== "TEXT") return false;
+      if (/\{\{\d+\}\}/.test(componentText(comp))) return false;
+    } else if (comp.type === "FOOTER") {
+      // teks polos — selalu terwakili
+    } else if (comp.type === "BUTTONS") {
+      const buttons = Array.isArray(comp.buttons)
+        ? (comp.buttons as RawComponent[])
+        : null;
+      if (!buttons || buttons.length > 3) return false;
+      if (buttons.some((b) => b.type !== "URL" && b.type !== "QUICK_REPLY")) {
+        return false;
+      }
+    } else {
+      return false;
+    }
+  }
+  return hasBody;
+}
+
+/** Isi awal formulir perbaiki dari komponen Meta apa adanya. */
+function prefillFromTemplate(tpl: WhatsAppTemplateResponse): {
+  header: string;
+  body: string;
+  examples: string;
+  footer: string;
+  buttons: TemplateButtonDraft[];
+} {
+  const comps = tpl.components as RawComponent[];
+  const header = comps.find((c) => c.type === "HEADER");
+  const body = comps.find((c) => c.type === "BODY");
+  const footer = comps.find((c) => c.type === "FOOTER");
+  const buttonsComp = comps.find((c) => c.type === "BUTTONS");
+  const example = (body?.example ?? null) as {
+    body_text?: string[][];
+  } | null;
+  const exampleRow = example?.body_text?.[0];
+  const buttons = (
+    Array.isArray(buttonsComp?.buttons)
+      ? (buttonsComp.buttons as RawComponent[])
+      : []
+  ).map((b) => ({
+    type: (b.type === "URL" ? "URL" : "QUICK_REPLY") as "URL" | "QUICK_REPLY",
+    text: typeof b.text === "string" ? b.text : "",
+    url: typeof b.url === "string" ? b.url : "",
+  }));
+  return {
+    header: componentText(header),
+    body: componentText(body),
+    examples: Array.isArray(exampleRow) ? exampleRow.join(", ") : "",
+    footer: componentText(footer),
+    buttons,
+  };
+}
+
 export function WhatsAppTemplatesSection({
   t,
   tenantId,
@@ -44,6 +120,8 @@ export function WhatsAppTemplatesSection({
     null,
   );
   const [showForm, setShowForm] = useState(false);
+  /** Id template REJECTED yang sedang diperbaiki (null = mode buat). */
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   // Keadaan formulir buat template.
   const [tplName, setTplName] = useState("");
@@ -119,6 +197,39 @@ export function WhatsAppTemplatesSection({
     }
   };
 
+  const resetForm = () => {
+    setShowForm(false);
+    setEditingId(null);
+    setTplName("");
+    setTplHeader("");
+    setTplBody("");
+    setTplExamples("");
+    setTplFooter("");
+    setTplButtons([]);
+  };
+
+  /** Buka formulir dalam mode perbaiki untuk satu template REJECTED. */
+  const startEdit = (tpl: WhatsAppTemplateResponse) => {
+    const prefill = prefillFromTemplate(tpl);
+    setTplName(tpl.name);
+    setTplLanguage(tpl.language);
+    setTplCategory(
+      tpl.category === "MARKETING" || tpl.category === "AUTHENTICATION"
+        ? tpl.category
+        : "UTILITY",
+    );
+    setTplHeader(prefill.header);
+    setTplBody(prefill.body);
+    setTplExamples(prefill.examples);
+    setTplFooter(prefill.footer);
+    setTplButtons(prefill.buttons);
+    setEditingId(tpl.id);
+    setConfirmingDelete(null);
+    setError(null);
+    setNotice(null);
+    setShowForm(true);
+  };
+
   const create = async () => {
     if (!tenantId || !channelAccountId || busy) return;
     setBusy(true);
@@ -129,10 +240,7 @@ export function WhatsAppTemplatesSection({
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
-      const input: CreateWhatsAppTemplateRequest = {
-        channelAccountId,
-        name: tplName.trim(),
-        language: tplLanguage.trim(),
+      const formFields = {
         category: tplCategory,
         bodyText: tplBody.trim(),
         ...(tplHeader.trim() ? { headerText: tplHeader.trim() } : {}),
@@ -148,15 +256,23 @@ export function WhatsAppTemplatesSection({
             }
           : {}),
       };
-      await api.whatsappTemplates.create(tenantId, input);
-      setNotice(t("whatsappTemplates.createdNote"));
-      setShowForm(false);
-      setTplName("");
-      setTplHeader("");
-      setTplBody("");
-      setTplExamples("");
-      setTplFooter("");
-      setTplButtons([]);
+      if (editingId) {
+        // Mode perbaiki: nama & bahasa tidak dikirim (tidak bisa diubah
+        // di Meta); server menegakkan status harus REJECTED.
+        const input: UpdateWhatsAppTemplateRequest = formFields;
+        await api.whatsappTemplates.update(tenantId, editingId, input);
+        setNotice(t("whatsappTemplates.updatedNote"));
+      } else {
+        const input: CreateWhatsAppTemplateRequest = {
+          channelAccountId,
+          name: tplName.trim(),
+          language: tplLanguage.trim(),
+          ...formFields,
+        };
+        await api.whatsappTemplates.create(tenantId, input);
+        setNotice(t("whatsappTemplates.createdNote"));
+      }
+      resetForm();
       await loadTemplates(channelAccountId);
     } catch (err) {
       setError(translateApiError(t, err));
@@ -240,7 +356,10 @@ export function WhatsAppTemplatesSection({
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowForm((v) => !v)}
+                  onClick={() => {
+                    if (showForm) resetForm();
+                    else setShowForm(true);
+                  }}
                   className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover"
                 >
                   {t("whatsappTemplates.createAction")}
@@ -263,7 +382,9 @@ export function WhatsAppTemplatesSection({
           {showForm && canManage ? (
             <div className="mt-5 max-w-2xl space-y-4 rounded-xl border border-border bg-surface p-4">
               <h3 className="text-sm font-semibold text-ink">
-                {t("whatsappTemplates.formTitle")}
+                {editingId
+                  ? t("whatsappTemplates.editFormTitle")
+                  : t("whatsappTemplates.formTitle")}
               </h3>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
@@ -274,11 +395,14 @@ export function WhatsAppTemplatesSection({
                     id="wt-name"
                     className={inputClass}
                     value={tplName}
+                    disabled={!!editingId}
                     onChange={(e) => setTplName(e.target.value)}
                     placeholder={t("whatsappTemplates.namePlaceholder")}
                   />
                   <p className="mt-1 text-xs text-muted">
-                    {t("whatsappTemplates.nameHint")}
+                    {editingId
+                      ? t("whatsappTemplates.nameLockedHint")
+                      : t("whatsappTemplates.nameHint")}
                   </p>
                 </div>
                 <div>
@@ -289,6 +413,7 @@ export function WhatsAppTemplatesSection({
                     id="wt-language"
                     className={inputClass}
                     value={tplLanguage}
+                    disabled={!!editingId}
                     onChange={(e) => setTplLanguage(e.target.value)}
                     placeholder={t("whatsappTemplates.languagePlaceholder")}
                   />
@@ -455,12 +580,14 @@ export function WhatsAppTemplatesSection({
                   onClick={() => void create()}
                   className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
                 >
-                  {t("whatsappTemplates.saveAction")}
+                  {editingId
+                    ? t("whatsappTemplates.saveEditAction")
+                    : t("whatsappTemplates.saveAction")}
                 </button>
                 <button
                   type="button"
                   disabled={busy}
-                  onClick={() => setShowForm(false)}
+                  onClick={() => resetForm()}
                   className="rounded-lg px-4 py-2 text-sm text-muted hover:text-ink disabled:opacity-50"
                 >
                   {t("whatsappTemplates.cancelAction")}
@@ -511,7 +638,18 @@ export function WhatsAppTemplatesSection({
                     </p>
                   ) : null}
                   {canManage && channelConnected ? (
-                    <div className="mt-3">
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {tpl.status === "REJECTED" &&
+                      isFormEditableTemplate(tpl) ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => startEdit(tpl)}
+                          className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-2 disabled:opacity-50"
+                        >
+                          {t("whatsappTemplates.editAction")}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         disabled={busy}

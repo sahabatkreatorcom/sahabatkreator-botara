@@ -202,6 +202,8 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.BROADCAST_AB_INCOMPLETE");
     case "META_TEMPLATE_INVALID":
       return t("errors.META_TEMPLATE_INVALID");
+    case "WHATSAPP_TEMPLATE_NOT_EDITABLE":
+      return t("errors.WHATSAPP_TEMPLATE_NOT_EDITABLE");
     case "META_WABA_MISSING":
       return t("errors.META_WABA_MISSING");
     default:
