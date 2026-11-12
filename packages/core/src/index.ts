@@ -874,6 +874,8 @@ export {
   getWhatsAppTemplateById,
   replaceSyncedWhatsAppTemplates,
   recordCreatedWhatsAppTemplate,
+  recordEditedWhatsAppTemplate,
+  resolveSyncedStatusReason,
   deleteWhatsAppTemplateMirrorByName,
   applyWhatsAppTemplateStatus,
   type WhatsAppTemplateUpsert,

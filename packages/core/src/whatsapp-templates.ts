@@ -31,9 +31,41 @@ export interface WhatsAppTemplateUpsert {
   language: string;
   category: string;
   status: string;
+  /**
+   * Alasan status dari Meta (penolakan) sebagaimana dilaporkan daftar
+   * Graph; null/ta terisi = Meta tidak melaporkan alasan pada sinkron
+   * ini. Semantik penggabungannya di `resolveSyncedStatusReason`.
+   */
+  statusReason?: string | null;
   components: unknown;
   bodyText: string | null;
   variableCount: number;
+}
+
+/**
+ * Menggabungkan alasan status saat SINKRON (jalur webhook punya aturan
+ * yang sama di `applyWhatsAppTemplateStatus`):
+ * - status APPROVED/REINSTATED selalu MEMBERSIHKAN alasan lama —
+ *   menampilkan alasan penolakan pada template yang sudah disetujui
+ *   hanya menyesatkan;
+ * - alasan yang baru dilaporkan Meta MENIMPA yang lama (kode
+ *   `rejected_reason` Graph adalah sumber kebenaran sinkron);
+ * - tanpa laporan baru, alasan yang sudah tercatat (mis. teks rinci
+ *   dari webhook) DIPERTAHANKAN — sinkron tidak boleh menghapus
+ *   informasi yang tidak bisa ia gantikan.
+ * Nilai "NONE" dari Graph diperlakukan sebagai "tidak ada alasan".
+ */
+export function resolveSyncedStatusReason(
+  status: string,
+  incoming: string | null | undefined,
+  existing: string | null,
+): string | null {
+  if (status === "APPROVED" || status === "REINSTATED") return null;
+  const trimmed = incoming?.trim();
+  if (trimmed && trimmed.toUpperCase() !== "NONE") {
+    return trimmed.slice(0, 512);
+  }
+  return existing;
 }
 
 /** Daftar cermin template satu akun (urut nama lalu bahasa). */
@@ -99,6 +131,7 @@ export async function replaceSyncedWhatsAppTemplates(
         id: whatsappTemplates.id,
         name: whatsappTemplates.name,
         language: whatsappTemplates.language,
+        statusReason: whatsappTemplates.statusReason,
       })
       .from(whatsappTemplates)
       .where(
@@ -107,6 +140,9 @@ export async function replaceSyncedWhatsAppTemplates(
           eq(whatsappTemplates.channelAccountId, input.channelAccountId),
         ),
       );
+    const existingReasonByKey = new Map(
+      existing.map((r) => [`${r.name}${r.language}`, r.statusReason]),
+    );
     for (const row of existing) {
       if (!keepKeys.has(`${row.name}${row.language}`)) {
         await tx
@@ -115,6 +151,11 @@ export async function replaceSyncedWhatsAppTemplates(
       }
     }
     for (const t of input.templates) {
+      const statusReason = resolveSyncedStatusReason(
+        t.status,
+        t.statusReason,
+        existingReasonByKey.get(`${t.name}${t.language}`) ?? null,
+      );
       await tx
         .insert(whatsappTemplates)
         .values({
@@ -125,6 +166,7 @@ export async function replaceSyncedWhatsAppTemplates(
           language: t.language,
           category: t.category,
           status: t.status,
+          statusReason,
           components: t.components as WhatsAppTemplate["components"],
           bodyText: t.bodyText,
           variableCount: t.variableCount,
@@ -140,6 +182,7 @@ export async function replaceSyncedWhatsAppTemplates(
             metaTemplateId: t.metaTemplateId,
             category: t.category,
             status: t.status,
+            statusReason,
             components: t.components as WhatsAppTemplate["components"],
             bodyText: t.bodyText,
             variableCount: t.variableCount,
@@ -189,6 +232,23 @@ export async function recordCreatedWhatsAppTemplate(
   return withTenantDb(db, input.tenantId, async (tx) => {
     const now = new Date();
     const t = input.template;
+    const [prior] = await tx
+      .select({ statusReason: whatsappTemplates.statusReason })
+      .from(whatsappTemplates)
+      .where(
+        and(
+          eq(whatsappTemplates.tenantId, input.tenantId),
+          eq(whatsappTemplates.channelAccountId, input.channelAccountId),
+          eq(whatsappTemplates.name, t.name),
+          eq(whatsappTemplates.language, t.language),
+        ),
+      )
+      .limit(1);
+    const statusReason = resolveSyncedStatusReason(
+      t.status,
+      t.statusReason,
+      prior?.statusReason ?? null,
+    );
     const [row] = await tx
       .insert(whatsappTemplates)
       .values({
@@ -199,6 +259,7 @@ export async function recordCreatedWhatsAppTemplate(
         language: t.language,
         category: t.category,
         status: t.status,
+        statusReason,
         components: t.components as WhatsAppTemplate["components"],
         bodyText: t.bodyText,
         variableCount: t.variableCount,
@@ -214,6 +275,7 @@ export async function recordCreatedWhatsAppTemplate(
           metaTemplateId: t.metaTemplateId,
           category: t.category,
           status: t.status,
+          statusReason,
           components: t.components as WhatsAppTemplate["components"],
           bodyText: t.bodyText,
           variableCount: t.variableCount,
@@ -230,6 +292,65 @@ export async function recordCreatedWhatsAppTemplate(
       meta: {
         whatsappTemplateId: row.id,
         channelAccountId: input.channelAccountId,
+        name: row.name,
+        language: row.language,
+        status: row.status,
+      },
+    });
+    return row;
+  });
+}
+
+/**
+ * Catat hasil perbaikan template di Meta (pengubahan terjadi di
+ * lapisan API lewat Graph `POST /{message_template_id}`; di sini
+ * hanya pencatatan + audit). Template yang diperbaiki masuk tinjauan
+ * ulang, jadi cermin kembali ke PENDING dan alasan penolakan lama
+ * dibersihkan — alasan itu milik versi yang baru saja diganti.
+ * Mengembalikan baris terbaru, atau null bila barisnya sudah tidak ada.
+ */
+export async function recordEditedWhatsAppTemplate(
+  db: Database,
+  input: {
+    tenantId: string;
+    userId: string;
+    templateId: string;
+    category: string;
+    components: unknown;
+    bodyText: string | null;
+    variableCount: number;
+  },
+): Promise<WhatsAppTemplate | null> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const now = new Date();
+    const [row] = await tx
+      .update(whatsappTemplates)
+      .set({
+        category: input.category,
+        status: "PENDING",
+        statusReason: null,
+        components: input.components as WhatsAppTemplate["components"],
+        bodyText: input.bodyText,
+        variableCount: input.variableCount,
+        syncedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(whatsappTemplates.tenantId, input.tenantId),
+          eq(whatsappTemplates.id, input.templateId),
+        ),
+      )
+      .returning();
+    if (!row) return null;
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "whatsapp_template.edited",
+      meta: {
+        whatsappTemplateId: row.id,
+        channelAccountId: row.channelAccountId,
         name: row.name,
         language: row.language,
         status: row.status,
