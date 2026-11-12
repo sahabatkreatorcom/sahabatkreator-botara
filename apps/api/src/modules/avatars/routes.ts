@@ -1,13 +1,17 @@
 import { Hono, type Context } from "hono";
 import { z } from "zod";
-import { getProfilePhoto } from "@sahabat-kreator/core";
+import {
+  fetchProfilePhotoBytes,
+  getProfilePhoto,
+  type PlatformSettingsOptions,
+} from "@sahabat-kreator/core";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 import { resolveTenantForUser } from "../tenants/guard";
 
 /**
  * Modul avatars (Fase 6D) — penyajian foto profil dari tabel
- * `profile_photos` (bytea di DB, lihat core/avatars.ts):
+ * `profile_photos` (lihat core/avatars.ts):
  *   GET /tenants/:tenantId/avatars/channels/:channelAccountId  foto bot/akun
  *   GET /tenants/:tenantId/avatars/contacts/:contactId          foto kontak
  *
@@ -19,6 +23,14 @@ import { resolveTenantForUser } from "../tenants/guard";
  * tenant lain → 404 NOT_FOUND). Respons membawa ETag (SHA-256 byte foto)
  * + Cache-Control privat agar browser tidak mengunduh ulang foto yang
  * sama; If-None-Match yang cocok dijawab 304.
+ *
+ * Bentuk baris transparan bagi web: bytea disajikan langsung dari DB;
+ * baris berbentuk R2 (avatar TikTok, migrasi 0024) diambil objeknya
+ * dari R2 di sisi server lewat resolver Panel Admin per request lalu
+ * diteruskan byte + content type + ETag yang sama — bucket tetap
+ * privat dan penyajian tidak bergantung domain publik media. Objek
+ * yang tidak bisa dibaca (R2 belum terkonfigurasi / hilang) dijawab
+ * 404 yang sama seperti foto belum ada.
  */
 
 export function channelAvatarUrl(tenantId: string, channelAccountId: string): string {
@@ -31,7 +43,15 @@ export function contactAvatarUrl(tenantId: string, contactId: string): string {
 
 const AVATAR_CACHE_CONTROL = "private, max-age=3600";
 
-export function createAvatarsRoutes(bundle: AuthBundle | null) {
+export interface AvatarsModuleOptions {
+  /** Resolver Panel Admin — membaca objek avatar R2 (identitas + kredensial per request). */
+  platform?: PlatformSettingsOptions;
+}
+
+export function createAvatarsRoutes(
+  bundle: AuthBundle | null,
+  opts?: AvatarsModuleOptions,
+) {
   const app = new Hono<{ Variables: AppVariables }>();
   const base = "/tenants/:tenantId/avatars";
 
@@ -62,10 +82,11 @@ export function createAvatarsRoutes(bundle: AuthBundle | null) {
         "Cache-Control": AVATAR_CACHE_CONTROL,
       });
     }
-    const bytes = Buffer.isBuffer(photo.data)
-      ? new Uint8Array(photo.data)
-      : new Uint8Array(Buffer.from(photo.data as Uint8Array));
-    return c.body(bytes, 200, {
+    // Byte diambil menurut bentuk barisnya (bytea langsung / objek R2
+    // server-side) — ETag sudah cocok di atas tanpa menyentuh R2.
+    const bytes = await fetchProfilePhotoBytes(bundle.db, photo, opts?.platform);
+    if (!bytes) return apiError(c, 404, "NOT_FOUND", "Avatar not found");
+    return c.body(new Uint8Array(bytes), 200, {
       "Content-Type": photo.contentType,
       "Cache-Control": AVATAR_CACHE_CONTROL,
       ETag: etag,

@@ -34,11 +34,13 @@ import {
   restoreChannelAccount,
   setChannelAccountStatus,
   storeProfilePhoto,
+  TIKTOK_AVATAR_R2_KEY_PREFIX,
   updateMetaChannelAccountCredentials,
   updateTelegramChannelAccountCredentials,
   updateWhatsAppChannelAccountCredentials,
   type ChannelHealthInfo,
   type MetaProvider,
+  type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
 import {
   TelegramApiError,
@@ -302,7 +304,9 @@ function scheduleMetaPhotoBackfill(
  * URL foto diselesaikan per provider oleh
  * `resolveOAuthProfilePictureUrl` lalu diunduh+disimpan lewat helper
  * core bersama `fetchAndStoreProfilePhotoFromUrl` (mekanisme
- * `profile_photos` yang sama persis dengan Meta/Telegram).
+ * `profile_photos` yang sama persis dengan Meta/Telegram) — kecuali
+ * byte avatar TikTok yang ditulis ke Cloudflare R2 (fallback bytea),
+ * sama seperti jalur connect TikTok.
  */
 const oauthPhotoBackfillInFlight = new Set<string>();
 const oauthPhotoBackfillNegative = new Map<string, number>();
@@ -404,6 +408,16 @@ function scheduleOAuthPhotoBackfill(
             tenantId: row.tenantId,
             channelAccountId: row.id,
             pictureUrl,
+            // Hanya TikTok: avatar ke R2 (fallback bytea) — provider
+            // lain tidak diberi opsi ini dan tetap bytea seperti biasa.
+            ...(row.provider === "tiktok" && opts.platform
+              ? {
+                  r2: {
+                    platformOptions: opts.platform,
+                    keyPrefix: TIKTOK_AVATAR_R2_KEY_PREFIX,
+                  },
+                }
+              : {}),
           })
         : false;
       if (stored) oauthPhotoBackfillNegative.delete(row.id);
@@ -464,6 +478,12 @@ async function deleteTelegramWebhookIfOwner(
 export interface ChannelsModuleOptions {
   /** Material kunci enkripsi kredensial channel (env CHANNEL_TOKEN_SECRET). */
   channelTokenSecret?: string;
+  /**
+   * Resolver Panel Admin — dipakai backfill foto TikTok untuk
+   * menyimpan avatar ke Cloudflare R2 (identitas + kredensial
+   * diselesaikan per pengambilan; pola opsi platform modul lain).
+   */
+  platform?: PlatformSettingsOptions;
   /** Base URL Bot API (env TELEGRAM_API_BASE; default api.telegram.org). */
   telegramApiBase?: string;
   /** URL publik aplikasi (env BETTER_AUTH_URL) — dasar URL webhook Telegram & Meta. */

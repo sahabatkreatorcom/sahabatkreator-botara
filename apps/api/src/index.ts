@@ -378,6 +378,9 @@ routes.route(
   "/",
   createChannelsRoutes(authBundle, {
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    // Resolver panel bersama — backfill foto TikTok menyimpan avatar
+    // ke R2 lewat resolver yang sama seperti modul lain.
+    platform: platformOptions,
     telegramApiBase: env.TELEGRAM_API_BASE,
     publicBaseUrl: env.BETTER_AUTH_URL,
     metaApiBase: env.META_API_BASE,
@@ -433,8 +436,13 @@ routes.route(
 );
 // Modul avatars (Fase 6D) — penyajian foto profil bot & kontak dari DB
 // /tenants/:tenantId/avatars/... (di balik sesi + membership; URL file
-// provider yang bertoken tidak pernah diedarkan).
-routes.route("/", createAvatarsRoutes(authBundle));
+// provider yang bertoken tidak pernah diedarkan). Opsi platform
+// dipakai menyajikan baris berbentuk R2 (avatar TikTok) — objek
+// diambil server-side per request dari resolver panel.
+routes.route(
+  "/",
+  createAvatarsRoutes(authBundle, { platform: platformOptions }),
+);
 // Modul media (Fase 18) — penyajian berkas yang dikirim pelanggan
 // /tenants/:tenantId/media/:mediaId (sesi + membership; bucket tetap
 // privat, key objek tidak pernah diedarkan).

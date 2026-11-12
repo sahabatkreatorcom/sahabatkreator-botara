@@ -6,6 +6,7 @@ import {
   TikTokOAuthStartResponseSchema,
 } from "@sahabat-kreator/contracts";
 import {
+  TIKTOK_AVATAR_R2_KEY_PREFIX,
   createTikTokChannelAccount,
   encryptChannelSecret,
   fetchAndStoreProfilePhotoFromUrl,
@@ -415,6 +416,12 @@ export function createTikTokOAuthRoutes(
             tenantId: state.tenantId,
             channelAccountId: own.id,
             pictureUrl: avatarUrl,
+            // Avatar TikTok disimpan ke R2 (fallback bytea selama
+            // kredensial R2 panel belum terisi) — lihat core/avatars.
+            r2: {
+              platformOptions: opts.platform,
+              keyPrefix: TIKTOK_AVATAR_R2_KEY_PREFIX,
+            },
           }),
         );
       }
@@ -499,12 +506,19 @@ export function createTikTokOAuthRoutes(
     // (user info atau creator_info) diunduh & disimpan mengikuti
     // mekanisme avatar platform lain (profile_photos) — fail-soft
     // dengan batas lunak; kegagalan tidak menggagalkan connect dan
-    // backfill daftar channel mencoba lagi nanti.
+    // backfill daftar channel mencoba lagi nanti. KHUSUS TikTok
+    // bytenya ditulis ke Cloudflare R2 (keputusan pemilik 2026-11-12:
+    // URL CDN TikTok bertanda tangan & kedaluwarsa), dengan fallback
+    // bytea selama kredensial R2 di Panel Admin belum terisi.
     await awaitPhotoSoftDeadline(
       fetchAndStoreProfilePhotoFromUrl(bundle.db, {
         tenantId: state.tenantId,
         channelAccountId: rowId,
         pictureUrl: avatarUrl,
+        r2: {
+          platformOptions: opts.platform,
+          keyPrefix: TIKTOK_AVATAR_R2_KEY_PREFIX,
+        },
       }),
     );
 
