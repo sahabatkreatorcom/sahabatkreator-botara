@@ -676,8 +676,54 @@ berjalan batas platform yang perlu diketahui pemilik.
 
 ---
 
+## Gelombang G5 — Pemicu Postback/Quick Reply/Welcome (2026-11-12)
+
+Fitur kode selesai & terverifikasi: automation dan flow kini bisa
+dipicu ketukan tombol postback (payload persis), ketukan quick
+reply, dan pesan pertama kontak (welcome) — dengan urutan prioritas
+eksplisit (keselamatan/consent → postback → quick reply → keyword →
+welcome → flow umum → AI). Yang perlu diketahui/dilakukan pemilik
+hanya soal sisi platformnya:
+
+- **Telegram — PERLU TINDAKAN: daftar ulang webhook bot yang sudah
+  terhubung.** Ketukan tombol inline (`callback_query`) hanya
+  dikirim Telegram bila webhook didaftarkan dengan
+  `allowed_updates` yang memuatnya; pendaftaran kode SUDAH
+  diperbarui, tetapi bot yang terhubung SEBELUM gelombang ini
+  tetap memakai pendaftaran lama dan ketukan tombolnya TIDAK akan
+  tiba. Untuk setiap bot Telegram yang ingin memakai pemicu
+  postback: **putuskan lalu hubungkan ulang bot-nya** dari halaman
+  Saluran (satu kali per bot), atau minta admin menjalankan ulang
+  `setWebhook`. Bot yang BARU dihubungkan sesudah deploy G5 tidak
+  perlu tindakan apa pun.
+- **Meta (Messenger & Instagram) — tidak ada izin/langganan baru.**
+  Event postback dan payload quick reply tiba lewat langganan
+  webhook `messages` yang sama dan sudah aktif. Yang berada di sisi
+  pemilik adalah PEMBUATAN tombolnya: tombol Get Started, menu
+  persisten, ice breaker, dan tombol pada template pesan dibuat di
+  pengaturan Page/Business Suite (atau lewat Send API oleh pengirim
+  pesan keluar) — string `payload` yang dipasang di tombol itulah
+  yang diisi ke aturan postback/quick reply di Botara. Quick reply
+  pada pesan yang dikirim lewat Botara sendiri belum dibuatkan
+  UI-nya (pemicu membaca ketukan dari tombol yang dibuat lewat
+  jalur platform mana pun).
+- **WhatsApp — tidak ada tindakan.** Balasan tombol/list interaktif
+  Cloud API kini ditangkap sebagai quick reply (payload = id
+  tombol/baris yang dikonfigurasi saat pesan interaktif dikirim).
+  Batasan lama tetap berlaku: pesan interaktif keluar dibuat di
+  luar Botara (template/pengirim platform) — Botara membaca
+  balasannya, belum menyediakan pembuat tombolnya.
+- **Threads, TikTok, webchat — tidak menyediakan postback/quick
+  reply** pada jalur webhook yang dipakai Botara saat ini, jadi
+  pemicu sinyal untuk platform itu memang tidak ada (bukan
+  kerusakan): aturannya cukup tidak akan menyala dari sana. Pemicu
+  keyword & welcome tetap bekerja di semua platform pesan.
+
+---
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
-penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan.
+penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
+Gelombang G5 (pemicu postback/quick reply/welcome).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
