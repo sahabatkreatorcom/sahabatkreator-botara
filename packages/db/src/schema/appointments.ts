@@ -249,6 +249,9 @@ export const googleServiceEnum = pgEnum("google_service", [
   "calendar",
   "youtube",
   "business",
+  // G16 (migrasi 0039): layanan 'ads' — consent OAuth Google Ads
+  // (scope adwords) untuk pengiriman konversi dari flow.
+  "ads",
 ]);
 
 /**
