@@ -9,6 +9,7 @@ import {
   createTikTokChannelAccount,
   encryptChannelSecret,
   fetchAndStoreProfilePhotoFromUrl,
+  getChannelAccount,
   getPlatformPublicConfig,
   getProviderSecret,
   lookupChannelAccountsByProviderExternalId,
@@ -60,6 +61,16 @@ import { resolveTenantForUser } from "../tenants/guard";
  * - Token TIDAK PERNAH masuk URL/browser/log: callback bekerja
  *   penuh di server dan hanya me-redirect browser dengan penanda
  *   hasil (`?tiktok_oauth=connected` / `?tiktok_oauth_error=<KODE>`).
+ *   Satu penanda peringatan khusus: bila user info ditolak provider
+ *   KHUSUSNYA karena scope (`scope_not_authorized` — izin
+ *   `user.info.basic`/Login Kit belum disetujui untuk aplikasi
+ *   TikTok di portal developer), akun TETAP terhubung fail-soft
+ *   tetapi kepulangannya `?tiktok_oauth=connected_profile_incomplete`
+ *   agar Channels menampilkan banner peringatan yang jujur (nama &
+ *   foto profil tidak terbaca + cara memperbaikinya), bukan sukses
+ *   polos yang menyembunyikan akun tanpa nama. Menghubungkan ulang
+ *   sesudah scope disetujui mengisi profil yang kosong itu (lihat
+ *   cabang akun-sudah-terhubung di callback).
  * - Access token yang berumur ±24 jam BUKAN masalah operator lagi:
  *   worker lifecycle menyegarkannya dari refresh token via grant
  *   `refresh_token` sebelum kedaluwarsa (lihat worker
@@ -280,6 +291,9 @@ export function createTikTokOAuthRoutes(
     // code, token, dan secret TIDAK PERNAH dicatat. User info yang
     // gagal TIDAK menggagalkan connect bila token response sudah
     // membawa open_id (identitas akun) — profil menyusul kosong.
+    // Kegagalan KHUSUS scope (`scope_not_authorized`) dicatat
+    // terpisah: akun tetap terhubung, tetapi kepulangan membawa
+    // penanda peringatan profil-belum-lengkap (lihat header modul).
     let openId: string;
     let accessToken: string;
     let refreshToken: string | null;
@@ -287,6 +301,7 @@ export function createTikTokOAuthRoutes(
     let username: string | null = null;
     let displayName: string | null = null;
     let avatarUrl: string | null = null;
+    let profileScopeDenied = false;
     try {
       const client = new TikTokClient({ baseUrl: opts.tiktokApiBase });
       const tokens = await client.exchangeTikTokCode({
@@ -308,6 +323,9 @@ export function createTikTokOAuthRoutes(
         displayName = info.displayName;
         avatarUrl = info.avatarUrl;
       } catch (infoErr) {
+        profileScopeDenied =
+          infoErr instanceof TikTokApiError &&
+          infoErr.providerCode === "scope_not_authorized";
         const detail =
           infoErr instanceof TikTokApiError
             ? `${infoErr.providerCode || infoErr.status}: ${infoErr.description}`
@@ -335,12 +353,67 @@ export function createTikTokOAuthRoutes(
     );
     if (activeElsewhere) return fail("TIKTOK_ACCOUNT_ALREADY_CONNECTED");
 
+    // Kepulangan sukses: penanda peringatan profil-belum-lengkap
+    // HANYA bila user info kali ini ditolak karena scope DAN akun
+    // hasil akhirnya tetap tanpa nama tampil — kegagalan user info
+    // karena alasan lain tetap sukses polos seperti sebelumnya.
+    const successRedirect = (profileIncomplete: boolean) =>
+      c.redirect(
+        `${webBase}/channels?tiktok_oauth=${
+          profileIncomplete ? "connected_profile_incomplete" : "connected"
+        }`,
+        302,
+      );
+
     const own = existing.find((r) => r.tenantId === state.tenantId);
     if (own && own.status === "connected") {
       // Sudah terhubung di workspace ini — idempoten seperti
       // Threads: kredensial yang ada TIDAK ditimpa; token disegarkan
       // worker lifecycle, bukan oleh login ulang.
-      return c.redirect(`${webBase}/channels?tiktok_oauth=connected`, 302);
+      //
+      // SATU pengecualian yang disengaja: PROFIL yang masih kosong
+      // dilengkapi dari user info kali ini. Inilah jalur perbaikan
+      // akun yang dulu terhubung saat scope profil belum diberikan
+      // (nama kosong + avatar placeholder): sesudah pemilik
+      // mengaktifkan scope `user.info.basic` di portal TikTok,
+      // menghubungkan ulang akun yang sama mengisi nama tampil
+      // (patch core hanya mengisi yang kosong) + mengambil avatar,
+      // tanpa baris baru dan tanpa menyentuh kredensial tersimpan.
+      let resultingDisplayName: string | null | undefined;
+      if (displayName !== null || username !== null) {
+        const row = await updateTikTokChannelAccountCredentials(
+          bundle.db,
+          { tenantId: state.tenantId },
+          own.id,
+          {
+            publicHandle: username ?? undefined,
+            profileName: displayName,
+          },
+        );
+        if (row) resultingDisplayName = row.displayName;
+      }
+      if (avatarUrl) {
+        await awaitPhotoSoftDeadline(
+          fetchAndStoreProfilePhotoFromUrl(bundle.db, {
+            tenantId: state.tenantId,
+            channelAccountId: own.id,
+            pictureUrl: avatarUrl,
+          }),
+        );
+      }
+      if (resultingDisplayName === undefined) {
+        // User info kali ini tidak membawa profil sama sekali
+        // (kasus scope ditolak): putuskan penanda peringatan dari
+        // nama yang TERSIMPAN — akun yang namanya sudah terisi dari
+        // connect sebelumnya tetap sukses polos.
+        const stored = await getChannelAccount(
+          bundle.db,
+          { tenantId: state.tenantId },
+          own.id,
+        );
+        resultingDisplayName = stored?.displayName ?? null;
+      }
+      return successRedirect(profileScopeDenied && !resultingDisplayName);
     }
 
     const tokenExpiresAt =
@@ -362,6 +435,7 @@ export function createTikTokOAuthRoutes(
     }
 
     let rowId: string;
+    let rowDisplayName: string | null;
     if (own) {
       // Revive baris yang sama dengan kredensial OAuth baru.
       const row = await updateTikTokChannelAccountCredentials(
@@ -380,6 +454,7 @@ export function createTikTokOAuthRoutes(
       );
       if (!row) return fail("TIKTOK_OAUTH_EXCHANGE_FAILED");
       rowId = row.id;
+      rowDisplayName = row.displayName;
     } else {
       const row = await createTikTokChannelAccount(
         bundle.db,
@@ -394,6 +469,7 @@ export function createTikTokOAuthRoutes(
         },
       );
       rowId = row.id;
+      rowDisplayName = row.displayName;
     }
 
     await recordChannelConnectedAudit(
@@ -414,7 +490,7 @@ export function createTikTokOAuthRoutes(
       }),
     );
 
-    return c.redirect(`${webBase}/channels?tiktok_oauth=connected`, 302);
+    return successRedirect(profileScopeDenied && !rowDisplayName);
   });
 
   return app;
