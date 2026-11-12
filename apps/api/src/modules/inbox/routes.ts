@@ -19,6 +19,7 @@ import {
   listContactPhotoFetchCandidates,
   listConversations,
   listMessagesPage,
+  MESSAGE_CONVERSATION_KINDS,
   listProfilePhotoOwnerIds,
   mapContactsToSelfChannelAccounts,
   markConversationRead,
@@ -234,11 +235,17 @@ export function createInboxRoutes(
     const rows = await listConversations(
       bundle.db,
       { tenantId },
-      { assignmentUserId: c.get("appUser").id },
+      {
+        assignmentUserId: c.get("appUser").id,
+        // Saringan Inbox yang sama seperti daftar: permukaan ini hanya
+        // mengenal percakapan pesan.
+        kinds: MESSAGE_CONVERSATION_KINDS,
+      },
     );
     const updated = rows.find((row) => row.id === id);
     if (!updated) {
-      // Hanya terjadi bila channel percakapan ini berada di Sampah —
+      // Hanya terjadi bila channel percakapan ini berada di Sampah,
+      // atau percakapan ini baris `channel` (bukan percakapan pesan) —
       // permukaan inbox memang tidak menampilkannya (pola Fase 6I),
       // jadi bagi inbox percakapan itu tidak ada.
       return apiError(c, 404, "NOT_FOUND", "Conversation not found");
@@ -267,6 +274,12 @@ export function createInboxRoutes(
         assignment: query.data.assignment,
         search: query.data.q,
         assignmentUserId: c.get("appUser").id,
+        // Keputusan pemilik: Inbox hanya untuk akun pesan. Baris
+        // kind='channel' (linimasa akun — sasaran postingan) TIDAK
+        // tampil di sini; yang tampil hanya percakapan pesan
+        // (DM `private` + `group`) dari ingest pesan. Lencana unread
+        // navigasi menjumlah daftar yang sama, jadi ikut konsisten.
+        kinds: MESSAGE_CONVERSATION_KINDS,
       },
     );
     // Avatar efektif tiap percakapan (endpoint avatar kita sendiri):
