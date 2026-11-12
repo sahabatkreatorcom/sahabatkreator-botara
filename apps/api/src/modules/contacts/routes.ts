@@ -15,25 +15,34 @@ import {
   findDuplicateContacts,
   getContact,
   listContactPlatforms,
+  listContactPhotoFetchCandidates,
   listContacts,
   listProfilePhotoOwnerIds,
   listSegmentMemberIds,
+  mapContactsToSelfChannelAccounts,
   mergeContacts,
   updateContact,
 } from "@sahabat-kreator/core";
 import type { Contact } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
-import { contactAvatarUrl } from "../avatars/routes";
+import {
+  pendingContactPhotoBackfillIds,
+  scheduleContactPhotoBackfills,
+  type ContactPhotoBackfillOptions,
+} from "../avatars/contact-photo-backfill";
+import { channelAvatarUrl, contactAvatarUrl } from "../avatars/routes";
 import { resolveTenantForUser } from "../tenants/guard";
 
 /**
  * Serialisasi kontak. `avatarUrl` (Fase 6D) TIDAK lagi dari kolom warisan
  * `contacts.avatar_url` (tidak pernah terisi): nilainya adalah endpoint
- * avatar kita sendiri bila foto profil kontak tersimpan di
- * `profile_photos` (saat ini hanya kontak Telegram), selain itu null.
- * Pemanggil daftar menghitung himpunan pemilik berfoto lebih dulu
- * (listProfilePhotoOwnerIds) lalu meneruskannya ke sini.
+ * avatar kita sendiri untuk AVATAR EFEKTIF kontak — foto profil kontak
+ * di `profile_photos` lebih dulu (kontak Telegram/Meta dari jalur pesan
+ * masuk & backfill), lalu, khusus kontak yang ADALAH akun channel itu
+ * sendiri (jangkar sasaran linimasa), foto akun channel-nya; selain itu
+ * null. Pemanggil menghitung peta avatar efektif lebih dulu
+ * (resolveContactAvatarUrls) lalu meneruskannya ke sini.
  */
 export function serializeContact(
   row: Contact,
@@ -68,19 +77,84 @@ export function serializeContact(
   });
 }
 
-/** avatarUrl satu kontak: endpoint avatar bila fotonya tersimpan, else null. */
-async function singleContactAvatarUrl(
+/**
+ * Peta avatar EFEKTIF sekelompok kontak (lihat header serializeContact):
+ * foto kontak → foto akun channel bagi kontak akun-dirinya → null.
+ * Dengan `scheduleBackfill`, kontak DM yang belum berfoto dan punya
+ * jalur resmi (telegram/messenger/instagram) dijadwalkan pengambilan
+ * fotonya di latar — pola backfill malas yang sama seperti daftar
+ * channel; permukaan administratif (duplikat) tidak menjadwalkan.
+ */
+async function resolveContactAvatarUrls(
   bundle: AuthBundle,
   tenantId: string,
-  contactId: string,
-): Promise<string | null> {
-  const withPhoto = await listProfilePhotoOwnerIds(
+  contactIds: string[],
+  opts?: {
+    scheduleBackfill?: boolean;
+    photoBackfillOpts?: ContactPhotoBackfillOptions;
+  },
+): Promise<Map<string, string | null>> {
+  const urls = new Map<string, string | null>();
+  if (contactIds.length === 0) return urls;
+  const contactPhotos = await listProfilePhotoOwnerIds(
     bundle.db,
     { tenantId },
     "contact",
-    [contactId],
+    contactIds,
   );
-  return withPhoto.has(contactId) ? contactAvatarUrl(tenantId, contactId) : null;
+  const missingContactIds = contactIds.filter(
+    (id) => !contactPhotos.has(id),
+  );
+  let selfAccounts = new Map<string, string>();
+  let channelPhotos = new Set<string>();
+  if (missingContactIds.length > 0) {
+    selfAccounts = await mapContactsToSelfChannelAccounts(
+      bundle.db,
+      { tenantId },
+      missingContactIds,
+    );
+    const selfAccountIds = [...new Set(selfAccounts.values())];
+    if (selfAccountIds.length > 0) {
+      channelPhotos = await listProfilePhotoOwnerIds(
+        bundle.db,
+        { tenantId },
+        "channel_account",
+        selfAccountIds,
+      );
+    }
+    if (opts?.scheduleBackfill) {
+      const pending = pendingContactPhotoBackfillIds(
+        missingContactIds.filter((id) => !selfAccounts.has(id)),
+      );
+      if (pending.length > 0) {
+        const candidates = await listContactPhotoFetchCandidates(
+          bundle.db,
+          { tenantId },
+          pending,
+        );
+        scheduleContactPhotoBackfills(
+          bundle,
+          opts.photoBackfillOpts,
+          tenantId,
+          candidates,
+        );
+      }
+    }
+  }
+  for (const contactId of contactIds) {
+    if (contactPhotos.has(contactId)) {
+      urls.set(contactId, contactAvatarUrl(tenantId, contactId));
+      continue;
+    }
+    const selfAccountId = selfAccounts.get(contactId);
+    urls.set(
+      contactId,
+      selfAccountId !== undefined && channelPhotos.has(selfAccountId)
+        ? channelAvatarUrl(tenantId, selfAccountId)
+        : null,
+    );
+  }
+  return urls;
 }
 
 const ListContactsQuerySchema = z.object({
@@ -100,7 +174,10 @@ const ListContactsQuerySchema = z.object({
  * Wajib sesi + membership workspace (non-member → 404 TENANT_NOT_FOUND,
  * pola Fase 1B). Logika domain ada di @sahabat-kreator/core (RLS tenant).
  */
-export function createContactsRoutes(bundle: AuthBundle | null) {
+export function createContactsRoutes(
+  bundle: AuthBundle | null,
+  photoBackfillOpts?: ContactPhotoBackfillOptions,
+) {
   const app = new Hono<{ Variables: AppVariables }>();
   const base = "/tenants/:tenantId/contacts";
 
@@ -113,6 +190,16 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     app.patch(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
   }
+
+  /** avatarUrl efektif satu kontak (+ jadwalkan backfill fotonya). */
+  const singleContactAvatarUrl = async (
+    tenantId: string,
+    contactId: string,
+  ): Promise<string | null> =>
+    (await resolveContactAvatarUrls(bundle, tenantId, [contactId], {
+      scheduleBackfill: true,
+      photoBackfillOpts,
+    })).get(contactId) ?? null;
 
 
   app.post(base, async (c) => {
@@ -160,17 +247,22 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
       { ...query.data, onlyIds },
     );
     const listedIds = result.contacts.map((row) => row.id);
-    // Foto & platform dihitung bersamaan: keduanya query independen, dan
-    // daftar kontak adalah endpoint terpanas di halaman ini.
-    const [withPhoto, platforms] = await Promise.all([
-      listProfilePhotoOwnerIds(bundle.db, { tenantId: tenant.id }, "contact", listedIds),
+    // Avatar efektif & platform dihitung bersamaan: keduanya query
+    // independen, dan daftar kontak adalah endpoint terpanas di
+    // halaman ini. Resolusi avatar sekaligus menjadwalkan backfill
+    // foto bagi kontak yang belum berfoto.
+    const [avatarUrls, platforms] = await Promise.all([
+      resolveContactAvatarUrls(bundle, tenant.id, listedIds, {
+        scheduleBackfill: true,
+        photoBackfillOpts,
+      }),
       listContactPlatforms(bundle.db, { tenantId: tenant.id }, listedIds),
     ]);
     const body = ContactListResponseSchema.parse({
       contacts: result.contacts.map((row) =>
         serializeContact(
           row,
-          withPhoto.has(row.id) ? contactAvatarUrl(tenant.id, row.id) : null,
+          avatarUrls.get(row.id) ?? null,
           platforms.get(row.id) ?? [],
         ),
       ),
@@ -188,8 +280,10 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
     const groups = await findDuplicateContacts(bundle.db, { tenantId: tenant.id });
     const groupIds = groups.flatMap((g) => g.contacts.map((row) => row.id));
-    const [withPhoto, platforms] = await Promise.all([
-      listProfilePhotoOwnerIds(bundle.db, { tenantId: tenant.id }, "contact", groupIds),
+    // Avatar efektif yang sama seperti daftar (tanpa menjadwalkan
+    // backfill — ini permukaan administratif pembersihan duplikat).
+    const [avatarUrls, platforms] = await Promise.all([
+      resolveContactAvatarUrls(bundle, tenant.id, groupIds),
       listContactPlatforms(bundle.db, { tenantId: tenant.id }, groupIds),
     ]);
     const body = ContactDuplicatesResponseSchema.parse({
@@ -197,7 +291,7 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
         contacts: g.contacts.map((row) =>
           serializeContact(
             row,
-            withPhoto.has(row.id) ? contactAvatarUrl(tenant.id, row.id) : null,
+            avatarUrls.get(row.id) ?? null,
             platforms.get(row.id) ?? [],
           ),
         ),
@@ -217,7 +311,7 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     const contact = await getContact(bundle.db, { tenantId: tenant.id }, id);
     if (!contact) return apiError(c, 404, "NOT_FOUND", "Contact not found");
     const [avatarUrl, platforms] = await Promise.all([
-      singleContactAvatarUrl(bundle, tenant.id, id),
+      singleContactAvatarUrl(tenant.id, id),
       listContactPlatforms(bundle.db, { tenantId: tenant.id }, [id]),
     ]);
     return c.json(
@@ -266,7 +360,7 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     // percakapan kontak yang digabung ke survivor, jadi badge-nya
     // berubah — mengembalikan nilai lama akan menampilkan badge basi.
     const [avatarUrl, platforms] = await Promise.all([
-      singleContactAvatarUrl(bundle, tenant.id, result.survivor.id),
+      singleContactAvatarUrl(tenant.id, result.survivor.id),
       listContactPlatforms(bundle.db, { tenantId: tenant.id }, [result.survivor.id]),
     ]);
     return c.json(
@@ -307,7 +401,7 @@ export function createContactsRoutes(bundle: AuthBundle | null) {
     // UI menimpa baris daftar dengan respons PATCH ini, jadi platform
     // harus ikut dihitung — kalau tidak, badge hilang sesudah menyunting.
     const [avatarUrl, platforms] = await Promise.all([
-      singleContactAvatarUrl(bundle, tenant.id, id),
+      singleContactAvatarUrl(tenant.id, id),
       listContactPlatforms(bundle.db, { tenantId: tenant.id }, [id]),
     ]);
     return c.json(
