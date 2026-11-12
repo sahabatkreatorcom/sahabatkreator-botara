@@ -162,6 +162,13 @@
       "when": 1793870118818,
       "tag": "0022_oauth_connect_tokens",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1793870118820,
+      "tag": "0024_profile_photos_r2_storage",
+      "breakpoints": true
     }
   ]
 }

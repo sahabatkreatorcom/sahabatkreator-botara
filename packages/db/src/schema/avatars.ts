@@ -25,6 +25,19 @@ import { tenants } from "./tenants";
  * kita sendiri (`/api/tenants/:tenantId/avatars/...`), yang menyajikan
  * byte ini di balik sesi + membership.
  *
+ * Pengecualian TikTok (keputusan pemilik 2026-11-12, migrasi 0024):
+ * avatar akun TikTok disimpan sebagai OBJEK di Cloudflare R2
+ * (`storage='r2'`, `data` NULL, `object_key` menunjuk objeknya), karena
+ * URL avatar CDN TikTok adalah URL bertanda tangan yang KEDALUWARSA
+ * (parameter `x-expires`) — salinan berkasnya harus tinggal di
+ * penyimpanan objek milik platform sendiri. Channel lain tetap bytea.
+ * Bentuk baris ditegakkan check `profile_photos_storage_shape`: tepat
+ * satu dari dua bentuk yang sah. Penyajian tidak berubah: endpoint
+ * avatar mengambil objek R2 di sisi server dan meneruskan bytenya, jadi
+ * web tidak pernah tahu bedanya. Bila kredensial R2 di Panel Admin
+ * belum terisi (atau tulis R2 gagal), avatar TikTok jatuh ke bytea
+ * persis seperti channel lain — lihat core/avatars.ts.
+ *
  * `owner_id` sengaja TANPA foreign key: pemiliknya polimorfik (dua tabel
  * berbeda). Kebersihan dirujuk dijaga lapisan core — purge channel (6I)
  * menghapus foto pemilik akun channel-nya, dan penghapusan tenant
@@ -54,8 +67,16 @@ export const profilePhotos = pgTable(
     /** Id pemilik (channel_accounts.id atau contacts.id, sesuai owner_type). */
     ownerId: uuid("owner_id").notNull(),
     contentType: varchar("content_type", { length: 128 }).notNull(),
-    /** Byte foto mentah (JPEG/PNG dari Bot API). */
-    data: bytea("data").notNull(),
+    /**
+     * Bentuk penyimpanan byte foto: 'db' (bytea di kolom `data`) atau
+     * 'r2' (objek Cloudflare R2 di `object_key`, `data` NULL) — 'r2'
+     * saat ini KHUSUS avatar TikTok (lihat header modul).
+     */
+    storage: varchar("storage", { length: 16 }).notNull().default("db"),
+    /** Kunci objek R2 bila `storage='r2'`; NULL bila 'db'. */
+    objectKey: varchar("object_key", { length: 512 }),
+    /** Byte foto mentah (JPEG/PNG dari Bot API); NULL bila `storage='r2'`. */
+    data: bytea("data"),
     /** SHA-256 hex dari `data` — ETag endpoint penyaji. */
     etag: varchar("etag", { length: 64 }).notNull(),
     /** Kapan foto ini diambil dari provider. */
@@ -79,6 +100,14 @@ export const profilePhotos = pgTable(
     check(
       "profile_photos_owner_type_valid",
       sql`${t.ownerType} IN ('channel_account', 'contact')`,
+    ),
+    check(
+      "profile_photos_storage_valid",
+      sql`${t.storage} IN ('db', 'r2')`,
+    ),
+    check(
+      "profile_photos_storage_shape",
+      sql`(${t.storage} = 'db' AND ${t.data} IS NOT NULL AND ${t.objectKey} IS NULL) OR (${t.storage} = 'r2' AND ${t.data} IS NULL AND ${t.objectKey} IS NOT NULL)`,
     ),
   ],
 );
