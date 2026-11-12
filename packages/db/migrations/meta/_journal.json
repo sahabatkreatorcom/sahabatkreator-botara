@@ -260,6 +260,13 @@
       "when": 1794477824048,
       "tag": "0036_wacrm_extras",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1794477824049,
+      "tag": "0037_discount_codes",
+      "breakpoints": true
     }
   ]
 }

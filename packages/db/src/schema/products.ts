@@ -298,8 +298,23 @@ export const orders = pgTable(
       { onDelete: "set null" },
     ),
     status: orderStatusEnum("status").notNull().default("pending"),
-    /** Total snapshot keranjang saat checkout — dihitung server (Rupiah penuh). */
+    /** Total FINAL snapshot keranjang sesudah diskon — dihitung server (Rupiah penuh). */
     totalIdr: bigint("total_idr", { mode: "number" }).notNull(),
+    /**
+     * Diskon kode promo yang diterapkan saat checkout (G14); 0 bila
+     * tanpa kode. Subtotal sebelum diskon = total_idr + kolom ini.
+     */
+    discountAmountIdr: bigint("discount_amount_idr", { mode: "number" })
+      .notNull()
+      .default(0),
+    /** Snapshot teks kode diskon; NULL bila order tanpa kode. */
+    discountCode: varchar("discount_code", { length: 64 }),
+    /**
+     * Kode diskon asal. TANPA FK (sama seperti payment_link_id):
+     * jejak analitik hidup di discount_redemptions; kolom ini penunjuk
+     * baca cepat yang tidak boleh menghalangi penghapusan kode.
+     */
+    discountCodeId: uuid("discount_code_id"),
     /**
      * Tautan bayar tunggal order ini. TANPA FK (lihat catatan kelompok):
      * arah referensi kanonis adalah payment_links.order_id.

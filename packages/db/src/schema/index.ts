@@ -26,3 +26,4 @@ export * from "./payments";
 export * from "./posts";
 export * from "./outbound-webhooks";
 export * from "./deals";
+export * from "./discount-codes";
