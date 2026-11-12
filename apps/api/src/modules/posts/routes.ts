@@ -68,6 +68,7 @@ function serializePost(post: PostRecord): PostResponse {
     publishedAt: post.publishedAt ? post.publishedAt.toISOString() : null,
     providerMessageId: post.providerMessageId,
     errorCode: post.errorCode,
+    publishOptions: post.publishOptions,
     target: {
       channelAccountId: post.target.channelAccountId,
       conversationId: post.target.conversationId,
@@ -100,6 +101,8 @@ const ERROR_STATUS: Record<PostErrorCode, 400 | 404 | 409 | 422> = {
   POST_MEDIA_REQUIRED: 422,
   POST_MEDIA_TOO_MANY: 422,
   POST_MEDIA_KIND_UNSUPPORTED: 422,
+  POST_PUBLISH_OPTIONS_REQUIRED: 422,
+  POST_PUBLISH_OPTIONS_INVALID: 422,
 };
 
 function domainError(c: AppContext, err: unknown) {
@@ -225,6 +228,7 @@ export function createPostsRoutes(bundle: AuthBundle | null) {
         title: parsed.data.title,
         caption: parsed.data.caption,
         mediaIds: parsed.data.mediaIds,
+        publishOptions: parsed.data.publishOptions,
       });
       return c.json(PostSchema.parse(serializePost(post)), 201);
     } catch (err) {

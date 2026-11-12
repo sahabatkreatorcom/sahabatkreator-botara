@@ -15,9 +15,11 @@ import {
 } from "@sahabat-kreator/db";
 import {
   POST_MEDIA_MAX,
+  PostPublishOptionsSchema,
   getPostProviderCapability,
   type PostMediaKind,
   type PostProviderCapability,
+  type PostPublishOptions,
 } from "@sahabat-kreator/contracts";
 import { withTenantDb, type DbTx } from "./tx";
 
@@ -68,7 +70,9 @@ export type PostErrorCode =
   | "POST_TITLE_TOO_LONG"
   | "POST_MEDIA_REQUIRED"
   | "POST_MEDIA_TOO_MANY"
-  | "POST_MEDIA_KIND_UNSUPPORTED";
+  | "POST_MEDIA_KIND_UNSUPPORTED"
+  | "POST_PUBLISH_OPTIONS_REQUIRED"
+  | "POST_PUBLISH_OPTIONS_INVALID";
 
 export interface PostTarget {
   channelAccountId: string;
@@ -99,6 +103,8 @@ export interface PostRecord {
   publishedAt: Date | null;
   providerMessageId: string | null;
   errorCode: string | null;
+  /** Opsi penerbitan per target (privasi/AI/dst.); null = belum dipilih. */
+  publishOptions: PostPublishOptions | null;
   target: PostTarget;
   media: PostMediaItem[];
   createdAt: Date;
@@ -116,6 +122,70 @@ function capabilityFor(provider: string): PostProviderCapability {
     getPostProviderCapability(provider) ??
     getPostProviderCapability("telegram")!
   );
+}
+
+/**
+ * Baca kolom `publish_options` (jsonb) menjadi bentuk kontrak.
+ * Nilai menyimpang/rusak diperlakukan sebagai "belum dipilih" (null)
+ * — bukan meledak saat membaca daftar: konsekuensinya jatuh ke
+ * gerbang penjadwalan dan resolusi bawaan adapter, yang memang
+ * dirancang untuk keadaan tanpa pilihan.
+ */
+function parsePublishOptions(value: unknown): PostPublishOptions | null {
+  if (value === null || value === undefined) return null;
+  const parsed = PostPublishOptionsSchema.safeParse(value);
+  if (!parsed.success) return null;
+  return Object.keys(parsed.data).length > 0 ? parsed.data : null;
+}
+
+/**
+ * Bersihkan opsi menurut provider SASARAN baris ini: field milik
+ * platform lain dibuang saat penulisan, supaya baris tidak pernah
+ * membawa pilihan basi lintas platform (mis. privasi TikTok pada
+ * baris YouTube hasil duplikat/grup campuran). Mengembalikan null
+ * bila tidak ada field yang relevan — kolomnya memang NULL untuk
+ * "belum memilih", bukan objek kosong.
+ */
+function sanitizePublishOptions(
+  provider: string,
+  options: PostPublishOptions | null | undefined,
+): PostPublishOptions | null {
+  if (!options) return null;
+  const clean: PostPublishOptions = {};
+  if (provider === "youtube") {
+    if (options.youtubePrivacyStatus !== undefined) {
+      clean.youtubePrivacyStatus = options.youtubePrivacyStatus;
+    }
+    if (options.aiGenerated !== undefined) {
+      clean.aiGenerated = options.aiGenerated;
+    }
+    if (options.madeForKids !== undefined) {
+      clean.madeForKids = options.madeForKids;
+    }
+  } else if (provider === "tiktok") {
+    if (options.tiktokPrivacyLevel !== undefined) {
+      clean.tiktokPrivacyLevel = options.tiktokPrivacyLevel;
+    }
+    if (options.aiGenerated !== undefined) {
+      clean.aiGenerated = options.aiGenerated;
+    }
+    if (options.tiktokAllowComment !== undefined) {
+      clean.tiktokAllowComment = options.tiktokAllowComment;
+    }
+    if (options.tiktokAllowDuet !== undefined) {
+      clean.tiktokAllowDuet = options.tiktokAllowDuet;
+    }
+    if (options.tiktokAllowStitch !== undefined) {
+      clean.tiktokAllowStitch = options.tiktokAllowStitch;
+    }
+    if (options.tiktokBrandOrganic !== undefined) {
+      clean.tiktokBrandOrganic = options.tiktokBrandOrganic;
+    }
+    if (options.tiktokBrandContent !== undefined) {
+      clean.tiktokBrandContent = options.tiktokBrandContent;
+    }
+  }
+  return Object.keys(clean).length > 0 ? clean : null;
 }
 
 /**
@@ -385,6 +455,7 @@ async function loadPost(
       publishedAt: posts.publishedAt,
       providerMessageId: posts.providerMessageId,
       errorCode: posts.errorCode,
+      publishOptions: posts.publishOptions,
       createdAt: posts.createdAt,
       updatedAt: posts.updatedAt,
       ...targetSelection(),
@@ -410,6 +481,7 @@ async function loadPost(
     publishedAt: row.publishedAt,
     providerMessageId: row.providerMessageId,
     errorCode: row.errorCode,
+    publishOptions: parsePublishOptions(row.publishOptions),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     target: {
@@ -476,6 +548,7 @@ export async function listPosts(
         publishedAt: posts.publishedAt,
         providerMessageId: posts.providerMessageId,
         errorCode: posts.errorCode,
+        publishOptions: posts.publishOptions,
         createdAt: posts.createdAt,
         updatedAt: posts.updatedAt,
         ...targetSelection(),
@@ -512,6 +585,7 @@ export async function listPosts(
       publishedAt: row.publishedAt,
       providerMessageId: row.providerMessageId,
       errorCode: row.errorCode,
+      publishOptions: parsePublishOptions(row.publishOptions),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       target: {
@@ -594,6 +668,7 @@ async function insertDraftPost(
     title: string;
     caption: string;
     mediaIds: string[];
+    publishOptions?: PostPublishOptions | null | undefined;
   },
 ): Promise<string> {
   const [row] = await tx
@@ -607,6 +682,12 @@ async function insertDraftPost(
       caption: input.caption.slice(
         0,
         capabilityFor(input.target.provider).maxCaption,
+      ),
+      // Opsi dibersihkan menurut provider baris ini (satu tempat,
+      // dipakai semua jalur pembuatan termasuk duplikat).
+      publishOptions: sanitizePublishOptions(
+        input.target.provider,
+        input.publishOptions,
       ),
       status: "draft",
       createdByUserId: input.userId,
@@ -626,6 +707,7 @@ export async function createPost(
     title: string;
     caption: string;
     mediaIds: string[];
+    publishOptions?: PostPublishOptions | null | undefined;
   },
 ): Promise<PostRecord> {
   return withTenantDb(db, input.tenantId, async (tx) => {
@@ -643,6 +725,7 @@ export async function createPost(
       title: input.title,
       caption: input.caption,
       mediaIds: input.mediaIds,
+      publishOptions: input.publishOptions,
     });
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
@@ -684,7 +767,11 @@ export async function createPostGroup(
     title: string;
     caption: string;
     mediaIds: string[];
-    targets: Array<{ conversationId: string; caption?: string }>;
+    targets: Array<{
+      conversationId: string;
+      caption?: string;
+      publishOptions?: PostPublishOptions | null | undefined;
+    }>;
   },
 ): Promise<PostGroupRecord> {
   return withTenantDb(db, input.tenantId, async (tx) => {
@@ -726,6 +813,7 @@ export async function createPostGroup(
           title: input.title,
           caption: target.caption ?? input.caption,
           mediaIds: input.mediaIds,
+          publishOptions: target.publishOptions,
         }),
       );
     }
@@ -761,6 +849,8 @@ export async function updatePost(
     title?: string;
     caption?: string;
     mediaIds?: string[];
+    /** undefined = tidak diubah; null = kosongkan pilihan. */
+    publishOptions?: PostPublishOptions | null | undefined;
   },
 ): Promise<PostRecord> {
   return withTenantDb(db, input.tenantId, async (tx) => {
@@ -781,6 +871,14 @@ export async function updatePost(
               caption: input.caption.slice(
                 0,
                 capabilityFor(existing.target.provider).maxCaption,
+              ),
+            }
+          : {}),
+        ...(input.publishOptions !== undefined
+          ? {
+              publishOptions: sanitizePublishOptions(
+                existing.target.provider,
+                input.publishOptions,
               ),
             }
           : {}),
@@ -913,6 +1011,58 @@ function assertPostContentSchedulable(existing: PostRecord): void {
       existing.media.some((item) => item.kind === "document")
     ) {
       throw new PostDomainError("POST_MEDIA_ALBUM_UNSUPPORTED");
+    }
+  }
+  assertPublishOptionsSchedulable(existing, capability);
+}
+
+/**
+ * Gerbang pilihan penerbitan (gelombang Pilihan Privasi & AI per
+ * Postingan) — siapa yang WAJIB memutuskan apa, menurut dokumen
+ * resmi platform (riset 2026-11-12, lihat kontrak PostPublishOptions):
+ *
+ * - Pengungkapan AI (`aiGenerated`): pernyataan ISI per postingan.
+ *   Untuk provider yang capability-nya mendukung pengungkapan
+ *   (YouTube `containsSyntheticMedia`, TikTok `is_aigc`) ia wajib
+ *   eksplisit — tidak ada nilai konfigurasi yang boleh mengisinya,
+ *   karena mengarang pernyataan isi atas nama kreator adalah
+ *   pelanggaran kebijakan kedua platform.
+ * - Privasi TikTok: Content Sharing Guidelines mewajibkan kreator
+ *   MEMILIH dari dropdown tanpa nilai yang terpilih duluan. Karena
+ *   itu sasaran TikTok tanpa `tiktokPrivacyLevel` pada postingannya
+ *   TIDAK bisa dijadwalkan — default Panel Admin sengaja TIDAK
+ *   menggantikannya di jalur formulir (ia hanya lapis bawaan
+ *   adapter untuk postingan lama/non-formulir). Pilihan tetap
+ *   divalidasi adapter terhadap `privacy_level_options` akun saat
+ *   publish, tanpa penurunan diam-diam.
+ * - Privasi YouTube: YouTube tidak melarang preseleksi dan pemilik
+ *   memutuskan nilai bawaan platform tetap hidup di Panel Admin —
+ *   jadi ketiadaan `youtubePrivacyStatus` pada postingan BUKAN
+ *   penolakan: adapter memakai bawaan panel→env saat publish.
+ * - Kombinasi tidak sah: konten bermerek TikTok (`brandContent`)
+ *   tidak boleh privat menurut Branded Content Policy — pilihan
+ *   SELF_ONLY + bermerek ditolak di sini, sebelum jam tayang.
+ */
+function assertPublishOptionsSchedulable(
+  existing: PostRecord,
+  capability: PostProviderCapability,
+): void {
+  const options = existing.publishOptions;
+  if (
+    capability.publishOptions.supportsAiDisclosure &&
+    typeof options?.aiGenerated !== "boolean"
+  ) {
+    throw new PostDomainError("POST_PUBLISH_OPTIONS_REQUIRED");
+  }
+  if (existing.target.provider === "tiktok") {
+    if (!options?.tiktokPrivacyLevel) {
+      throw new PostDomainError("POST_PUBLISH_OPTIONS_REQUIRED");
+    }
+    if (
+      options.tiktokBrandContent === true &&
+      options.tiktokPrivacyLevel === "SELF_ONLY"
+    ) {
+      throw new PostDomainError("POST_PUBLISH_OPTIONS_INVALID");
     }
   }
 }
@@ -1148,6 +1298,9 @@ export async function duplicatePost(
       title: source.title,
       caption: source.caption,
       mediaIds: source.media.map((item) => item.mediaId),
+      // Pilihan penerbitan ikut disalin: menduplikat berarti memakai
+      // ulang keputusan privasi/AI yang sama untuk kiriman yang sama.
+      publishOptions: source.publishOptions,
     });
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
@@ -1202,6 +1355,8 @@ export interface PostPublishPayload {
   chatId: string;
   encryptedToken: string | null;
   provider: string;
+  /** Pilihan penerbitan pengguna per postingan ini; null = belum memilih. */
+  publishOptions: PostPublishOptions | null;
   media: Array<{
     r2Key: string;
     mimeType: string | null;
@@ -1264,6 +1419,7 @@ export async function getPostForPublish(
         chatId: conversations.providerChatId,
         provider: conversations.provider,
         encryptedToken: channelAccounts.accessTokenEncrypted,
+        publishOptions: posts.publishOptions,
       })
       .from(posts)
       .innerJoin(conversations, eq(conversations.id, posts.conversationId))
@@ -1295,6 +1451,7 @@ export async function getPostForPublish(
       chatId: row.chatId,
       encryptedToken: row.encryptedToken,
       provider: row.provider,
+      publishOptions: parsePublishOptions(row.publishOptions),
       media: files.map((file) => ({
         r2Key: file.r2Key,
         mimeType: file.mimeType,

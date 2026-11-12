@@ -9,6 +9,7 @@ import {
   createPostGroup,
   duplicatePost,
   getPost,
+  getPostForPublish,
   getPostTargetProvider,
   listPostTargets,
   markPostFailed,
@@ -333,6 +334,10 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
       title: "Review Produk Baru",
       caption: "Deskripsi video minggu ini",
       mediaIds: [MEDIA_VIDEO],
+      // Pengungkapan AI eksplisit wajib untuk YouTube; privasi
+      // sengaja tidak dipilih di sini — ia jatuh ke bawaan platform
+      // (Panel Admin) saat publish, bukan penolakan penjadwalan.
+      publishOptions: { aiGenerated: false },
     });
     const scheduled = await schedulePost(ctx.db, {
       tenantId: TEST_TENANT_ID,
@@ -618,6 +623,7 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
       title: "Video promo minggu ini",
       caption: "Caption adalah judul postingan TikTok #promo",
       mediaIds: [MEDIA_VIDEO],
+      publishOptions: { tiktokPrivacyLevel: "SELF_ONLY", aiGenerated: false },
     });
     const scheduled = await schedulePost(ctx.db, {
       tenantId: TEST_TENANT_ID,
@@ -652,6 +658,7 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
       title: "Foto TikTok",
       caption: "Foto produk terbaru #fyp",
       mediaIds: [MEDIA_PHOTO],
+      publishOptions: { tiktokPrivacyLevel: "SELF_ONLY", aiGenerated: false },
     });
     const scheduledPhoto = await schedulePost(ctx.db, {
       tenantId: TEST_TENANT_ID,
@@ -667,6 +674,7 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
       title: "Carousel TikTok",
       caption: "Geser untuk lihat semua varian",
       mediaIds: [MEDIA_PHOTO, MEDIA_PHOTO_2],
+      publishOptions: { tiktokPrivacyLevel: "SELF_ONLY", aiGenerated: false },
     });
     const scheduledCarousel = await schedulePost(ctx.db, {
       tenantId: TEST_TENANT_ID,
@@ -744,6 +752,236 @@ describe("sasaran Meta & Threads (Gelombang 1)", () => {
     });
     expect(scheduled.post.status).toBe("scheduled");
     expect(scheduled.post.target.provider).toBe("messenger");
+  });
+});
+
+describe("opsi penerbitan per postingan (privasi & AI)", () => {
+  it("tersimpan per baris sasaran, field lintas platform dibersihkan, dan terbawa ke payload publish", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const youtube = targets.find((target) => target.provider === "youtube")!;
+    const post = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube.conversationId,
+      title: "Video berkonten AI",
+      caption: "Deskripsi video hasil generasi AI",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: {
+        youtubePrivacyStatus: "unlisted",
+        aiGenerated: true,
+        madeForKids: false,
+        // Field TikTok pada baris YouTube harus dibuang saat simpan.
+        tiktokPrivacyLevel: "SELF_ONLY",
+      },
+    });
+    expect(post.publishOptions).toEqual({
+      youtubePrivacyStatus: "unlisted",
+      aiGenerated: true,
+      madeForKids: false,
+    });
+
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    const claimed = await claimPostForPublish(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      postId: post.id,
+      expectedScheduledAt: scheduled.post.scheduledAt!,
+    });
+    expect(claimed.kind).toBe("claimed");
+    const payload = await getPostForPublish(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      postId: post.id,
+    });
+    expect(payload?.publishOptions).toEqual({
+      youtubePrivacyStatus: "unlisted",
+      aiGenerated: true,
+      madeForKids: false,
+    });
+  });
+
+  it("YouTube tanpa pengungkapan AI eksplisit tidak bisa dijadwalkan; dengan AI tetapi tanpa privasi bisa (bawaan panel)", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const youtube = targets.find((target) => target.provider === "youtube")!;
+    const noAi = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube.conversationId,
+      title: "Tanpa pernyataan AI",
+      caption: "Pengguna belum menyatakan konten AI atau bukan",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: { youtubePrivacyStatus: "public" },
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: noAi.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_PUBLISH_OPTIONS_REQUIRED" });
+
+    const noPrivacy = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: youtube.conversationId,
+      title: "Privasi dari bawaan panel",
+      caption: "Privasi tidak dipilih pada postingan — bawaan platform berlaku",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: { aiGenerated: false },
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: noPrivacy.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+  });
+
+  it("TikTok tanpa pilihan privasi pada postingan TIDAK bisa dijadwalkan (guidelines: tanpa nilai terpilih duluan)", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const tiktok = targets.find((target) => target.provider === "tiktok")!;
+    const noPrivacy = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok.conversationId,
+      title: "TikTok tanpa privasi",
+      caption: "AI sudah dinyatakan, privasi belum dipilih",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: { aiGenerated: false },
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: noPrivacy.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_PUBLISH_OPTIONS_REQUIRED" });
+
+    const withPrivacy = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok.conversationId,
+      title: "TikTok dengan privasi",
+      caption: "Privasi dipilih pengguna pada postingan ini",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: { tiktokPrivacyLevel: "SELF_ONLY", aiGenerated: true },
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: withPrivacy.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+    expect(scheduled.post.publishOptions?.aiGenerated).toBe(true);
+  });
+
+  it("TikTok: konten bermerek tidak boleh privat; bermerek + publik sah", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const tiktok = targets.find((target) => target.provider === "tiktok")!;
+    const brandedPrivate = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok.conversationId,
+      title: "Endorse privat",
+      caption: "Konten bermerek yang disembunyikan — ditolak platform",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: {
+        tiktokPrivacyLevel: "SELF_ONLY",
+        aiGenerated: false,
+        tiktokBrandContent: true,
+      },
+    });
+    await expect(
+      schedulePost(ctx.db, {
+        tenantId: TEST_TENANT_ID,
+        userId: USER_ID,
+        postId: brandedPrivate.id,
+      }),
+    ).rejects.toMatchObject({ code: "POST_PUBLISH_OPTIONS_INVALID" });
+
+    const brandedPublic = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: tiktok.conversationId,
+      title: "Endorse publik",
+      caption: "Konten bermerek yang dinyatakan terbuka",
+      mediaIds: [MEDIA_VIDEO],
+      publishOptions: {
+        tiktokPrivacyLevel: "PUBLIC_TO_EVERYONE",
+        aiGenerated: false,
+        tiktokBrandContent: true,
+      },
+    });
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: brandedPublic.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+  });
+
+  it("grup multi-target: opsi melekat per anggota; edit draft mengganti/mengosongkan; duplikat menyalin", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const youtube = targets.find((target) => target.provider === "youtube")!;
+    const telegram = targets.find((target) => target.provider === "telegram")!;
+    const group = await createPostGroup(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      title: "Kampanye campuran",
+      caption: "Satu konten, dua platform",
+      mediaIds: [MEDIA_VIDEO],
+      targets: [
+        {
+          conversationId: youtube.conversationId,
+          publishOptions: { aiGenerated: true, youtubePrivacyStatus: "public" },
+        },
+        {
+          conversationId: telegram.conversationId,
+          // Provider tanpa permukaan opsi: apa pun yang dikirim dibuang.
+          publishOptions: { aiGenerated: true },
+        },
+      ],
+    });
+    const ytMember = group.posts.find((p) => p.target.provider === "youtube")!;
+    const tgMember = group.posts.find((p) => p.target.provider === "telegram")!;
+    expect(ytMember.publishOptions).toEqual({
+      aiGenerated: true,
+      youtubePrivacyStatus: "public",
+    });
+    expect(tgMember.publishOptions).toBeNull();
+
+    const edited = await updatePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: ytMember.id,
+      publishOptions: { aiGenerated: false, madeForKids: true },
+    });
+    expect(edited.publishOptions).toEqual({
+      aiGenerated: false,
+      madeForKids: true,
+    });
+    const cleared = await updatePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: ytMember.id,
+      publishOptions: null,
+    });
+    expect(cleared.publishOptions).toBeNull();
+
+    const withOptions = await updatePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: ytMember.id,
+      publishOptions: { aiGenerated: true },
+    });
+    const copy = await duplicatePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: withOptions.id,
+    });
+    expect(copy.publishOptions).toEqual({ aiGenerated: true });
   });
 });
 
