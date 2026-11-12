@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Locale, createTranslator } from "@sahabat-kreator/i18n";
 import {
   getPostProviderCapability,
+  type PinterestBoard,
+  type PinterestBoardPrivacy,
+  type PostPublishOptions,
   type PostResponse,
   type PostStatus,
   type PostTarget,
@@ -40,6 +43,15 @@ import { useWorkspace } from "../workspace/WorkspaceProvider";
  * - Pemulihan bersifat manual dan terlihat: post gagal punya tombol
  *   Coba Lagi, post macet di `publishing` punya tombol Bebaskan
  *   (dua langkah) — tidak ada retry otomatis yang disembunyikan.
+ * - Opsi penerbitan per sasaran (gelombang Pilihan Privasi & AI):
+ *   sasaran YouTube/TikTok/Pinterest menampilkan sub-formulir dari
+ *   capability providernya — privasi + pernyataan AI (YouTube:
+ *   privasi mulai dari bawaan platform; TikTok: privasi mulai
+ *   KOSONG karena guidelines mewajibkan kreator memilih sendiri),
+ *   toggle interaksi + pengungkapan komersial TikTok, dan board
+ *   tujuan Pin (dropdown akun + buat board baru sebaris). Pilihan
+ *   wajib diperiksa lokal sebelum penjadwalan; server menegakkan
+ *   gerbang yang sama.
  */
 
 interface PostsPageProps {
@@ -164,6 +176,34 @@ export function PostsPage({ t, locale }: PostsPageProps) {
   const [caption, setCaption] = useState("");
   const [mediaIds, setMediaIds] = useState<string[]>([]);
   const [scheduleAt, setScheduleAt] = useState("");
+  /**
+   * Opsi penerbitan per sasaran (gelombang Pilihan Privasi & AI):
+   * pilihan pengguna pada formulir ini, dikunci per conversationId
+   * sasaran — grup multi-target membawa pilihan platformnya
+   * masing-masing, persis model data di core.
+   */
+  const [optionsByTarget, setOptionsByTarget] = useState<
+    Record<string, PostPublishOptions>
+  >({});
+  const setTargetOption = (
+    conversationId: string,
+    patch: Partial<PostPublishOptions>,
+  ) =>
+    setOptionsByTarget((current) => ({
+      ...current,
+      [conversationId]: { ...current[conversationId], ...patch },
+    }));
+  /** Bentuk kirim: field tak terisi (undefined) dibuang; kosong = tanpa opsi. */
+  const optionsFor = (
+    conversationId: string,
+  ): PostPublishOptions | undefined => {
+    const raw = optionsByTarget[conversationId];
+    if (!raw) return undefined;
+    const clean = Object.fromEntries(
+      Object.entries(raw).filter(([, value]) => value !== undefined),
+    ) as PostPublishOptions;
+    return Object.keys(clean).length > 0 ? clean : undefined;
+  };
 
   const todayTuple = useMemo(
     () => zonedDayTuple(new Date().toISOString(), timezone) ?? { y: 1970, m: 1, d: 1 },
@@ -248,6 +288,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
         title: title.trim(),
         caption,
         mediaIds,
+        publishOptions: optionsFor(selectedTargets[0]!),
       });
       return [created];
     }
@@ -255,7 +296,10 @@ export function PostsPage({ t, locale }: PostsPageProps) {
       title: title.trim(),
       caption,
       mediaIds,
-      targets: selectedTargets.map((conversationId) => ({ conversationId })),
+      targets: selectedTargets.map((conversationId) => ({
+        conversationId,
+        publishOptions: optionsFor(conversationId),
+      })),
     });
     return group.items;
   };
@@ -265,6 +309,46 @@ export function PostsPage({ t, locale }: PostsPageProps) {
     setCaption("");
     setMediaIds([]);
     setScheduleAt("");
+    setOptionsByTarget({});
+  };
+
+  /**
+   * Pilihan wajib SEBELUM penjadwalan (cermin gerbang core, agar
+   * pengguna tidak ditinggal dengan draft setengah terjadwal):
+   * pengungkapan AI untuk YouTube/TikTok, privasi untuk TikTok
+   * (guidelines: dipilih pengguna, tanpa nilai bawaan), dan
+   * larangan konten bermerek privat di TikTok. Mengembalikan pesan
+   * error siap tampil atau null bila lengkap.
+   */
+  const optionsScheduleError = (): string | null => {
+    for (const target of targets) {
+      if (!selectedTargets.includes(target.conversationId)) continue;
+      const capability = getPostProviderCapability(target.provider);
+      if (!capability) continue;
+      const options = optionsFor(target.conversationId);
+      if (
+        capability.publishOptions.supportsAiDisclosure &&
+        typeof options?.aiGenerated !== "boolean"
+      ) {
+        return t("posts.optionsAiRequired", {
+          target: target.title ?? target.provider,
+        });
+      }
+      if (target.provider === "tiktok") {
+        if (!options?.tiktokPrivacyLevel) {
+          return t("posts.optionsTiktokPrivacyRequired", {
+            target: target.title ?? target.provider,
+          });
+        }
+        if (
+          options.tiktokBrandContent === true &&
+          options.tiktokPrivacyLevel === "SELF_ONLY"
+        ) {
+          return t("posts.optionsTiktokBrandedPrivate");
+        }
+      }
+    }
+    return null;
   };
 
   const onSaveDraft = () =>
@@ -273,8 +357,16 @@ export function PostsPage({ t, locale }: PostsPageProps) {
       resetForm();
     });
 
-  const onSchedule = () =>
-    run(async () => {
+  const onSchedule = () => {
+    // Pilihan wajib diperiksa LOKAL lebih dulu: tanpa ini pengguna
+    // ditinggal dengan draft yang gagal di tengah penjadwalan
+    // (server menegakkan gerbang yang sama persis lewat API).
+    const optionsError = optionsScheduleError();
+    if (optionsError) {
+      setError(optionsError);
+      return;
+    }
+    return run(async () => {
       if (!tenantId) return;
       const created = await createDrafts();
       const iso = toIso(scheduleAt);
@@ -283,6 +375,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
       }
       if (created.length > 0) resetForm();
     });
+  };
 
   const onUpload = async (files: FileList | null) => {
     if (!tenantId || !files || files.length === 0) return;
@@ -431,6 +524,34 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                 <p className="mt-1 text-xs text-muted">{t("posts.groupHint")}</p>
               )}
             </div>
+
+            {targets
+              .filter((target) =>
+                selectedTargets.includes(target.conversationId),
+              )
+              .map((target) => {
+                const capability = getPostProviderCapability(target.provider);
+                if (!capability) return null;
+                const surface = capability.publishOptions;
+                const hasSurface =
+                  surface.privacyValues.length > 0 ||
+                  surface.supportsAiDisclosure ||
+                  surface.supportsBoardChoice;
+                if (!hasSurface) return null;
+                return (
+                  <PublishOptionsFields
+                    key={target.conversationId}
+                    t={t}
+                    tenantId={tenantId}
+                    target={target}
+                    options={optionsByTarget[target.conversationId] ?? {}}
+                    onChange={(patch) =>
+                      setTargetOption(target.conversationId, patch)
+                    }
+                    disabled={!canManage}
+                  />
+                );
+              })}
 
             <label className="block">
               <span className="text-xs font-medium text-muted">{t("posts.internalTitle")}</span>
@@ -830,6 +951,11 @@ function PostCard({
               ? ` · ${t("posts.mediaCount", { count: post.media.length })}`
               : ""}
           </p>
+          {publishOptionsSummary(t, post) ? (
+            <p className="mt-1 text-xs text-muted">
+              {publishOptionsSummary(t, post)}
+            </p>
+          ) : null}
           {post.caption && (
             <p className="mt-2 line-clamp-2 text-sm text-ink">{post.caption}</p>
           )}
@@ -960,5 +1086,500 @@ function PostCard({
         )}
       </div>
     </li>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Opsi penerbitan per sasaran (gelombang Pilihan Privasi & AI per
+// Postingan) — sub-formulir yang digambar dari capability provider:
+// platformlah yang menentukan pilihan apa yang ada, formulir hanya
+// menampilkannya per sasaran yang dipilih.
+// ---------------------------------------------------------------------------
+
+const inputClassName =
+  "mt-1 w-full rounded-md border border-line bg-surface px-3 py-2 text-sm text-ink";
+
+/** Ringkasan satu baris opsi pada kartu daftar (indikator seperlunya). */
+function publishOptionsSummary(t: Translate, post: PostResponse): string | null {
+  const options = post.publishOptions;
+  if (!options) return null;
+  const parts: string[] = [];
+  const privacy = options.youtubePrivacyStatus ?? options.tiktokPrivacyLevel;
+  if (privacy) parts.push(`${t("posts.optionsPrivacyLabel")}: ${privacy}`);
+  if (options.aiGenerated) parts.push(t("posts.optionsAiBadge"));
+  if (options.pinterestBoardId) {
+    parts.push(`${t("posts.optionsBoardLabel")}: ${options.pinterestBoardId}`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function AiDisclosureField({
+  t,
+  name,
+  value,
+  onChange,
+  disabled,
+}: {
+  t: Translate;
+  name: string;
+  value: boolean | undefined;
+  onChange: (next: boolean) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div>
+      <span className="text-xs font-medium text-muted">
+        {t("posts.optionsAiLabel")}
+      </span>
+      <div className="mt-1 space-y-1">
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input
+            type="radio"
+            name={name}
+            checked={value === true}
+            onChange={() => onChange(true)}
+            disabled={disabled}
+          />
+          <span>{t("posts.optionsAiYes")}</span>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-ink">
+          <input
+            type="radio"
+            name={name}
+            checked={value === false}
+            onChange={() => onChange(false)}
+            disabled={disabled}
+          />
+          <span>{t("posts.optionsAiNo")}</span>
+        </label>
+      </div>
+      <p className="mt-1 text-xs text-muted">{t("posts.optionsAiHint")}</p>
+    </div>
+  );
+}
+
+function PublishOptionsFields({
+  t,
+  tenantId,
+  target,
+  options,
+  onChange,
+  disabled,
+}: {
+  t: Translate;
+  tenantId: string | null;
+  target: PostTarget;
+  options: PostPublishOptions;
+  onChange: (patch: Partial<PostPublishOptions>) => void;
+  disabled: boolean;
+}) {
+  const provider = target.provider;
+  return (
+    <div className="space-y-3 rounded-lg border border-line p-3">
+      <p className="text-xs font-semibold text-ink">
+        {t("posts.optionsTitle")} — {target.title ?? target.providerChatId}
+      </p>
+
+      {provider === "youtube" && (
+        <>
+          <label className="block">
+            <span className="text-xs font-medium text-muted">
+              {t("posts.optionsPrivacyLabel")}
+            </span>
+            <select
+              className={inputClassName}
+              value={options.youtubePrivacyStatus ?? ""}
+              onChange={(event) =>
+                onChange({
+                  youtubePrivacyStatus:
+                    event.target.value === ""
+                      ? undefined
+                      : (event.target.value as NonNullable<
+                          PostPublishOptions["youtubePrivacyStatus"]
+                        >),
+                })
+              }
+              disabled={disabled}
+            >
+              <option value="">{t("posts.optionsYoutubePrivacyDefault")}</option>
+              <option value="private">{t("posts.optionsPrivacyPrivate")}</option>
+              <option value="unlisted">{t("posts.optionsPrivacyUnlisted")}</option>
+              <option value="public">{t("posts.optionsPrivacyPublic")}</option>
+            </select>
+          </label>
+          <AiDisclosureField
+            t={t}
+            name={`ai-${target.conversationId}`}
+            value={options.aiGenerated}
+            onChange={(next) => onChange({ aiGenerated: next })}
+            disabled={disabled}
+          />
+          <label className="block">
+            <span className="text-xs font-medium text-muted">
+              {t("posts.optionsMadeForKidsLabel")}
+            </span>
+            <select
+              className={inputClassName}
+              value={
+                options.madeForKids === undefined
+                  ? ""
+                  : String(options.madeForKids)
+              }
+              onChange={(event) =>
+                onChange({
+                  madeForKids:
+                    event.target.value === ""
+                      ? undefined
+                      : event.target.value === "true",
+                })
+              }
+              disabled={disabled}
+            >
+              <option value="">{t("posts.optionsMadeForKidsChannel")}</option>
+              <option value="true">{t("posts.optionsMadeForKidsYes")}</option>
+              <option value="false">{t("posts.optionsMadeForKidsNo")}</option>
+            </select>
+          </label>
+        </>
+      )}
+
+      {provider === "tiktok" && (
+        <>
+          <label className="block">
+            <span className="text-xs font-medium text-muted">
+              {t("posts.optionsPrivacyLabel")}
+            </span>
+            <select
+              className={inputClassName}
+              value={options.tiktokPrivacyLevel ?? ""}
+              onChange={(event) =>
+                onChange({
+                  tiktokPrivacyLevel:
+                    event.target.value === ""
+                      ? undefined
+                      : (event.target.value as NonNullable<
+                          PostPublishOptions["tiktokPrivacyLevel"]
+                        >),
+                })
+              }
+              disabled={disabled}
+            >
+              {/* Guidelines TikTok: privasi dipilih kreator sendiri —
+                  pemilih ini SENGAJA mulai kosong, tanpa nilai bawaan. */}
+              <option value="">
+                {t("posts.optionsTiktokPrivacyPlaceholder")}
+              </option>
+              <option value="PUBLIC_TO_EVERYONE">
+                {t("posts.optionsTiktokPrivacyPublic")}
+              </option>
+              <option value="FOLLOWER_OF_CREATOR">
+                {t("posts.optionsTiktokPrivacyFollowers")}
+              </option>
+              <option value="MUTUAL_FOLLOW_FRIENDS">
+                {t("posts.optionsTiktokPrivacyFriends")}
+              </option>
+              <option value="SELF_ONLY">
+                {t("posts.optionsTiktokPrivacySelfOnly")}
+              </option>
+            </select>
+          </label>
+          <AiDisclosureField
+            t={t}
+            name={`ai-${target.conversationId}`}
+            value={options.aiGenerated}
+            onChange={(next) => onChange({ aiGenerated: next })}
+            disabled={disabled}
+          />
+          <div>
+            <span className="text-xs font-medium text-muted">
+              {t("posts.optionsInteractionsLabel")}
+            </span>
+            <div className="mt-1 space-y-1">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={options.tiktokAllowComment === true}
+                  onChange={(event) =>
+                    onChange({ tiktokAllowComment: event.target.checked })
+                  }
+                  disabled={disabled}
+                />
+                <span>{t("posts.optionsAllowComment")}</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={options.tiktokAllowDuet === true}
+                  onChange={(event) =>
+                    onChange({ tiktokAllowDuet: event.target.checked })
+                  }
+                  disabled={disabled}
+                />
+                <span>{t("posts.optionsAllowDuet")}</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={options.tiktokAllowStitch === true}
+                  onChange={(event) =>
+                    onChange({ tiktokAllowStitch: event.target.checked })
+                  }
+                  disabled={disabled}
+                />
+                <span>{t("posts.optionsAllowStitch")}</span>
+              </label>
+            </div>
+            <p className="mt-1 text-xs text-muted">
+              {t("posts.optionsInteractionsHint")}
+            </p>
+          </div>
+          <div>
+            <span className="text-xs font-medium text-muted">
+              {t("posts.optionsCommercialLabel")}
+            </span>
+            <div className="mt-1 space-y-1">
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={options.tiktokBrandOrganic === true}
+                  onChange={(event) =>
+                    onChange({ tiktokBrandOrganic: event.target.checked })
+                  }
+                  disabled={disabled}
+                />
+                <span>{t("posts.optionsBrandOrganic")}</span>
+              </label>
+              <label className="flex items-center gap-2 text-sm text-ink">
+                <input
+                  type="checkbox"
+                  checked={options.tiktokBrandContent === true}
+                  onChange={(event) =>
+                    onChange({ tiktokBrandContent: event.target.checked })
+                  }
+                  disabled={disabled}
+                />
+                <span>{t("posts.optionsBrandContent")}</span>
+              </label>
+            </div>
+            {options.tiktokBrandContent === true &&
+              options.tiktokPrivacyLevel === "SELF_ONLY" && (
+                <p className="mt-1 text-xs text-warning">
+                  {t("posts.optionsBrandedPrivateHint")}
+                </p>
+              )}
+          </div>
+        </>
+      )}
+
+      {provider === "pinterest" && (
+        <PinterestBoardField
+          t={t}
+          tenantId={tenantId}
+          target={target}
+          value={options.pinterestBoardId}
+          onChange={(boardId) => onChange({ pinterestBoardId: boardId })}
+          disabled={disabled}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Pemilih board Pinterest pada formulir postingan: dropdown board
+ * milik akun sasaran (endpoint daftar board Channels yang sama —
+ * akun-scope, bukan jalur API kedua) + buat board baru sebaris.
+ * Pilihan di sini adalah OPSI POSTINGAN (tidak menimpa bawaan akun);
+ * board hasil buat dipilih untuk postingan ini dan — perilaku
+ * endpoint Channels yang dipakai — juga menjadi bawaan akun.
+ * Daftar gagal dimuat → catatan jujur dan formulir tetap bisa
+ * disimpan dengan board kosong (= resolusi bawaan penerbit).
+ */
+function PinterestBoardField({
+  t,
+  tenantId,
+  target,
+  value,
+  onChange,
+  disabled,
+}: {
+  t: Translate;
+  tenantId: string | null;
+  target: PostTarget;
+  value: string | undefined;
+  onChange: (boardId: string | undefined) => void;
+  disabled: boolean;
+}) {
+  const [boards, setBoards] = useState<PinterestBoard[] | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newDesc, setNewDesc] = useState("");
+  const [newPrivacy, setNewPrivacy] =
+    useState<PinterestBoardPrivacy>("PUBLIC");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!tenantId) return;
+    setLoadFailed(false);
+    try {
+      const data = await api.channels.pinterestBoards(
+        tenantId,
+        target.channelAccountId,
+      );
+      setBoards(data.boards);
+    } catch {
+      // Kegagalan memuat daftar TIDAK mengunci formulir: board
+      // kosong berarti penerbit memakai resolusi bawaannya.
+      setLoadFailed(true);
+    }
+  }, [tenantId, target.channelAccountId]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function handleCreate(event: React.FormEvent) {
+    event.preventDefault();
+    if (!tenantId) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const created = await api.channels.pinterestBoardCreate(
+        tenantId,
+        target.channelAccountId,
+        {
+          name: newName.trim(),
+          ...(newDesc.trim() ? { description: newDesc.trim() } : {}),
+          privacy: newPrivacy,
+        },
+      );
+      setBoards(created.boards);
+      onChange(created.createdBoard.id);
+      setShowCreate(false);
+      setNewName("");
+      setNewDesc("");
+      setNewPrivacy("PUBLIC");
+    } catch (err) {
+      setCreateError(translateApiError(t, err));
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <label className="block">
+        <span className="text-xs font-medium text-muted">
+          {t("posts.optionsBoardLabel")}
+        </span>
+        <select
+          className={inputClassName}
+          value={value ?? ""}
+          onChange={(event) =>
+            onChange(
+              event.target.value === "" ? undefined : event.target.value,
+            )
+          }
+          disabled={disabled || boards === null}
+        >
+          <option value="">{t("posts.optionsBoardDefault")}</option>
+          {boards?.map((board) => (
+            <option key={board.id} value={board.id}>
+              {board.name ?? board.id}
+            </option>
+          ))}
+        </select>
+      </label>
+      {boards === null && !loadFailed && (
+        <p className="text-xs text-muted">{t("posts.optionsBoardLoading")}</p>
+      )}
+      {loadFailed && (
+        <p className="text-xs text-warning">
+          {t("posts.optionsBoardLoadFailed")}
+        </p>
+      )}
+      {!showCreate ? (
+        <button
+          type="button"
+          className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink disabled:opacity-40"
+          onClick={() => setShowCreate(true)}
+          disabled={disabled}
+        >
+          {t("channels.pinterestBoardCreateToggle")}
+        </button>
+      ) : (
+        <form onSubmit={(event) => void handleCreate(event)} className="space-y-2">
+          <label className="block">
+            <span className="text-xs text-muted">
+              {t("channels.pinterestBoardNameLabel")}
+            </span>
+            <input
+              className={inputClassName}
+              value={newName}
+              onChange={(event) => setNewName(event.target.value)}
+              placeholder={t("channels.pinterestBoardNamePlaceholder")}
+              maxLength={180}
+              required
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-muted">
+              {t("channels.pinterestBoardDescLabel")}
+            </span>
+            <input
+              className={inputClassName}
+              value={newDesc}
+              onChange={(event) => setNewDesc(event.target.value)}
+              maxLength={500}
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-muted">
+              {t("channels.pinterestBoardPrivacyLabel")}
+            </span>
+            <select
+              className={inputClassName}
+              value={newPrivacy}
+              onChange={(event) =>
+                setNewPrivacy(event.target.value as PinterestBoardPrivacy)
+              }
+            >
+              <option value="PUBLIC">
+                {t("channels.pinterestBoardPrivacyPublic")}
+              </option>
+              <option value="PROTECTED">
+                {t("channels.pinterestBoardPrivacyProtected")}
+              </option>
+            </select>
+          </label>
+          <p className="text-xs text-muted">
+            {t("posts.optionsBoardCreateNote")}
+          </p>
+          {createError && (
+            <p className="text-xs text-danger">{createError}</p>
+          )}
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              className="rounded-md bg-accent px-2 py-1 text-xs font-medium text-white disabled:opacity-40"
+              disabled={creating || !newName.trim()}
+            >
+              {creating
+                ? t("channels.pinterestBoardCreating")
+                : t("channels.pinterestBoardCreateButton")}
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-line bg-surface px-2 py-1 text-xs text-ink"
+              onClick={() => setShowCreate(false)}
+            >
+              {t("posts.cancel")}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
   );
 }

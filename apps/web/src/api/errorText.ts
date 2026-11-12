@@ -97,6 +97,10 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.PINTEREST_BOARD_NOT_FOUND");
     case "PINTEREST_BOARDS_UNAVAILABLE":
       return t("errors.PINTEREST_BOARDS_UNAVAILABLE");
+    case "POST_PUBLISH_OPTIONS_REQUIRED":
+      return t("errors.POST_PUBLISH_OPTIONS_REQUIRED");
+    case "POST_PUBLISH_OPTIONS_INVALID":
+      return t("errors.POST_PUBLISH_OPTIONS_INVALID");
     case "CHANNEL_DELETE_CONFIRMATION_MISMATCH":
       return t("errors.CHANNEL_DELETE_CONFIRMATION_MISMATCH");
     case "CHANNEL_ALREADY_TRASHED":

@@ -915,6 +915,11 @@ export function AdminPage({ t, locale }: AdminPageProps) {
         grup publik lain; barisnya teks biasa dan dimuat ulang sesudah
         diubah agar tampilan efektifnya segar. Nilai di luar pilihan
         sah ditolak server saat disimpan.
+        Sejak gelombang Pilihan Privasi & AI per Postingan kedua
+        level ini adalah NILAI BAWAAN platform: formulir postingan
+        menampilkan pemilihnya per postingan dan pilihan pengguna
+        menimpa bawaan ini (keputusan pemilik 2026-11-12 — panel
+        dipertahankan sebagai default, BUKAN dicabut).
       */}
       <section className="mt-8">
         <h2 className="text-base font-semibold text-ink">
