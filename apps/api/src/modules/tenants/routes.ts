@@ -22,6 +22,7 @@ function serializeTenant(t: TenantWithRole): TenantResponse {
     slug: t.slug,
     defaultLocale: t.defaultLocale,
     timezone: t.timezone,
+    defaultCurrency: t.defaultCurrency,
     role: t.role,
     createdAt: t.createdAt.toISOString(),
     updatedAt: t.updatedAt.toISOString(),

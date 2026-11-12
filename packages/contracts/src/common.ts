@@ -255,6 +255,17 @@ export const ErrorCodeSchema = z.enum([
   "WEBHOOK_EVENT_UNKNOWN",
   "WEBHOOK_EVENTS_EMPTY",
   "WEBHOOK_ENDPOINT_LIMIT",
+  // Gelombang G12: deals/pipeline — rujukan tidak ditemukan di tenant
+  // ini, atau penghapusan ditolak karena isi (pipeline berisi deal,
+  // tahap berisi deal tanpa tujuan pindah, pipeline tanpa tahap).
+  "DEAL_NOT_FOUND",
+  "PIPELINE_NOT_FOUND",
+  "STAGE_NOT_FOUND",
+  "CONTACT_NOT_FOUND",
+  "CONVERSATION_NOT_FOUND",
+  "PIPELINE_HAS_DEALS",
+  "STAGE_NOT_EMPTY",
+  "PIPELINE_HAS_NO_STAGES",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

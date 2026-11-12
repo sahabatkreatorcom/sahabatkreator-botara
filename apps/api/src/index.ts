@@ -58,6 +58,7 @@ import { createAuditRoutes } from "./modules/audit/routes";
 import { createBroadcastsRoutes } from "./modules/broadcasts/routes";
 import { createBroadcastRecurrenceRoutes } from "./modules/broadcast-recurrences/routes";
 import { createOutboundWebhooksRoutes } from "./modules/outbound-webhooks/routes";
+import { createDealsRoutes } from "./modules/deals/routes";
 import { createPostsRoutes } from "./modules/posts/routes";
 import { createWhatsAppTemplatesRoutes } from "./modules/whatsapp-templates/routes";
 import { createCommentsRoutes } from "./modules/comments/routes";
@@ -327,6 +328,9 @@ routes.route(
     channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
   }),
 );
+// Modul deals (G12) — pipeline penjualan & papan Kanban:
+// /tenants/:tenantId/deal-pipelines + /deals + /deal-settings.
+routes.route("/", createDealsRoutes(authBundle));
 // Modul posts (Fase 23) — Content Schedule untuk channel Telegram
 // /tenants/:tenantId/posts; penerbitan oleh worker (event outbox
 // post.publish_due → job post.publish). Opsi modul dipakai
