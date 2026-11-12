@@ -39,6 +39,7 @@ export * from "./analytics";
 export * from "./dashboard";
 export * from "./broadcasts";
 export * from "./outbound-webhooks";
+export * from "./deals";
 export * from "./whatsapp-templates";
 export * from "./flows";
 export * from "./experiments";

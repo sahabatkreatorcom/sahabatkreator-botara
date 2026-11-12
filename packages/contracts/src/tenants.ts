@@ -18,6 +18,8 @@ export const TenantResponseSchema = z.object({
   slug: z.string(),
   defaultLocale: z.string(),
   timezone: z.string(),
+  /** Mata uang bawaan akun untuk deal baru (G12; pola wacrm 021). */
+  defaultCurrency: z.string(),
   /** Role pemanggil di workspace ini (dari tenant_members). */
   role: MemberRoleSchema,
   createdAt: z.string().datetime(),

@@ -59,6 +59,19 @@ import { z } from "zod";
  * - add_tag       { tag }    remove_tag { tag }    set_stage { stage }
  * - enroll_sequence { automationId } — sequence AKTIF milik tenant
  *                   yang sama (divalidasi saat aktivasi & eksekusi).
+ * - create_deal   { title, value?, dealStageId, assigneeUserId? } —
+ *                   (G12) buat deal untuk kontak run di tahap tujuan
+ *                   (pipeline mengikuti tahap); judul dirender seperti
+ *                   send_message ({name} + spintax); mata uang =
+ *                   bawaan tenant (pola wacrm create_deal). Tahap
+ *                   hilang saat eksekusi → langkah dilewati beralasan
+ *                   (deal_stage_unavailable), run lanjut.
+ * - move_deal_stage { dealStageId } — (G12) pindahkan deal OPEN
+ *                   TERBARU kontak run ke tahap tujuan (riwayat +
+ *                   status terminal mengikuti perpindahan, persis
+ *                   jalur UI). Kontak tanpa deal open → langkah
+ *                   dilewati beralasan (no_open_deal), BUKAN kegagalan
+ *                   run — tercatat di detail langkah.
  * - ai_response   {} — memanggil jalur agent.respond yang ada.
  * - handoff       {} — agent_enabled=false pada percakapan + audit.
  * - end           {}
@@ -284,6 +297,10 @@ export const FlowNodeTypeSchema = z.enum([
   "remove_tag",
   "set_stage",
   "enroll_sequence",
+  // G12 — aksi deals (pola wacrm create_deal): buat deal untuk kontak
+  // run / pindahkan tahap deal open terbaru kontak run.
+  "create_deal",
+  "move_deal_stage",
   "ai_response",
   "handoff",
   "end",
@@ -365,6 +382,19 @@ export const FlowNodeConfigSchema = z.union([
   z.object({ tag: z.string().min(1).max(64) }),
   z.object({ stage: z.string().min(1).max(64) }),
   z.object({ automationId: z.string().uuid() }),
+  // G12 — create_deal: bentuk kasar; keabsahan rinci (tahap ada di
+  // tenant ini, assignee member tenant, nilai dalam rentang)
+  // ditegakkan validasi aktivasi di core. `title` adalah templat teks
+  // yang dirender seperti send_message ({name} + spintax).
+  z.object({
+    title: z.string().min(1).max(1000),
+    value: z.number().finite().min(0).max(999_999_999_999).optional(),
+    dealStageId: z.string().uuid(),
+    assigneeUserId: z.string().uuid().optional(),
+  }),
+  // G12 — move_deal_stage: pindahkan deal open TERBARU kontak ke
+  // tahap tujuan (pipeline mengikuti tahap tujuan).
+  z.object({ dealStageId: z.string().uuid() }),
   // Fase 12A — bentuk kasar; keabsahan rinci (rentang persen, rujukan
   // flow/produk aktif, format field) ditegakkan validasi aktivasi.
   z.object({
@@ -840,6 +870,8 @@ export const FlowSimulateEffectKindSchema = z.enum([
   "set_stage",
   "set_field",
   "enroll_sequence",
+  "create_deal",
+  "move_deal_stage",
   "goto_flow",
   "handoff",
   "ai_response",
