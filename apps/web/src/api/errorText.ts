@@ -53,6 +53,17 @@ export function translateApiError(t: Translate, err: unknown): string {
       return t("errors.APPOINTMENT_TIMEZONE_INVALID");
     case "SLOT_TAKEN":
       return t("errors.SLOT_TAKEN");
+    // G2b: penolakan pendaftaran sequence manual — sebabnya diterjemahkan.
+    case "SEQUENCE_UNAVAILABLE":
+      return t("errors.SEQUENCE_UNAVAILABLE");
+    case "SEQUENCE_NO_STEPS":
+      return t("errors.SEQUENCE_NO_STEPS");
+    case "ENROLL_NO_CONVERSATION":
+      return t("errors.ENROLL_NO_CONVERSATION");
+    case "ENROLL_CONVERSATION_INVALID":
+      return t("errors.ENROLL_CONVERSATION_INVALID");
+    case "ENROLL_CONTACT_OPTED_OUT":
+      return t("errors.ENROLL_CONTACT_OPTED_OUT");
     case "GOOGLE_NOT_CONFIGURED":
       return t("errors.GOOGLE_NOT_CONFIGURED");
     case "GOOGLE_NOT_CONNECTED":

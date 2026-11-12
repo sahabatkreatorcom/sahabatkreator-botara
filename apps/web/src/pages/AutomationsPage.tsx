@@ -15,6 +15,9 @@ import {
   type AutomationTemplateSummary,
   type ChannelAccountResponse,
   type CommentResponse,
+  type ContactResponse,
+  type EnrollConversationResponse,
+  type EnrollSequenceByTagResponse,
   type SequenceEnrollmentResponse,
   type SequenceTemplateResponse,
 } from "@sahabat-kreator/contracts";
@@ -1839,40 +1842,39 @@ function EnrollmentsModal({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const list = await api.automations.listEnrollments(
-          tenantId,
-          automation.id,
-        );
-        if (cancelled) return;
-        setEnrollments(list);
-        // Nama kontak bersifat pelengkap: ambil per kontak unik, abaikan gagal.
-        const uniqueContactIds = [...new Set(list.map((e) => e.contactId))];
-        const names: Record<string, string> = {};
-        await Promise.all(
-          uniqueContactIds.map(async (contactId) => {
-            try {
-              const contact = await api.contacts.get(tenantId, contactId);
-              names[contactId] = contact.name;
-            } catch {
-              // biarkan fallback ke ID ringkas
-            }
-          }),
-        );
-        if (!cancelled) setContactNames(names);
-      } catch (err) {
-        if (!cancelled) setError(translateApiError(t, err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadEnrollments = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await api.automations.listEnrollments(
+        tenantId,
+        automation.id,
+      );
+      setEnrollments(list);
+      // Nama kontak bersifat pelengkap: ambil per kontak unik, abaikan gagal.
+      const uniqueContactIds = [...new Set(list.map((e) => e.contactId))];
+      const names: Record<string, string> = {};
+      await Promise.all(
+        uniqueContactIds.map(async (contactId) => {
+          try {
+            const contact = await api.contacts.get(tenantId, contactId);
+            names[contactId] = contact.name;
+          } catch {
+            // biarkan fallback ke ID ringkas
+          }
+        }),
+      );
+      setContactNames(names);
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setLoading(false);
+    }
   }, [tenantId, automation.id, t]);
+
+  useEffect(() => {
+    void loadEnrollments();
+  }, [loadEnrollments]);
 
   return (
     <div
@@ -1896,6 +1898,13 @@ function EnrollmentsModal({
             {t("common.close")}
           </button>
         </div>
+        <ManualEnrollSection
+          t={t}
+          locale={locale}
+          tenantId={tenantId}
+          automation={automation}
+          onEnrolled={() => void loadEnrollments()}
+        />
         {loading ? (
           <p className="mt-4 text-sm text-muted">{t("common.loading")}</p>
         ) : error ? (
@@ -1946,6 +1955,295 @@ function EnrollmentsModal({
             ))}
           </ul>
         )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Pendaftaran sequence MANUAL (G2b) di dalam modal pendaftaran:
+ * daftarkan satu kontak (dengan pemilih percakapan pesan sebagai
+ * jangkar) atau semua kontak bertag. Penolakan dari API selalu
+ * berkode dan diterjemahkan di sini (kontak tanpa percakapan pesan,
+ * opt-out, sequence nonaktif) — pengguna membaca SEBABNYA, bukan
+ * pesan generik. Sesudah berhasil, daftar pendaftaran dimuat ulang
+ * oleh modal induk lewat `onEnrolled`.
+ */
+function ManualEnrollSection({
+  t,
+  locale,
+  tenantId,
+  automation,
+  onEnrolled,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  automation: AutomationResponse;
+  onEnrolled: () => void;
+}) {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<ContactResponse[]>([]);
+  const [searched, setSearched] = useState(false);
+  const [selectedContact, setSelectedContact] =
+    useState<ContactResponse | null>(null);
+  const [conversations, setConversations] = useState<
+    EnrollConversationResponse[] | null
+  >(null);
+  const [conversationId, setConversationId] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const searchSeq = useRef(0);
+
+  const [tag, setTag] = useState("");
+  const [tagBusy, setTagBusy] = useState(false);
+  const [tagReport, setTagReport] =
+    useState<EnrollSequenceByTagResponse | null>(null);
+  const [tagError, setTagError] = useState<string | null>(null);
+
+  const runSearch = async (value: string) => {
+    setSearch(value);
+    setNotice(null);
+    setActionError(null);
+    const seq = ++searchSeq.current;
+    if (value.trim().length < 2) {
+      setResults([]);
+      setSearched(false);
+      return;
+    }
+    try {
+      const page = await api.contacts.list(tenantId, {
+        search: value.trim(),
+        limit: 8,
+      });
+      if (searchSeq.current !== seq) return;
+      setResults(page.contacts);
+      setSearched(true);
+    } catch {
+      if (searchSeq.current !== seq) return;
+      setResults([]);
+      setSearched(true);
+    }
+  };
+
+  const pickContact = async (contact: ContactResponse) => {
+    setSelectedContact(contact);
+    setResults([]);
+    setSearched(false);
+    setSearch(contact.name);
+    setNotice(null);
+    setActionError(null);
+    setConversations(null);
+    setConversationId("");
+    try {
+      const list = await api.automations.listEnrollConversations(
+        tenantId,
+        automation.id,
+        contact.id,
+      );
+      setConversations(list);
+      // Bawaan semantik jangkar: percakapan pesan terbaru (urutan
+      // pertama dari server).
+      setConversationId(list[0]?.id ?? "");
+    } catch (err) {
+      setActionError(translateApiError(t, err));
+      setConversations([]);
+    }
+  };
+
+  const enrollOne = async () => {
+    if (!selectedContact || !conversationId) return;
+    setBusy(true);
+    setNotice(null);
+    setActionError(null);
+    try {
+      const result = await api.automations.enrollContact(
+        tenantId,
+        automation.id,
+        { contactId: selectedContact.id, conversationId },
+      );
+      setNotice(
+        result.outcome === "enrolled"
+          ? t("automations.enrollSuccess")
+          : t("automations.enrollAlready"),
+      );
+      onEnrolled();
+    } catch (err) {
+      setActionError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const enrollTag = async () => {
+    const value = tag.trim();
+    if (!value) return;
+    setTagBusy(true);
+    setTagError(null);
+    setTagReport(null);
+    try {
+      const report = await api.automations.enrollByTag(
+        tenantId,
+        automation.id,
+        { tag: value },
+      );
+      setTagReport(report);
+      onEnrolled();
+    } catch (err) {
+      setTagError(translateApiError(t, err));
+    } finally {
+      setTagBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 rounded-xl border border-line bg-elevated/40 p-4">
+      <h3 className="text-sm font-semibold text-ink">
+        {t("automations.enrollManualTitle")}
+      </h3>
+      <p className="mt-1 text-sm text-muted">
+        {t("automations.enrollManualHint")}
+      </p>
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => void runSearch(e.target.value)}
+        placeholder={t("automations.enrollSearchPlaceholder")}
+        className={`${inputClassName} mt-3`}
+      />
+      {results.length > 0 ? (
+        <ul className="mt-2 divide-y divide-line rounded-lg border border-line bg-surface">
+          {results.map((contact) => (
+            <li key={contact.id}>
+              <button
+                type="button"
+                onClick={() => void pickContact(contact)}
+                className="w-full px-3 py-2 text-left"
+              >
+                <span className="block text-sm font-medium text-ink">
+                  {contact.name}
+                </span>
+                <span className="block text-xs text-muted">
+                  {[contact.phone, contact.email]
+                    .filter(Boolean)
+                    .join(" · ") || shortId(contact.id)}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : searched && !selectedContact ? (
+        <p className="mt-2 text-sm text-muted">
+          {t("automations.enrollNoResults")}
+        </p>
+      ) : null}
+      {selectedContact ? (
+        <div className="mt-3">
+          {conversations === null ? (
+            <p className="text-sm text-muted">{t("common.loading")}</p>
+          ) : conversations.length === 0 ? (
+            <p className="text-sm text-warning">
+              {t("automations.enrollConversationNone")}
+            </p>
+          ) : (
+            <>
+              <label className="block text-xs font-medium text-muted">
+                {t("automations.enrollConversationLabel")}
+                <select
+                  value={conversationId}
+                  onChange={(e) => setConversationId(e.target.value)}
+                  className={`${inputClassName} mt-1`}
+                >
+                  {conversations.map((conv, i) => (
+                    <option key={conv.id} value={conv.id}>
+                      {(conv.title ?? selectedContact.name) +
+                        ` · ${t(
+                          conv.kind === "group"
+                            ? "automations.enrollKindGroup"
+                            : "automations.enrollKindPrivate",
+                        )} · ${conv.provider}` +
+                        (conv.lastMessageAt
+                          ? ` · ${formatDateTime(conv.lastMessageAt, locale)}`
+                          : "") +
+                        (i === 0
+                          ? ` (${t("automations.enrollConversationLatest")})`
+                          : "")}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => void enrollOne()}
+                disabled={busy || !conversationId}
+                className="mt-3 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+              >
+                {t("automations.enrollButton")}
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {notice ? (
+        <p className="mt-3 text-sm text-accent">{notice}</p>
+      ) : null}
+      {actionError ? (
+        <p className="mt-3 text-sm text-danger">{actionError}</p>
+      ) : null}
+      <div className="mt-4 border-t border-line pt-4">
+        <h3 className="text-sm font-semibold text-ink">
+          {t("automations.enrollByTagTitle")}
+        </h3>
+        <p className="mt-1 text-sm text-muted">
+          {t("automations.enrollByTagHint")}
+        </p>
+        <div className="mt-3 flex gap-2">
+          <input
+            type="text"
+            value={tag}
+            onChange={(e) => setTag(e.target.value)}
+            placeholder={t("automations.enrollTagPlaceholder")}
+            className={inputClassName}
+          />
+          <button
+            type="button"
+            onClick={() => void enrollTag()}
+            disabled={tagBusy || !tag.trim()}
+            className="shrink-0 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {t("automations.enrollByTagButton")}
+          </button>
+        </div>
+        {tagError ? (
+          <p className="mt-3 text-sm text-danger">{tagError}</p>
+        ) : null}
+        {tagReport ? (
+          <div className="mt-3 text-sm text-ink">
+            <p>
+              {t("automations.enrollReport", {
+                tag: tagReport.tag,
+                matched: formatNumber(tagReport.matched, locale),
+                enrolled: formatNumber(tagReport.enrolled, locale),
+                already: formatNumber(tagReport.alreadyEnrolled, locale),
+                skipped: formatNumber(tagReport.skippedTotal, locale),
+                noConversation: formatNumber(
+                  tagReport.skippedByReason.noConversation,
+                  locale,
+                ),
+                optedOut: formatNumber(
+                  tagReport.skippedByReason.contactOptedOut,
+                  locale,
+                ),
+              })}
+            </p>
+            {tagReport.capped ? (
+              <p className="mt-1 text-muted">
+                {t("automations.enrollReportCapped")}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );

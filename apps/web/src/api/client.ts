@@ -177,6 +177,12 @@ import type {
   UpdatePaymentSettingsRequest,
   SequenceEnrollmentListResponse,
   SequenceEnrollmentResponse,
+  EnrollConversationListResponse,
+  EnrollConversationResponse,
+  EnrollSequenceByTagRequest,
+  EnrollSequenceByTagResponse,
+  EnrollSequenceContactRequest,
+  EnrollSequenceContactResponse,
   SequenceTemplateListResponse,
   SequenceTemplateResponse,
   TenantListResponse,
@@ -1108,6 +1114,53 @@ export const api = {
         { method: "GET" },
       );
       return body.enrollments;
+    },
+    /**
+     * GET /api/tenants/:tenantId/automations/:id/enroll-conversations?contactId=
+     * → percakapan pesan (private/group) kontak untuk pemilih jangkar
+     * pendaftaran manual (G2b), terbaru dulu.
+     */
+    async listEnrollConversations(
+      tenantId: string,
+      automationId: string,
+      contactId: string,
+    ): Promise<EnrollConversationResponse[]> {
+      const body = await request<EnrollConversationListResponse>(
+        `/api/tenants/${tenantId}/automations/${automationId}/enroll-conversations?contactId=${contactId}`,
+        { method: "GET" },
+      );
+      return body.conversations;
+    },
+    /**
+     * POST /api/tenants/:tenantId/automations/:id/enroll → daftarkan satu
+     * kontak secara manual (G2b). Tanpa conversationId, server memakai
+     * percakapan pesan terbaru kontak sebagai jangkar. Penolakan tiba
+     * sebagai ApiClientError berkode (ENROLL_NO_CONVERSATION dsb.).
+     */
+    enrollContact(
+      tenantId: string,
+      automationId: string,
+      input: EnrollSequenceContactRequest,
+    ): Promise<EnrollSequenceContactResponse> {
+      return request<EnrollSequenceContactResponse>(
+        `/api/tenants/${tenantId}/automations/${automationId}/enroll`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/automations/:id/enroll-by-tag →
+     * daftarkan semua kontak bertag (G2b); balasan adalah laporan
+     * agregat terdaftar / sudah terdaftar / dilewati per alasan.
+     */
+    enrollByTag(
+      tenantId: string,
+      automationId: string,
+      input: EnrollSequenceByTagRequest,
+    ): Promise<EnrollSequenceByTagResponse> {
+      return request<EnrollSequenceByTagResponse>(
+        `/api/tenants/${tenantId}/automations/${automationId}/enroll-by-tag`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
     },
   },
   comments: {
