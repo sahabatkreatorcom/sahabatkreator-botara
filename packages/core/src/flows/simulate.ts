@@ -115,6 +115,7 @@ export type FlowSimEffectKind =
   | "catalog_message"
   | "checkout"
   | "appointment_offer"
+  | "ad_conversion"
   | "park";
 
 export interface FlowSimEffect {
@@ -574,6 +575,33 @@ export function simulateFlowRun(
           dealStageId,
         });
         pushEffect("move_deal_stage", node, "recorded", { dealStageId });
+        return { type: "advance" };
+      }
+
+      case "send_ad_conversion": {
+        const platform = c.platform === "google" ? "google" : "meta";
+        const eventName =
+          typeof c.eventName === "string" ? c.eventName : "";
+        if (!eventName) {
+          throw new SimNodeError("send_ad_conversion tanpa config.eventName");
+        }
+        // API iklan TIDAK dipanggil dan tidak ada ledger/outbox yang
+        // lahir — di simulasi peristiwa hanya dicatat sebagai efek.
+        // Nilai konteks nyata (order/deal kontak sungguhan) juga di
+        // luar graf: yang ditampilkan adalah nilai statis node bila
+        // ada; resolusi konteks terjadi pada run sungguhan.
+        pushStep(node, {
+          outcome: "simulated",
+          reason: "ad_conversion_not_sent",
+          platform,
+          eventName,
+        });
+        pushEffect("ad_conversion", node, "recorded", {
+          platform,
+          eventName,
+          value: typeof c.value === "number" ? c.value : null,
+          currency: typeof c.currency === "string" ? c.currency : null,
+        });
         return { type: "advance" };
       }
 

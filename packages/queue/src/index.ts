@@ -56,6 +56,7 @@ export const TEAM_INVITATION_EMAIL_JOB = "team.invitation_email";
 export const APPOINTMENT_GOOGLE_SYNC_JOB = "appointment.google_sync";
 export const POST_PUBLISH_JOB = "post.publish";
 export const OUTBOUND_WEBHOOK_FANOUT_JOB = "outbound-webhook.fanout";
+export const AD_CONVERSION_SEND_JOB = "ad-conversion.send";
 
 export interface AutomationEvaluateJobData {
   tenantId: string;
@@ -224,6 +225,21 @@ export interface OutboundWebhookFanoutJobData {
   payload: Record<string, unknown>;
 }
 
+/**
+ * Job G16: kirim SATU baris ledger konversi iklan
+ * (`ad_conversion_events`) ke platformnya (Meta CAPI / Google Ads).
+ * Di-enqueue oleh relay outbox dari event `ad_conversion.requested`;
+ * jobId deterministik dari id event outbox. Pengiriman sendiri
+ * idempoten per baris (baris 'sent' tidak dikirim ulang), dan
+ * kegagalan platform tercatat di baris — bukan kegagalan job.
+ */
+export interface AdConversionSendJobData {
+  tenantId: string;
+  outboxEventId: string;
+  /** Id baris `ad_conversion_events` yang dikirim. */
+  adConversionEventRowId: string;
+}
+
 /** jobId deterministik dari id event outbox — fondasi idempotensi relay. */
 export function automationEvaluateJobId(outboxEventId: string): string {
   return `automation-evaluate-${outboxEventId}`;
@@ -277,6 +293,11 @@ export function outboundWebhookFanoutJobId(outboxEventId: string): string {
   return `outbound-webhook-fanout-${outboxEventId}`;
 }
 
+/** jobId deterministik pengiriman konversi iklan dari id event outbox. */
+export function adConversionSendJobId(outboxEventId: string): string {
+  return `ad-conversion-${outboxEventId}`;
+}
+
 /**
  * Koneksi Redis untuk BullMQ. `maxRetriesPerRequest: null` adalah syarat
  * BullMQ untuk koneksi blocking (Worker). Buat SATU instance per peran
@@ -321,7 +342,8 @@ export type MainJobData =
   | InvitationEmailJobData
   | AppointmentGoogleSyncJobData
   | PostPublishJobData
-  | OutboundWebhookFanoutJobData;
+  | OutboundWebhookFanoutJobData
+  | AdConversionSendJobData;
 
 export type MainQueue = Queue<MainJobData>;
 
@@ -604,6 +626,27 @@ export async function enqueueOutboundWebhookFanout(
     ...options,
   });
   return job.id ?? outboundWebhookFanoutJobId(data.outboxEventId);
+}
+
+/**
+ * Meng-enqueue pengiriman satu konversi iklan. Aman dipanggil
+ * berulang: jobId diturunkan dari id event outbox, BullMQ
+ * mengembalikan job yang sudah ada.
+ */
+export async function enqueueAdConversionSend(
+  queue: MainQueue,
+  data: AdConversionSendJobData,
+  options?: JobsOptions,
+): Promise<string> {
+  const job = await queue.add(AD_CONVERSION_SEND_JOB, data, {
+    jobId: adConversionSendJobId(data.outboxEventId),
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1_000 },
+    removeOnComplete: 1_000,
+    removeOnFail: 1_000,
+    ...options,
+  });
+  return job.id ?? adConversionSendJobId(data.outboxEventId);
 }
 
 export {

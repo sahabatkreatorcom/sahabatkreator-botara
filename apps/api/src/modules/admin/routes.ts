@@ -66,6 +66,7 @@ export interface AdminRoutesOptions {
     calendar: string;
     youtube: string;
     business: string;
+    ads: string;
   };
 }
 
@@ -131,6 +132,12 @@ const KEY_MAX_LENGTH: Record<PlatformSettingKey, number> = {
   google_youtube_client_secret: 512,
   google_business_client_id: 256,
   google_business_client_secret: 512,
+  // G16: klien OAuth layanan 'ads' (pola per-layanan yang sama) +
+  // developer token Google Ads milik platform (rahasia; diterbitkan
+  // Google ±22 char — batas mengikuti kunci rahasia lain).
+  google_ads_client_id: 256,
+  google_ads_client_secret: 512,
+  google_ads_developer_token: 512,
   // Token verifikasi webhook Meta: nilai bebas yang ditempel ke
   // dashboard Meta App; panjang mengikuti kunci rahasia lain.
   meta_webhook_verify_token: 512,
@@ -328,6 +335,12 @@ export function createAdminRoutes(
               publicConfig.google_business_client_id ??
               publicConfig.google_oauth_client_id,
             redirectUri: options.googleOAuthRedirectUris?.business ?? "",
+          },
+          ads: {
+            clientId:
+              publicConfig.google_ads_client_id ??
+              publicConfig.google_oauth_client_id,
+            redirectUri: options.googleOAuthRedirectUris?.ads ?? "",
           },
         },
       },

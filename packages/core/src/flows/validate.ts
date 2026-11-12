@@ -208,6 +208,48 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
         err("DEAL_STAGE_ID_REQUIRED", "Node move_deal_stage membutuhkan config.dealStageId");
       }
       break;
+    case "send_ad_conversion": {
+      // G16: platform wajib meta|google; eventName wajib (nama
+      // peristiwa Meta / label aksi Google); value statis opsional
+      // ≥ 0; currency opsional ISO 4217 huruf besar. Koneksi iklan
+      // tenant TIDAK diperiksa di sini — koneksi boleh dipasang
+      // sesudah flow aktif; ketiadaannya tercatat jujur di ledger
+      // saat pengiriman, bukan menggagalkan aktivasi/executor.
+      if (c.platform !== "meta" && c.platform !== "google") {
+        err(
+          "AD_PLATFORM_INVALID",
+          "Node send_ad_conversion membutuhkan config.platform 'meta'|'google'",
+        );
+      }
+      if (!isNonEmptyString(c.eventName) || String(c.eventName).length > 128) {
+        err(
+          "AD_EVENT_NAME_REQUIRED",
+          "Node send_ad_conversion membutuhkan config.eventName (maks 128 karakter)",
+        );
+      }
+      if (
+        c.value !== undefined &&
+        (typeof c.value !== "number" ||
+          !Number.isFinite(c.value) ||
+          c.value < 0 ||
+          c.value > 999_999_999_999)
+      ) {
+        err(
+          "AD_VALUE_INVALID",
+          "Node send_ad_conversion: config.value harus bilangan 0..999999999999",
+        );
+      }
+      if (
+        c.currency !== undefined &&
+        (typeof c.currency !== "string" || !/^[A-Z]{3}$/.test(c.currency))
+      ) {
+        err(
+          "AD_CURRENCY_INVALID",
+          "Node send_ad_conversion: config.currency harus kode ISO 4217 (3 huruf besar)",
+        );
+      }
+      break;
+    }
     case "set_field": {
       const field = c.field;
       const customKey =

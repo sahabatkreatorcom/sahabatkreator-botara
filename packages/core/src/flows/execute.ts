@@ -50,6 +50,11 @@ import { renderMessageText } from "../render-text";
 import { enrollContactInSequence } from "../sequence-enroll";
 import { createDealForContact, moveLatestOpenDealStage } from "../deals";
 import {
+  buildAdConversionUserData,
+  queueAdConversionTx,
+  resolveAdConversionValueTx,
+} from "../ad-conversions";
+import {
   DiscountClaimLostError,
   previewDiscount,
   type DiscountPreview,
@@ -820,6 +825,60 @@ async function executeNodeInTx(
           };
       }
       throw new FlowNodeError("move_deal_stage: hasil perpindahan tidak dikenal");
+    }
+
+    case "send_ad_conversion": {
+      // G16: antrekan peristiwa konversi iklan untuk kontak run.
+      // Node TIDAK memanggil API iklan di sini: ia mengambil snapshot
+      // konteks (hash pengenal + nilai nyata) dan menulis baris
+      // ledger + event outbox dalam transaksi langkah ini (pola
+      // send_message); worker yang mengirimkannya. Hasil pengiriman
+      // (termasuk kegagalannya) hidup di ledger, BUKAN di run —
+      // iklan yang mati tidak pernah membatalkan percakapan. Baris
+      // yang sudah ada untuk (run, node) ini → langkah tercatat
+      // `already_queued` (dedup), tanpa outbox kedua.
+      if (!ctx.contact) throw new FlowNodeError("kontak run tidak ditemukan");
+      const platform = c.platform === "google" ? "google" : "meta";
+      const eventName =
+        typeof c.eventName === "string" ? c.eventName.trim() : "";
+      if (!eventName) {
+        throw new FlowNodeError("send_ad_conversion tanpa config.eventName");
+      }
+      const resolvedValue = await resolveAdConversionValueTx(tx, {
+        tenantId,
+        contactId: run.contactId,
+        staticValue: typeof c.value === "number" ? c.value : undefined,
+        staticCurrency:
+          typeof c.currency === "string" ? c.currency : undefined,
+      });
+      const queued = await queueAdConversionTx(tx, {
+        tenantId,
+        platform,
+        eventName,
+        flowId: run.flowId,
+        runId: run.id,
+        nodeId: node.id,
+        contactId: run.contactId,
+        userData: buildAdConversionUserData({
+          id: run.contactId,
+          email: ctx.contact.email,
+          phone: ctx.contact.phone,
+        }),
+        value: resolvedValue,
+        occurredAt: new Date(),
+      });
+      return {
+        detail: {
+          outcome: queued.kind === "queued" ? "queued" : "already_queued",
+          platform,
+          eventName,
+          eventId: queued.eventId,
+          adConversionEventId: queued.rowId,
+          value: resolvedValue.value,
+          currency: resolvedValue.currency,
+          valueSource: resolvedValue.source,
+        },
+      };
     }
 
     case "set_field": {

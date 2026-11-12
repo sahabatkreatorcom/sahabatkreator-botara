@@ -37,6 +37,7 @@ import { createKnowledgeRoutes } from "./modules/knowledge/routes";
 import { createProductsRoutes } from "./modules/products/routes";
 import { createPayRoutes } from "./modules/pay/routes";
 import { createPaymentsRoutes } from "./modules/payments/routes";
+import { createAdConnectionsRoutes } from "./modules/ad-connections/routes";
 import { createApiKeysRoutes } from "./modules/api-keys/routes";
 import { createPublicV1Routes } from "./modules/public-v1/routes";
 import { createWebchatRoutes } from "./modules/webchat/routes";
@@ -158,6 +159,11 @@ const platformOptions: PlatformSettingsOptions = {
     google_youtube_client_secret: env.GOOGLE_YOUTUBE_CLIENT_SECRET,
     google_business_client_id: env.GOOGLE_BUSINESS_CLIENT_ID,
     google_business_client_secret: env.GOOGLE_BUSINESS_CLIENT_SECRET,
+    // G16: klien OAuth layanan 'ads' + developer token Google Ads
+    // milik platform — env hanya fallback; sumber utama Panel Admin.
+    google_ads_client_id: env.GOOGLE_ADS_CLIENT_ID,
+    google_ads_client_secret: env.GOOGLE_ADS_CLIENT_SECRET,
+    google_ads_developer_token: env.GOOGLE_ADS_DEVELOPER_TOKEN,
     // Instruksi pemilik 2026-11-12: sisa kredensial/pengaturan platform
     // ikut dikelola Panel Admin — env hanya fallback per kunci.
     meta_webhook_verify_token: env.META_WEBHOOK_VERIFY_TOKEN,
@@ -594,6 +600,17 @@ routes.route(
     publicBaseUrl: env.BETTER_AUTH_URL,
   }),
 );
+// Modul ad-connections (Gelombang G16) — koneksi iklan per tenant
+// /tenants/:tenantId/ad-connections (Settings → Konversi Iklan):
+// dataset + token CAPI Meta terenkripsi, customer + aksi konversi
+// Google Ads; consent OAuth Ads lewat rute generik google/:service.
+routes.route(
+  "/",
+  createAdConnectionsRoutes(authBundle, {
+    tokenSecret: env.CHANNEL_TOKEN_SECRET,
+    platform: platformOptions,
+  }),
+);
 // Modul api-keys (Fase 5A) — manajemen kunci workspace /tenants/:tenantId/api-keys (sesi + owner/admin).
 routes.route("/", createApiKeysRoutes(authBundle));
 // Modul API publik /v1 (Fase 5A) — auth API key per tenant, tenant dari kunci (bukan URL).
@@ -641,6 +658,7 @@ routes.route(
       calendar: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("calendar")}`,
       youtube: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("youtube")}`,
       business: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("business")}`,
+      ads: `${(env.BETTER_AUTH_URL ?? "").replace(/\/+$/, "")}${googleOAuthCallbackPath("ads")}`,
     },
   }),
 );

@@ -275,6 +275,35 @@ import { z } from "zod";
  *                   Layanan yang hilang/nonaktif saat eksekusi adalah
  *                   kegagalan keras tercatat (appointment_service_
  *                   unavailable), pola show_catalog.
+ *
+ * Tipe node tambahan (Gelombang G16 — konversi iklan):
+ * - send_ad_conversion { platform: "meta"|"google", eventName,
+ *                   value?, currency? } — mengirim peristiwa konversi
+ *                   ke platform iklan TENANT saat flow mencapai node
+ *                   ini. Node TIDAK memanggil API iklan secara sinkron:
+ *                   ia menulis baris ledger `ad_conversion_events` +
+ *                   event outbox `ad_conversion.requested` di dalam
+ *                   transaksi langkah (pola send_message), dan worker
+ *                   mengirimnya ke Meta Conversions API / Google Ads
+ *                   API; kegagalan pengiriman tercatat di ledger + log
+ *                   integrasi dan TIDAK membatalkan run.
+ *                   `eventName`: nama peristiwa Meta (standar Lead /
+ *                   Purchase / CompleteRegistration / … atau kustom);
+ *                   untuk Google ia label tampilan saja — aksi konversi
+ *                   tujuan ditentukan koneksi iklan tenant.
+ *                   `value`: nilai STATIS opsional (dengan `currency`,
+ *                   bawaan mata uang tenant) yang hanya dipakai bila
+ *                   konteks nyata tidak menyediakan nilai: prioritas
+ *                   nilai = order LUNAS terbaru kontak vs deal terbaru
+ *                   kontak (yang lebih segar menang), lalu statis,
+ *                   lalu peristiwa terkirim TANPA nilai — tidak ada
+ *                   nilai karangan. event_id dedup deterministik dari
+ *                   (run, node): langkah yang tereksekusi ulang tidak
+ *                   melahirkan konversi kedua. Pengenal yang dikirim
+ *                   hanya yang benar-benar dimiliki Botara: hash
+ *                   email/telepon kontak (+ external_id untuk Meta);
+ *                   fbp/fbc/gclid TIDAK tersedia dari chat dan tidak
+ *                   pernah dikarang. Tanpa cabang — satu edge "next".
  */
 export const FlowStatusSchema = z.enum(["draft", "active", "archived"]);
 export type FlowStatus = z.infer<typeof FlowStatusSchema>;
@@ -318,6 +347,8 @@ export const FlowNodeTypeSchema = z.enum([
   "cart_checkout",
   // Fase 13G
   "book_appointment",
+  // G16 — kirim peristiwa konversi ke platform iklan tenant.
+  "send_ad_conversion",
 ]);
 export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
 
@@ -481,6 +512,18 @@ export const FlowNodeConfigSchema = z.union([
     maxInvalidAttempts: z.number().int().min(1).max(5),
     invalidPrompt: z.string().min(1).max(1000).optional(),
     bookedMessage: z.string().min(1).max(1000).optional(),
+  }),
+  // G16 — send_ad_conversion: bentuk kasar; keabsahan rinci (platform
+  // sah, nama peristiwa non-kosong, nilai dalam rentang, mata uang
+  // ISO 4217) ditegakkan validasi aktivasi di core.
+  z.object({
+    platform: z.enum(["meta", "google"]),
+    eventName: z.string().min(1).max(128),
+    value: z.number().finite().min(0).max(999_999_999_999).optional(),
+    currency: z
+      .string()
+      .regex(/^[A-Z]{3}$/)
+      .optional(),
   }),
   // ai_response / handoff / end: config kosong.
   z.object({}),
@@ -819,7 +862,9 @@ export type FlowVersionRestoreResponse = z.infer<
  *   di luar graf; goto menyelesaikan run asal seperti aslinya tetapi
  *   flow tujuan tidak ditelusuri), tautan pembayaran & checkout
  *   (membuat order/tautan adalah tulisan), penawaran slot janji
- *   (mesin slot + kalender di luar interpreter).
+ *   (mesin slot + kalender di luar interpreter), send_ad_conversion
+ *   (tidak ada panggilan API iklan; nilai & pengenal kontak mock
+ *   tidak pernah meninggalkan proses).
  * Node parkir (wait_reply/questionnaire/show_catalog/
  * book_appointment) MENGHENTIKAN simulasi dengan status `parked` +
  * alasan; khusus wait_reply, `replyText` pada permintaan melanjutkan
@@ -887,6 +932,9 @@ export const FlowSimulateEffectKindSchema = z.enum([
   "catalog_message",
   "checkout",
   "appointment_offer",
+  // G16: node send_ad_conversion — hanya dicatat (tidak ada panggilan
+  // API iklan dari simulator), fidelity "recorded".
+  "ad_conversion",
   "park",
 ]);
 export type FlowSimulateEffectKind = z.infer<

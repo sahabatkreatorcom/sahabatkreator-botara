@@ -93,12 +93,13 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   GET    /oauth/google_calendar/callback                callback publik calendar (state bertanda tangan)
  *   GET    /oauth/youtube/callback                        callback publik youtube (state bertanda tangan)
  *   GET    /oauth/google_business/callback                callback publik business (state bertanda tangan)
+ *   GET    /oauth/google_ads/callback                     callback publik ads (state bertanda tangan; G16)
  *
  * Pemisahan Google per layanan (2026-11-12): modul ini juga rumah
- * bagi OAuth tiga layanan Google — state bertanda tangan kini memuat
- * LAYANAN (calendar/youtube/business) dan halaman asal. Tiap layanan
+ * bagi OAuth layanan Google — state bertanda tangan kini memuat
+ * LAYANAN (calendar/youtube/business/ads) dan halaman asal. Tiap layanan
  * punya callback KANONIS sendiri (/api/oauth/google_calendar|
- * youtube|google_business/callback, keputusan pemilik) yang
+ * youtube|google_business|google_ads/callback, keputusan pemilik) yang
  * dilayani SATU handler yang sama; callback gabungan lama Fase 13G
  * (/google/oauth/callback) SENGAJA dihapus tanpa alias — pemilik
  * mendaftarkan URI baru di proyeknya sebelum connect diuji lagi:
@@ -279,6 +280,7 @@ export function createAppointmentsRoutes(
     app.get("/oauth/google_calendar/callback", unavailable);
     app.get("/oauth/youtube/callback", unavailable);
     app.get("/oauth/google_business/callback", unavailable);
+    app.get("/oauth/google_ads/callback", unavailable);
     return app;
   }
 
@@ -913,6 +915,10 @@ export function createAppointmentsRoutes(
   app.get("/oauth/google_calendar/callback", handleGoogleOAuthCallback);
   app.get("/oauth/youtube/callback", handleGoogleOAuthCallback);
   app.get("/oauth/google_business/callback", handleGoogleOAuthCallback);
+  // G16: layanan 'ads' — callback-nya tidak punya sinkron turunan
+  // (tidak ada akun channel dari Ads); koneksi cukup disimpan dan
+  // dibaca modul ad-conversions untuk pengiriman konversi.
+  app.get("/oauth/google_ads/callback", handleGoogleOAuthCallback);
 
   return app;
 }

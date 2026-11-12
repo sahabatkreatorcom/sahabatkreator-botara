@@ -78,14 +78,21 @@ export const YOUTUBE_READONLY_SCOPE =
  */
 export const GOOGLE_BUSINESS_MANAGE_SCOPE =
   "https://www.googleapis.com/auth/business.manage";
+/**
+ * Scope Google Ads API (G16) — membaca/mengelola kampanye & mengunggah
+ * konversi akun Ads yang memberi consent. Tanpa scope ini token
+ * layanan lain tidak bisa dipakai Ads API (Google menolaknya).
+ */
+export const GOOGLE_ADS_SCOPE = "https://www.googleapis.com/auth/adwords";
 
 /** Layanan Google yang kini punya koneksi OAuth mandiri per tenant. */
-export type GoogleService = "calendar" | "youtube" | "business";
+export type GoogleService = "calendar" | "youtube" | "business" | "ads";
 
 export const GOOGLE_SERVICES: readonly GoogleService[] = [
   "calendar",
   "youtube",
   "business",
+  "ads",
 ];
 
 export function isGoogleService(value: string): value is GoogleService {
@@ -109,6 +116,7 @@ export const GOOGLE_SERVICE_SCOPES: Record<GoogleService, string[]> = {
   ],
   youtube: ["openid", "email", YOUTUBE_UPLOAD_SCOPE, YOUTUBE_READONLY_SCOPE],
   business: ["openid", "email", GOOGLE_BUSINESS_MANAGE_SCOPE],
+  ads: ["openid", "email", GOOGLE_ADS_SCOPE],
 };
 
 /** Scope consent satu layanan sebagai string spasi-terpisah (bentuk dialog OAuth). */
@@ -128,6 +136,7 @@ export const GOOGLE_OAUTH_CALLBACK_SEGMENTS: Record<GoogleService, string> = {
   calendar: "google_calendar",
   youtube: "youtube",
   business: "google_business",
+  ads: "google_ads",
 };
 
 /** Path callback kanonis satu layanan, mis. `/api/oauth/youtube/callback`. */
@@ -175,6 +184,11 @@ export interface GoogleBases {
    * https://mybusinessaccountmanagement.googleapis.com.
    */
   accountManagementBase?: string;
+  /**
+   * Base Google Ads API (G16) — host tersendiri
+   * https://googleads.googleapis.com; override untuk tiruan verify.
+   */
+  adsBase?: string;
 }
 
 export interface GoogleDeps {
@@ -228,6 +242,10 @@ const GOOGLE_SERVICE_CLIENT_KEYS: Record<GoogleService, GoogleClientKeyPair> =
     business: {
       clientIdKey: "google_business_client_id",
       clientSecretKey: "google_business_client_secret",
+    },
+    ads: {
+      clientIdKey: "google_ads_client_id",
+      clientSecretKey: "google_ads_client_secret",
     },
   };
 

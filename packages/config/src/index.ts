@@ -371,6 +371,21 @@ const EnvSchema = z.object({
   GOOGLE_BUSINESS_CLIENT_ID: z.string().min(1).optional(),
   GOOGLE_BUSINESS_CLIENT_SECRET: z.string().min(1).optional(),
   /**
+   * G16 (konversi iklan): klien OAuth layanan Google 'ads' (fallback
+   * env; sumber utama Panel Admin google_ads_*) + developer token
+   * Google Ads MILIK PLATFORM (diterbitkan untuk akun manager
+   * platform; sumber utama Panel Admin `google_ads_developer_token`).
+   */
+  GOOGLE_ADS_CLIENT_ID: z.string().min(1).optional(),
+  GOOGLE_ADS_CLIENT_SECRET: z.string().min(1).optional(),
+  GOOGLE_ADS_DEVELOPER_TOKEN: z.string().min(1).optional(),
+  /**
+   * Base URL Google Ads API untuk mock rantai uji — default
+   * https://googleads.googleapis.com (host tersendiri, pola
+   * GOOGLE_BUSINESS_API_BASE).
+   */
+  GOOGLE_ADS_API_BASE: z.string().url().optional(),
+  /**
    * Base URL Google untuk mock rantai uji (Fase 13G) — pola yang sama
    * dengan RESEND_API_BASE: GOOGLE_API_BASE (Calendar API + userinfo;
    * default https://www.googleapis.com), GOOGLE_TOKEN_BASE (token

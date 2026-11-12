@@ -251,7 +251,15 @@ export type GoogleConnectStartResponse = z.infer<
  * business (Google Business Profile). Tiap layanan = consent +
  * koneksi + klien OAuth proyek Cloud-nya sendiri.
  */
-export const GoogleServiceSchema = z.enum(["calendar", "youtube", "business"]);
+export const GoogleServiceSchema = z.enum([
+  "calendar",
+  "youtube",
+  "business",
+  // G16: layanan 'ads' — consent OAuth Google Ads (scope adwords)
+  // untuk pengiriman konversi dari flow; callback kanonis
+  // /api/oauth/google_ads/callback.
+  "ads",
+]);
 export type GoogleService = z.infer<typeof GoogleServiceSchema>;
 
 /** Keadaan koneksi SATU layanan Google tenant (TANPA token apa pun). */

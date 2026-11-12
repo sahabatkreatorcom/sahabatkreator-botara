@@ -36,6 +36,9 @@ import {
   dispatchOutboundWebhookEvent,
   processDueOutboundWebhookRetries,
   OUTBOUND_WEBHOOK_EVENT_TYPES,
+  AD_CONVERSION_REQUESTED_OUTBOX_TYPE,
+  deliverAdConversion,
+  type AdConversionDeps,
   purgeExpiredTrashedChannels,
   reconcileBroadcasts,
   recordPermanentJobFailure,
@@ -78,6 +81,7 @@ import {
   APPOINTMENT_GOOGLE_SYNC_JOB,
   POST_PUBLISH_JOB,
   OUTBOUND_WEBHOOK_FANOUT_JOB,
+  AD_CONVERSION_SEND_JOB,
   createAutomationQueue,
   createRealtimePublisher,
   createRedisConnection,
@@ -90,6 +94,7 @@ import {
   enqueueInvitationEmail,
   enqueuePostPublish,
   enqueueOutboundWebhookFanout,
+  enqueueAdConversionSend,
   enqueueKbEmbed,
   enqueueSequenceStep,
   type AgentRespondJobData,
@@ -100,6 +105,7 @@ import {
   type AppointmentGoogleSyncJobData,
   type PostPublishJobData,
   type OutboundWebhookFanoutJobData,
+  type AdConversionSendJobData,
   type InvitationEmailJobData,
   type KbEmbedJobData,
   type MainJobData,
@@ -267,6 +273,13 @@ const platformSettingsOptions: PlatformSettingsOptions = {
     google_youtube_client_secret: env.GOOGLE_YOUTUBE_CLIENT_SECRET,
     google_business_client_id: env.GOOGLE_BUSINESS_CLIENT_ID,
     google_business_client_secret: env.GOOGLE_BUSINESS_CLIENT_SECRET,
+    // G16: klien OAuth layanan 'ads' + developer token Google Ads —
+    // refresh token layanan 'ads' (job pengiriman konversi) WAJIB
+    // memakai klien penerbitnya; developer token dibaca
+    // deliverAdConversion dari resolver platform yang sama.
+    google_ads_client_id: env.GOOGLE_ADS_CLIENT_ID,
+    google_ads_client_secret: env.GOOGLE_ADS_CLIENT_SECRET,
+    google_ads_developer_token: env.GOOGLE_ADS_DEVELOPER_TOKEN,
     // Kredensial aplikasi LinkedIn (gelombang Semua OAuth): lifecycle
     // token LinkedIn tidak me-refresh (LinkedIn tidak menerbitkan
     // refresh token untuk program standar), tetapi resolusi panel →
@@ -333,6 +346,27 @@ const paymentDeps: PaymentDeps = {
   midtransApiBase: env.MIDTRANS_API_BASE,
   xenditApiBase: env.XENDIT_API_BASE,
   publicBaseUrl: env.BETTER_AUTH_URL,
+};
+
+/**
+ * Dependensi konversi iklan (G16) untuk job `ad-conversion.send`:
+ * secret enkripsi kredensial tenant + resolver kredensial platform
+ * (developer token Google Ads) + override base URL platform untuk
+ * mock rantai (META_API_BASE pola yang sama seperti Meta lain;
+ * GOOGLE_ADS_API_BASE untuk Ads API; base token Google dipakai
+ * refresh token layanan 'ads'). Konfigurasinya sendiri dibaca core
+ * dari DB per tenant.
+ */
+const adConversionDeps: AdConversionDeps = {
+  tokenSecret: env.CHANNEL_TOKEN_SECRET,
+  platform: platformSettingsOptions,
+  metaApiBase: env.META_API_BASE,
+  googleBases: {
+    apiBase: env.GOOGLE_API_BASE,
+    tokenBase: env.GOOGLE_TOKEN_BASE,
+    authBase: env.GOOGLE_AUTH_BASE,
+    adsBase: env.GOOGLE_ADS_API_BASE,
+  },
 };
 
 async function resolveAgentLlmProvider(): Promise<LlmProvider> {
@@ -520,6 +554,23 @@ const bullWorker = new Worker<MainJobData>(
           `[worker] outbound-webhook.fanout event=${data.outboxEventId} type=${data.eventType} matched=${result.matched} created=${result.created}`,
         );
       }
+      return result;
+    }
+    if (job.name === AD_CONVERSION_SEND_JOB) {
+      // G16: kirim satu baris ledger konversi iklan ke platformnya.
+      // Hasil platform (termasuk kegagalan provider) dicatat core di
+      // baris + log integrasi dan BUKAN kegagalan job — yang dilempar
+      // hanya kegagalan DB agar BullMQ mencoba lagi (pengiriman
+      // idempoten per baris: 'sent' tidak pernah dikirim ulang).
+      const data = job.data as AdConversionSendJobData;
+      const result = await deliverAdConversion(
+        db,
+        { tenantId: data.tenantId, eventRowId: data.adConversionEventRowId },
+        adConversionDeps,
+      );
+      console.log(
+        `[worker] ad-conversion.send event=${data.outboxEventId} row=${data.adConversionEventRowId} result=${result.kind}`,
+      );
       return result;
     }
     if (job.name === AUTOMATION_EVALUATE_JOB) {
@@ -967,6 +1018,28 @@ async function relayTick(): Promise<void> {
           eventType: event.type,
           payload: event.payload,
         });
+      }
+      // G16: peristiwa konversi terantre dari node flow
+      // send_ad_conversion → job pengiriman ke platform iklan.
+      // jobId deterministik dari id event: relay ulang tidak
+      // menggandakan; payload tidak lengkap ditandai published
+      // tanpa job (pola sequence.step_due di bawah).
+      if (event.type === AD_CONVERSION_REQUESTED_OUTBOX_TYPE) {
+        const payload = event.payload as {
+          adConversionEventRowId?: unknown;
+        };
+        if (typeof payload.adConversionEventRowId !== "string") {
+          console.warn(
+            `[worker] event ad_conversion.requested ${event.id} payload tidak lengkap — ditandai published tanpa job`,
+          );
+          return;
+        }
+        await enqueueAdConversionSend(queue, {
+          tenantId: event.tenantId,
+          outboxEventId: event.id,
+          adConversionEventRowId: payload.adConversionEventRowId,
+        });
+        return;
       }
       // Fase 2C: langkah sequence jatuh tempo → job BullMQ TERTUNDA.
       // Titik mulai delay digeser ke saat event ter-relay (±2 dtk dari

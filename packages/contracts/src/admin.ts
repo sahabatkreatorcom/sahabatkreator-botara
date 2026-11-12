@@ -103,6 +103,15 @@ export const PlatformSettingKeySchema = z.enum([
   "google_youtube_client_secret",
   "google_business_client_id",
   "google_business_client_secret",
+  // G16 (konversi iklan): klien OAuth per layanan 'ads' (pola yang
+  // sama: client_id PUBLIK, client_secret RAHASIA) + developer token
+  // Google Ads MILIK PLATFORM — token itu diterbitkan untuk akun
+  // manager milik platform (BUKAN milik tenant), jadi ia kredensial
+  // platform di panel ini; tenant membawa customer ID + aksi konversi
+  // + consent OAuth akun Ads-nya sendiri (koneksi tenant).
+  "google_ads_client_id",
+  "google_ads_client_secret",
+  "google_ads_developer_token",
   // Instruksi pemilik 2026-11-12: semua kredensial integrasi diisi lewat
   // Panel Admin, env hanya fallback. `meta_webhook_verify_token` adalah
   // token handshake webhook Meta (nilai yang KITA tentukan) — RAHASIA
@@ -268,6 +277,13 @@ export const PlatformGoogleInfoSchema = z.object({
       redirectUri: z.string(),
     }),
     business: z.object({
+      clientId: z.string().nullable(),
+      redirectUri: z.string(),
+    }),
+    // G16: layanan 'ads' (Google Ads) — proyek Cloud-nya wajib
+    // mengaktifkan Google Ads API; redirect URI kanonis
+    // /api/oauth/google_ads/callback.
+    ads: z.object({
       clientId: z.string().nullable(),
       redirectUri: z.string(),
     }),

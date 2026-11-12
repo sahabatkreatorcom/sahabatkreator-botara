@@ -45,6 +45,7 @@ export * from "./deals";
 export * from "./discount-codes";
 export * from "./whatsapp-templates";
 export * from "./flows";
+export * from "./ad-conversions";
 export * from "./experiments";
 export * from "./flow-templates";
 export * from "./saved-replies";
