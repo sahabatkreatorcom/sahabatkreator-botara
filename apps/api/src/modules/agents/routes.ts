@@ -1,31 +1,46 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  AgentInstructionTemplateListResponseSchema,
+  AgentInstructionTemplateResponseSchema,
   AgentListResponseSchema,
+  AgentPlaygroundDraftRequestSchema,
   AgentPlaygroundRequestSchema,
   AgentPlaygroundResponseSchema,
   AgentResponseSchema,
   AgentSuggestionListResponseSchema,
   AgentSuggestionResponseSchema,
   AgentSuggestionStatusSchema,
+  CreateAgentInstructionTemplateRequestSchema,
   CreateAgentRequestSchema,
   UpdateAgentRequestSchema,
+  type AgentInstructionTemplateResponse,
+  type AgentPlaygroundResponse,
   type AgentResponse,
   type AgentSuggestionResponse,
 } from "@sahabat-kreator/contracts";
 import {
   approveSuggestion,
   createAgent,
+  createAgentInstructionTemplate,
+  deleteAgentInstructionTemplate,
+  listAgentInstructionTemplates,
   listAgents,
   listSuggestions,
   rejectSuggestion,
   resolveAgentLlmProvider,
   resolveEmbeddingProvider,
   runAgentPlayground,
+  runAgentPlaygroundDraft,
   updateAgent,
+  type AgentPlaygroundOutcome,
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
-import type { Agent, AgentSuggestion } from "@sahabat-kreator/db";
+import type {
+  Agent,
+  AgentInstructionTemplate,
+  AgentSuggestion,
+} from "@sahabat-kreator/db";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppContext, type AppVariables } from "../../http";
@@ -42,6 +57,54 @@ export function serializeAgent(row: Agent): AgentResponse {
     config: row.config,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  });
+}
+
+export function serializeAgentInstructionTemplate(
+  row: AgentInstructionTemplate,
+): AgentInstructionTemplateResponse {
+  return AgentInstructionTemplateResponseSchema.parse({
+    id: row.id,
+    name: row.name,
+    systemPrompt: row.systemPrompt,
+    mode: row.mode,
+    language: row.language,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  });
+}
+
+/**
+ * Serialisasi respons playground — dipakai handler agent tersimpan
+ * DAN handler draf agar kedua jalur menjawab dengan bentuk persis sama.
+ */
+function serializePlaygroundOutcome(
+  outcome: Extract<AgentPlaygroundOutcome, { kind: "ok" }>,
+): AgentPlaygroundResponse {
+  return AgentPlaygroundResponseSchema.parse({
+    replyText: outcome.replyText,
+    mode: outcome.mode,
+    retrieval: outcome.retrieval,
+    kbHits: outcome.kbHits.map((h) => ({
+      chunkId: h.chunkId,
+      documentId: h.documentId,
+      documentTitle: h.documentTitle,
+      chunkIndex: h.chunkIndex,
+      snippet: h.content.slice(0, 280),
+      sources: h.sources,
+    })),
+    intents: outcome.intents.map((intent) =>
+      intent.kind === "unknown"
+        ? { kind: intent.kind, toolName: intent.toolName }
+        : intent,
+    ),
+    usage: {
+      provider: outcome.usage.provider,
+      model: outcome.usage.model,
+      tokensIn: outcome.usage.tokensIn,
+      tokensOut: outcome.usage.tokensOut,
+      costUsd: outcome.usage.costUsd ?? null,
+    },
   });
 }
 
@@ -81,8 +144,12 @@ export interface AgentsRoutesDeps {
  * balasan mode 'suggest':
  *   POST  /tenants/:tenantId/agents                  buat → 201
  *   GET   /tenants/:tenantId/agents                  daftar
+ *   POST  /tenants/:tenantId/agents/playground-draft uji kering konfigurasi DRAF formulir (belum tersimpan) → balasan + potongan KB + niat tool
  *   PATCH /tenants/:tenantId/agents/:id              ubah name/systemPrompt/model/mode/isActive/config
  *   POST  /tenants/:tenantId/agents/:id/playground   uji kering agent (Fase 12E) → balasan + potongan KB + niat tool
+ *   POST  /tenants/:tenantId/agent-templates         simpan templat instruction pribadi → 201
+ *   GET   /tenants/:tenantId/agent-templates         daftar templat instruction pribadi
+ *   DELETE /tenants/:tenantId/agent-templates/:id    hapus templat instruction pribadi → baris terhapus
  *   GET   /tenants/:tenantId/suggestions?status=     draf balasan agent
  *   POST  /tenants/:tenantId/suggestions/:id/approve kirim teks saran sbg pesan agent
  *   POST  /tenants/:tenantId/suggestions/:id/reject  tolak draf
@@ -100,6 +167,7 @@ export function createAgentsRoutes(
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   const agentsBase = "/tenants/:tenantId/agents";
+  const templatesBase = "/tenants/:tenantId/agent-templates";
   const suggestionsBase = "/tenants/:tenantId/suggestions";
 
   if (!bundle) {
@@ -107,8 +175,12 @@ export function createAgentsRoutes(
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured");
     app.post(agentsBase, notConfigured);
     app.get(agentsBase, notConfigured);
+    app.post(`${agentsBase}/playground-draft`, notConfigured);
     app.patch(`${agentsBase}/:id`, notConfigured);
     app.post(`${agentsBase}/:id/playground`, notConfigured);
+    app.post(templatesBase, notConfigured);
+    app.get(templatesBase, notConfigured);
+    app.delete(`${templatesBase}/:id`, notConfigured);
     app.get(suggestionsBase, notConfigured);
     app.post(`${suggestionsBase}/:id/approve`, notConfigured);
     app.post(`${suggestionsBase}/:id/reject`, notConfigured);
@@ -129,6 +201,28 @@ export function createAgentsRoutes(
     } catch {
       return undefined;
     }
+  };
+
+  /**
+   * Resolusi provider playground — dipakai handler tersimpan DAN draf
+   * agar yang diuji persis provider yang akan menjawab sungguhan.
+   * Kegagalan resolusi LLM DILEMPAR (pemanggil memetakannya ke 502);
+   * embedding adalah peningkat: kegagalan resolusi = nonaktif
+   * (retrieval full-text murni), tidak pernah menggagalkan playground.
+   */
+  const resolvePlaygroundProviders = async () => {
+    const llmProvider = await resolveAgentLlmProvider(bundle.db, {
+      platform: deps.platform,
+      providerEnv: deps.llmProviderEnv,
+    });
+    const embeddingProvider = deps.platform
+      ? await resolveEmbeddingProvider(bundle.db, {
+          platform: deps.platform,
+          providerEnv: deps.embeddingProviderEnv,
+          modelEnv: deps.embeddingModelEnv,
+        }).catch(() => null)
+      : null;
+    return { llmProvider, embeddingProvider };
   };
 
   app.post(agentsBase, async (c) => {
@@ -158,6 +252,62 @@ export function createAgentsRoutes(
       agents: rows.map(serializeAgent),
     });
     return c.json(body);
+  });
+
+  // Playground draf: uji kering konfigurasi formulir yang BELUM
+  // tersimpan. Didaftarkan SEBELUM rute `:id` agar segmen literal
+  // `playground-draft` tidak pernah ditafsirkan sebagai id agent.
+  // Resolusi provider + serialisasi respons sama persis dengan
+  // playground tersimpan di bawah.
+  app.post(`${agentsBase}/playground-draft`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const json = await parseJson(c);
+    if (json === undefined) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = AgentPlaygroundDraftRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid playground payload");
+    }
+
+    let providers;
+    try {
+      providers = await resolvePlaygroundProviders();
+    } catch {
+      return apiError(
+        c,
+        502,
+        "AGENT_PROVIDER_ERROR",
+        "AI provider is not configured correctly",
+      );
+    }
+
+    const outcome = await runAgentPlaygroundDraft(
+      bundle.db,
+      providers.llmProvider,
+      {
+        tenantId: tenant.id,
+        draft: parsed.data.draft,
+        message: parsed.data.message,
+        history: parsed.data.history,
+        embeddingProvider: providers.embeddingProvider,
+      },
+    );
+    if (outcome.kind === "provider_error") {
+      return apiError(
+        c,
+        502,
+        "AGENT_PROVIDER_ERROR",
+        "AI provider failed to respond",
+      );
+    }
+    if (outcome.kind === "agent_not_found") {
+      // Tidak mungkin pada jalur draf (agent sintetis selalu ada);
+      // dijaga hanya agar penyempitan tipe tuntas.
+      return apiError(c, 404, "NOT_FOUND", "Agent not found");
+    }
+    return c.json(serializePlaygroundOutcome(outcome));
   });
 
   app.patch(`${agentsBase}/:id`, async (c) => {
@@ -204,12 +354,9 @@ export function createAgentsRoutes(
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid playground payload");
     }
 
-    let llmProvider;
+    let providers;
     try {
-      llmProvider = await resolveAgentLlmProvider(bundle.db, {
-        platform: deps.platform,
-        providerEnv: deps.llmProviderEnv,
-      });
+      providers = await resolvePlaygroundProviders();
     } catch {
       return apiError(
         c,
@@ -218,22 +365,13 @@ export function createAgentsRoutes(
         "AI provider is not configured correctly",
       );
     }
-    // Embedding adalah peningkat: kegagalan resolusi = nonaktif (retrieval
-    // full-text murni), tidak pernah menggagalkan playground.
-    const embeddingProvider = deps.platform
-      ? await resolveEmbeddingProvider(bundle.db, {
-          platform: deps.platform,
-          providerEnv: deps.embeddingProviderEnv,
-          modelEnv: deps.embeddingModelEnv,
-        }).catch(() => null)
-      : null;
 
-    const outcome = await runAgentPlayground(bundle.db, llmProvider, {
+    const outcome = await runAgentPlayground(bundle.db, providers.llmProvider, {
       tenantId: tenant.id,
       agentId: id,
       message: parsed.data.message,
       history: parsed.data.history,
-      embeddingProvider,
+      embeddingProvider: providers.embeddingProvider,
     });
     if (outcome.kind === "agent_not_found") {
       return apiError(c, 404, "NOT_FOUND", "Agent not found");
@@ -246,32 +384,60 @@ export function createAgentsRoutes(
         "AI provider failed to respond",
       );
     }
-    const body = AgentPlaygroundResponseSchema.parse({
-      replyText: outcome.replyText,
-      mode: outcome.mode,
-      retrieval: outcome.retrieval,
-      kbHits: outcome.kbHits.map((h) => ({
-        chunkId: h.chunkId,
-        documentId: h.documentId,
-        documentTitle: h.documentTitle,
-        chunkIndex: h.chunkIndex,
-        snippet: h.content.slice(0, 280),
-        sources: h.sources,
-      })),
-      intents: outcome.intents.map((intent) =>
-        intent.kind === "unknown"
-          ? { kind: intent.kind, toolName: intent.toolName }
-          : intent,
-      ),
-      usage: {
-        provider: outcome.usage.provider,
-        model: outcome.usage.model,
-        tokensIn: outcome.usage.tokensIn,
-        tokensOut: outcome.usage.tokensOut,
-        costUsd: outcome.usage.costUsd ?? null,
-      },
+    return c.json(serializePlaygroundOutcome(outcome));
+  });
+
+  // Templat instruction pribadi tenant: buat/daftar/hapus salinan
+  // instruction dari formulir agent. Penanda "[...]" yang belum diganti
+  // BUKAN kesalahan di sini — skema kontrak sengaja hanya membatasi
+  // panjang, sama seperti pembuatan agent.
+  app.post(templatesBase, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const json = await parseJson(c);
+    if (json === undefined) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = CreateAgentInstructionTemplateRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid agent template payload");
+    }
+    const created = await createAgentInstructionTemplate(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      parsed.data,
+    );
+    return c.json(serializeAgentInstructionTemplate(created), 201);
+  });
+
+  app.get(templatesBase, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const rows = await listAgentInstructionTemplates(bundle.db, {
+      tenantId: tenant.id,
+    });
+    const body = AgentInstructionTemplateListResponseSchema.parse({
+      templates: rows.map(serializeAgentInstructionTemplate),
     });
     return c.json(body);
+  });
+
+  app.delete(`${templatesBase}/:id`, async (c) => {
+    const tenant = await resolveTenant(c);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Agent template not found");
+    }
+    const deleted = await deleteAgentInstructionTemplate(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+    );
+    if (!deleted) {
+      return apiError(c, 404, "NOT_FOUND", "Agent template not found");
+    }
+    return c.json(serializeAgentInstructionTemplate(deleted));
   });
 
   app.get(suggestionsBase, async (c) => {
