@@ -47,7 +47,8 @@
     "verify:sla-working-hours": "tsx scripts/verify-sla-working-hours.ts",
     "verify:contact-field-schema": "tsx scripts/verify-contact-field-schema.ts",
     "verify:contact-scan": "tsx scripts/verify-contact-scan.ts",
-    "verify:flow-action-buttons": "tsx scripts/verify-flow-action-buttons.ts"
+    "verify:flow-action-buttons": "tsx scripts/verify-flow-action-buttons.ts",
+    "verify:gamification": "tsx scripts/verify-gamification.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

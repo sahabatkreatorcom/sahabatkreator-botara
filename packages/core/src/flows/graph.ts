@@ -103,6 +103,8 @@ export const NODE_TYPES = new Set([
   "send_dynamic_image",
   // G18 — tombol aksi salin teks / telepon
   "send_action_buttons",
+  // G18 — gamifikasi poin
+  "award_points",
 ]);
 
 /**

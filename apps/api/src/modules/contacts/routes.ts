@@ -8,6 +8,14 @@ import {
   ContactFieldDefinitionListResponseSchema,
   ContactFieldDefinitionResponseSchema,
   ContactImportRequestSchema,
+  AdjustContactPointsRequestSchema,
+  ContactPointsResponseSchema,
+  CreateLoyaltyLevelRequestSchema,
+  LeaderboardResponseSchema,
+  LoyaltyLevelListResponseSchema,
+  LoyaltyLevelSchema,
+  UpdateLoyaltyLevelRequestSchema,
+  type LoyaltyLevel as LoyaltyLevelResponse,
   ContactScanCandidateResponseSchema,
   ContactScanDetailResponseSchema,
   ContactScanImportRequestSchema,
@@ -46,6 +54,13 @@ import {
   importContactScanCandidates,
   listContactScans,
   readScanStats,
+  adjustContactPoints,
+  createLoyaltyLevel,
+  deleteLoyaltyLevel,
+  getContactPoints,
+  listLeaderboard,
+  listLoyaltyLevels,
+  updateLoyaltyLevel,
   deleteContactFieldDefinition,
   deleteContactNote,
   effectiveOptInStatus,
@@ -73,6 +88,7 @@ import type {
   ContactFieldDefinition,
   ContactScanCandidate,
   ContactScanRun,
+  LoyaltyLevel as LoyaltyLevelRow,
 } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
@@ -173,6 +189,19 @@ export function serializeContactScanCandidate(
     sampleText: row.sampleText,
     status: row.status,
     importedContactId: row.importedContactId,
+  });
+}
+
+/** Serialisasi satu level loyalitas (G18 butir 4). */
+export function serializeLoyaltyLevel(
+  row: LoyaltyLevelRow,
+): LoyaltyLevelResponse {
+  return LoyaltyLevelSchema.parse({
+    id: row.id,
+    name: row.name,
+    minPoints: row.minPoints,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
   });
 }
 
@@ -344,6 +373,13 @@ export function createContactsRoutes(
     app.get(`${base}/scans`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/scans/:scanId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/scans/:scanId/import`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/leaderboard`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/loyalty-levels`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/loyalty-levels`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.patch(`${base}/loyalty-levels/:levelId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.delete(`${base}/loyalty-levels/:levelId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/:id/points`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:id/points/adjust`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/conversations`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/notes`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
@@ -776,6 +812,182 @@ export function createContactsRoutes(
     );
     if (!result) return apiError(c, 404, "NOT_FOUND", "Contact scan not found");
     return c.json(ContactScanImportResponseSchema.parse(result));
+  });
+
+  // --- Gamifikasi / loyalitas (G18 butir 4) -------------------------
+  app.get(`${base}/leaderboard`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const rawLimit = Number(c.req.query("limit") ?? "50");
+    const limit = Number.isFinite(rawLimit)
+      ? Math.min(200, Math.max(1, Math.trunc(rawLimit)))
+      : 50;
+    const rows = await listLeaderboard(bundle.db, { tenantId: tenant.id }, limit);
+    return c.json(
+      LeaderboardResponseSchema.parse({
+        entries: rows.map((r) => ({
+          contactId: r.contactId,
+          contactName: r.contactName,
+          balance: r.balance,
+          levelName: r.levelName,
+        })),
+      }),
+    );
+  });
+
+  app.get(`${base}/loyalty-levels`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const rows = await listLoyaltyLevels(bundle.db, { tenantId: tenant.id });
+    return c.json(
+      LoyaltyLevelListResponseSchema.parse({
+        levels: rows.map(serializeLoyaltyLevel),
+      }),
+    );
+  });
+
+  app.post(`${base}/loyalty-levels`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    if (tenant.role !== "owner" && tenant.role !== "admin") {
+      return apiError(c, 403, "FORBIDDEN", "Only owners and admins can manage loyalty levels");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = CreateLoyaltyLevelRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid loyalty level payload");
+    }
+    const result = await createLoyaltyLevel(bundle.db, { tenantId: tenant.id }, parsed.data);
+    if (result.kind === "duplicate_min_points") {
+      return apiError(c, 409, "VALIDATION_ERROR", "A level with this minimum points already exists");
+    }
+    if (result.kind !== "ok") {
+      return apiError(c, 500, "INTERNAL_ERROR", "Unexpected loyalty level result");
+    }
+    return c.json(serializeLoyaltyLevel(result.level), 201);
+  });
+
+  app.patch(`${base}/loyalty-levels/:levelId`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    if (tenant.role !== "owner" && tenant.role !== "admin") {
+      return apiError(c, 403, "FORBIDDEN", "Only owners and admins can manage loyalty levels");
+    }
+    const levelId = c.req.param("levelId");
+    if (!z.string().uuid().safeParse(levelId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Loyalty level not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = UpdateLoyaltyLevelRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid loyalty level payload");
+    }
+    const result = await updateLoyaltyLevel(bundle.db, { tenantId: tenant.id }, levelId, parsed.data);
+    if (result.kind === "not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Loyalty level not found");
+    }
+    if (result.kind === "duplicate_min_points") {
+      return apiError(c, 409, "VALIDATION_ERROR", "A level with this minimum points already exists");
+    }
+    return c.json(serializeLoyaltyLevel(result.level));
+  });
+
+  app.delete(`${base}/loyalty-levels/:levelId`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    if (tenant.role !== "owner" && tenant.role !== "admin") {
+      return apiError(c, 403, "FORBIDDEN", "Only owners and admins can manage loyalty levels");
+    }
+    const levelId = c.req.param("levelId");
+    if (!z.string().uuid().safeParse(levelId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Loyalty level not found");
+    }
+    const removed = await deleteLoyaltyLevel(bundle.db, { tenantId: tenant.id }, levelId);
+    if (!removed) return apiError(c, 404, "NOT_FOUND", "Loyalty level not found");
+    return c.json({ ok: true });
+  });
+
+  app.get(`${base}/:id/points`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    const view = await getContactPoints(bundle.db, { tenantId: tenant.id }, id);
+    if (!view) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    return c.json(
+      ContactPointsResponseSchema.parse({
+        contactId: id,
+        balance: view.balance,
+        levelName: view.levelName,
+        nextLevel: view.nextLevel,
+        entries: view.entries.map((e) => ({
+          id: e.id,
+          points: e.points,
+          source: e.source,
+          note: e.note,
+          createdByUserId: e.createdByUserId,
+          createdAt: e.createdAt.toISOString(),
+        })),
+      }),
+    );
+  });
+
+  app.post(`${base}/:id/points/adjust`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    if (tenant.role !== "owner" && tenant.role !== "admin") {
+      return apiError(c, 403, "FORBIDDEN", "Only owners and admins can adjust points");
+    }
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = AdjustContactPointsRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid points adjustment payload");
+    }
+    const result = await adjustContactPoints(bundle.db, { tenantId: tenant.id }, {
+      contactId: id,
+      points: parsed.data.points,
+      note: parsed.data.note ?? null,
+      userId: c.get("appUser").id,
+    });
+    if (!result) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    const view = await getContactPoints(bundle.db, { tenantId: tenant.id }, id);
+    return c.json(
+      ContactPointsResponseSchema.parse({
+        contactId: id,
+        balance: result.balance,
+        levelName: view?.levelName ?? null,
+        nextLevel: view?.nextLevel ?? null,
+        entries: (view?.entries ?? []).map((e) => ({
+          id: e.id,
+          points: e.points,
+          source: e.source,
+          note: e.note,
+          createdByUserId: e.createdByUserId,
+          createdAt: e.createdAt.toISOString(),
+        })),
+      }),
+    );
   });
 
   app.get(`${base}/:id`, async (c) => {

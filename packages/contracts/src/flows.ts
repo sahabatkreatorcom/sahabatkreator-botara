@@ -382,6 +382,9 @@ export const FlowNodeTypeSchema = z.enum([
   // mendukungnya, fallback teks tercatat bila tidak (lihat
   // ACTION_BUTTON_NATIVE_SUPPORT).
   "send_action_buttons",
+  // G18 — gamifikasi: beri poin loyalitas ke kontak run (buku
+  // besar poin; idempoten per run+node).
+  "award_points",
 ]);
 export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
 
@@ -631,6 +634,12 @@ export const FlowNodeConfigSchema = z.union([
       )
       .min(1)
       .max(3),
+  }),
+  // G18 — award_points: jumlah poin positif + label opsional yang
+  // tercatat sebagai catatan baris buku besar.
+  z.object({
+    points: z.number().int().min(1).max(100_000),
+    label: z.string().max(200).optional(),
   }),
   // ai_response / handoff / end: config kosong.
   z.object({}),

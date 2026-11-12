@@ -136,7 +136,9 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 //   skema field kustom bertipe per tenant)
 // + 2 tabel Gelombang G18 / migrasi 0044 (contact_scan_runs,
 //   contact_scan_candidates — pindai pelanggan otomatis)
-assert.equal(Number(tablesRes.rows[0].count), 86);
+// + 2 tabel Gelombang G18 / migrasi 0045 (loyalty_levels,
+//   contact_point_ledger — gamifikasi poin kontak)
+assert.equal(Number(tablesRes.rows[0].count), 88);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -342,7 +344,11 @@ const policies = await db.query<{ count: string }>(
 // Migrasi 0044 (Gelombang G18 — pindai pelanggan otomatis) menambah
 // `contact_scan_runs` dan `contact_scan_candidates`, masing-masing
 // dengan tenant_isolation → 114.
-assert.equal(Number(policies.rows[0].count), 114);
+//
+// Migrasi 0045 (Gelombang G18 — gamifikasi) menambah
+// `loyalty_levels` dan `contact_point_ledger`, masing-masing
+// dengan tenant_isolation → 116.
+assert.equal(Number(policies.rows[0].count), 116);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2532,8 +2538,11 @@ function oneHotVector(index: number): string {
   // 2026-11-13: migrasi 0044 (Gelombang G18 — pindai pelanggan
   // otomatis) menambah contact_scan_runs & contact_scan_candidates
   // (masing-masing tenant_isolation) → tabel 86, policy 114.
-  assert.equal(counts.rows[0].tables, "86");
-  assert.equal(counts.rows[0].policies, "114");
+  // 2026-11-13: migrasi 0045 (Gelombang G18 — gamifikasi) menambah
+  // loyalty_levels & contact_point_ledger (masing-masing
+  // tenant_isolation) → tabel 88, policy 116.
+  assert.equal(counts.rows[0].tables, "88");
+  assert.equal(counts.rows[0].policies, "116");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

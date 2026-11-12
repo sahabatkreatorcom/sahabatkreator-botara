@@ -189,6 +189,23 @@ export {
   type ImportContactScanResult,
 } from "./contact-scans";
 export {
+  flowAwardEventId,
+  contactPointsBalanceTx,
+  awardFlowPointsTx,
+  adjustContactPoints,
+  getContactPoints,
+  levelForBalance,
+  listLeaderboard,
+  listLoyaltyLevels,
+  createLoyaltyLevel,
+  updateLoyaltyLevel,
+  deleteLoyaltyLevel,
+  type AwardFlowPointsResult,
+  type ContactPointsView,
+  type LeaderboardRow,
+  type LoyaltyLevelWriteResult,
+} from "./loyalty";
+export {
   DEFAULT_OPT_IN_KEYWORDS,
   DEFAULT_OPT_OUT_KEYWORDS,
   DEFAULT_OPT_IN_SETTINGS,

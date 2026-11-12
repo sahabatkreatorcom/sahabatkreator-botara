@@ -1109,6 +1109,49 @@ export function NodeConfigPanel({
         </>
       ) : null}
 
+      {type === "award_points" ? (
+        <>
+          <p className="text-xs text-muted">{t("flows.awardPointsNote")}</p>
+          <div>
+            <label className={labelClass} htmlFor="cfg-award-points">
+              {t("flows.awardPointsLabel")}
+            </label>
+            <input
+              id="cfg-award-points"
+              type="number"
+              min={1}
+              max={100000}
+              className={inputClass}
+              disabled={readOnly}
+              value={typeof config.points === "number" ? config.points : ""}
+              onChange={(e) =>
+                set({
+                  points: e.target.value
+                    ? Math.trunc(Number(e.target.value))
+                    : undefined,
+                })
+              }
+            />
+          </div>
+          <div>
+            <label className={labelClass} htmlFor="cfg-award-label">
+              {t("flows.awardPointsNoteLabel")}
+            </label>
+            <input
+              id="cfg-award-label"
+              className={inputClass}
+              maxLength={200}
+              disabled={readOnly}
+              placeholder={t("flows.awardPointsNotePlaceholder")}
+              value={str(config.label)}
+              onChange={(e) =>
+                set({ label: e.target.value ? e.target.value : undefined })
+              }
+            />
+          </div>
+        </>
+      ) : null}
+
       {type === "append_sheet_row" ? (
         <>
           <p className="text-xs text-muted">{t("flows.sheetNote")}</p>

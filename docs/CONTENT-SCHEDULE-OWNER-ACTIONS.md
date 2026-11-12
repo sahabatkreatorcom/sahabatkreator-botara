@@ -1115,6 +1115,31 @@ Node "Kirim gambar dinamis" merender kartu PNG 1200×630
   baris teks terbaca di badan pesan dan modenya tercatat di detail
   run. Tidak ada tindakan pemilik; ini batas platform, bukan bug.
 
+### Butir 4 — Gamifikasi: Poin, Level, Papan Peringkat (tanpa tindakan pemilik)
+
+- Buku besar poin per kontak live: node flow "Beri poin
+  loyalitas" (idempoten per run), penyesuaian manual oleh
+  owner/admin di detail kontak (diaudit), level loyalitas yang
+  diatur tenant (Kontak → Papan peringkat), dan papan peringkat
+  yang dihitung dari buku besar. Tidak ada kredensial/tindakan
+  pemilik.
+- PENILAIAN MINI APPS / MINIGAMES (diminta eksplisit di brief):
+  TIDAK dibangun pada gelombang ini, dengan alasan: (1) permukaan
+  resminya tidak seragam — Telegram punya Mini Apps (web app di
+  dalam chat, butuh hosting HTTPS + validasi initData), WhatsApp
+  TIDAK punya permukaan mini app/game di dalam chat untuk
+  pengguna umum, Messenger hanya punya games di konteks terbatas
+  yang tidak terbuka untuk Page messaging biasa; membangun untuk
+  satu kanal saja akan menciptakan fitur timpang yang sulit
+  dijelaskan ke tenant kanal lain. (2) Permainan adalah produk
+  tersendiri (konten, anti-kecurangan, ekonomi hadiah) — jauh di
+  luar inti gamifikasi yang bisa diverifikasi gelombang ini.
+  Bentuk terkecil yang masuk akal bila pemilik ingin melanjutkan:
+  kuis/tebak skor berbasis flow yang SUDAH didukung mesin saat
+  ini (questionnaire + condition + node poin G18) tanpa kode baru,
+  atau satu Mini App Telegram khusus tenant yang meminta. Keputusan
+  ada di pemilik; tidak ada yang terblokir oleh penundaan ini.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +

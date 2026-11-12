@@ -617,3 +617,98 @@ export const ContactTimelineResponseSchema = z.object({
 export type ContactTimelineResponse = z.infer<
   typeof ContactTimelineResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Gamifikasi / loyalitas (G18 butir 4): buku besar poin per kontak —
+// saldo adalah SUM baris buku besar; level diturunkan dari ambang
+// yang diatur tenant. Pemberian flow idempoten per run+node
+// (event_id deterministik); penyesuaian manual oleh tim (diaudit).
+// ---------------------------------------------------------------------------
+
+export const LoyaltyLevelSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  minPoints: z.number().int().nonnegative(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type LoyaltyLevel = z.infer<typeof LoyaltyLevelSchema>;
+
+export const LoyaltyLevelListResponseSchema = z.object({
+  levels: z.array(LoyaltyLevelSchema),
+});
+export type LoyaltyLevelListResponse = z.infer<
+  typeof LoyaltyLevelListResponseSchema
+>;
+
+export const CreateLoyaltyLevelRequestSchema = z.object({
+  name: z.string().trim().min(1).max(64),
+  minPoints: z.number().int().min(0).max(1_000_000_000),
+});
+export type CreateLoyaltyLevelRequest = z.infer<
+  typeof CreateLoyaltyLevelRequestSchema
+>;
+
+export const UpdateLoyaltyLevelRequestSchema = z
+  .object({
+    name: z.string().trim().min(1).max(64).optional(),
+    minPoints: z.number().int().min(0).max(1_000_000_000).optional(),
+  })
+  .refine((v) => v.name !== undefined || v.minPoints !== undefined, {
+    message: "Tidak ada perubahan",
+  });
+export type UpdateLoyaltyLevelRequest = z.infer<
+  typeof UpdateLoyaltyLevelRequestSchema
+>;
+
+export const ContactPointLedgerEntrySchema = z.object({
+  id: z.string().uuid(),
+  points: z.number().int(),
+  source: z.enum(["flow_award", "manual"]),
+  note: z.string().nullable(),
+  createdByUserId: z.string().uuid().nullable(),
+  createdAt: z.string(),
+});
+export type ContactPointLedgerEntry = z.infer<
+  typeof ContactPointLedgerEntrySchema
+>;
+
+export const ContactPointsResponseSchema = z.object({
+  contactId: z.string().uuid(),
+  balance: z.number().int(),
+  /** Nama level saat ini (ambang tertinggi yang terpenuhi) / null. */
+  levelName: z.string().nullable(),
+  /** Level berikutnya + poin yang kurang / null bila teratas. */
+  nextLevel: z
+    .object({ name: z.string(), pointsNeeded: z.number().int().positive() })
+    .nullable(),
+  entries: z.array(ContactPointLedgerEntrySchema),
+});
+export type ContactPointsResponse = z.infer<typeof ContactPointsResponseSchema>;
+
+export const AdjustContactPointsRequestSchema = z.object({
+  /** Delta poin: positif menambah, negatif mengoreksi. Bukan nol. */
+  points: z
+    .number()
+    .int()
+    .min(-1_000_000)
+    .max(1_000_000)
+    .refine((v) => v !== 0, { message: "Poin tidak boleh nol" }),
+  note: z.string().trim().max(500).optional(),
+});
+export type AdjustContactPointsRequest = z.infer<
+  typeof AdjustContactPointsRequestSchema
+>;
+
+export const LeaderboardEntrySchema = z.object({
+  contactId: z.string().uuid(),
+  contactName: z.string(),
+  balance: z.number().int(),
+  levelName: z.string().nullable(),
+});
+export type LeaderboardEntry = z.infer<typeof LeaderboardEntrySchema>;
+
+export const LeaderboardResponseSchema = z.object({
+  entries: z.array(LeaderboardEntrySchema),
+});
+export type LeaderboardResponse = z.infer<typeof LeaderboardResponseSchema>;

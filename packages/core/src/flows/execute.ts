@@ -49,6 +49,7 @@ import {
 import { renderMessageText } from "../render-text";
 import { enrollContactInSequence } from "../sequence-enroll";
 import { createDealForContact, moveLatestOpenDealStage } from "../deals";
+import { awardFlowPointsTx } from "../loyalty";
 import {
   buildAdConversionUserData,
   queueAdConversionTx,
@@ -1374,6 +1375,39 @@ async function executeNodeInTx(
           outboundMessageId: outboundId,
         },
         outboundMessageId: outboundId,
+      };
+    }
+
+    case "award_points": {
+      // G18: beri poin loyalitas ke kontak run. Buku besar adalah
+      // kebenaran tunggal; pemberian IDEMPOTEN per run+node
+      // (event_id deterministik) — eksekusi ulang langkah yang
+      // sama tercatat already_awarded, poin tidak berlipat.
+      if (!ctx.contact) throw new FlowNodeError("kontak run tidak ditemukan");
+      const points =
+        typeof c.points === "number" && Number.isInteger(c.points)
+          ? c.points
+          : 0;
+      if (points < 1 || points > 100_000) {
+        throw new FlowNodeError(
+          "award_points tanpa jumlah poin sah",
+          "award_points_unconfigured",
+        );
+      }
+      const awarded = await awardFlowPointsTx(tx, {
+        tenantId,
+        contactId: run.contactId,
+        runId: run.id,
+        nodeId: node.id,
+        points,
+        note: typeof c.label === "string" && c.label ? c.label : null,
+      });
+      return {
+        detail: {
+          outcome: awarded.kind,
+          points,
+          balance: awarded.balance,
+        },
       };
     }
 

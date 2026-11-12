@@ -889,6 +889,30 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
       }
       break;
     }
+    case "award_points": {
+      // G18: poin positif wajib; label opsional maks 200.
+      if (
+        typeof c.points !== "number" ||
+        !Number.isInteger(c.points) ||
+        c.points < 1 ||
+        c.points > 100_000
+      ) {
+        err(
+          "AWARD_POINTS_INVALID",
+          "Node award_points membutuhkan config.points bilangan bulat 1..100000",
+        );
+      }
+      if (
+        c.label !== undefined &&
+        (typeof c.label !== "string" || c.label.length > 200)
+      ) {
+        err(
+          "AWARD_POINTS_LABEL_INVALID",
+          "Node award_points: config.label harus string maks 200 karakter bila diisi",
+        );
+      }
+      break;
+    }
     case "ai_response":
     case "handoff":
     case "end":

@@ -121,6 +121,13 @@ import type {
   ContactScanImportResponse,
   ContactScanRunListResponse,
   ContactScanRunResponse,
+  AdjustContactPointsRequest,
+  ContactPointsResponse,
+  CreateLoyaltyLevelRequest,
+  LeaderboardEntry,
+  LeaderboardResponse,
+  LoyaltyLevel,
+  LoyaltyLevelListResponse,
   CreateFlowRequest,
   CreateGrowthLinkRequest,
   GrowthLinkAttributedContactsResponse,
@@ -738,6 +745,60 @@ export const api = {
           method: "POST",
           body: JSON.stringify(candidateIds ? { candidateIds } : {}),
         },
+      );
+    },
+    /** GET /api/tenants/:tenantId/contacts/leaderboard → papan peringkat poin (G18). */
+    async leaderboard(tenantId: string): Promise<LeaderboardEntry[]> {
+      const body = await request<LeaderboardResponse>(
+        `/api/tenants/${tenantId}/contacts/leaderboard`,
+        { method: "GET" },
+      );
+      return body.entries;
+    },
+    /** GET /api/tenants/:tenantId/contacts/loyalty-levels → level loyalitas tenant (G18). */
+    async listLoyaltyLevels(tenantId: string): Promise<LoyaltyLevel[]> {
+      const body = await request<LoyaltyLevelListResponse>(
+        `/api/tenants/${tenantId}/contacts/loyalty-levels`,
+        { method: "GET" },
+      );
+      return body.levels;
+    },
+    /** POST /api/tenants/:tenantId/contacts/loyalty-levels → buat level (owner/admin). */
+    createLoyaltyLevel(
+      tenantId: string,
+      input: CreateLoyaltyLevelRequest,
+    ): Promise<LoyaltyLevel> {
+      return request<LoyaltyLevel>(
+        `/api/tenants/${tenantId}/contacts/loyalty-levels`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE /api/tenants/:tenantId/contacts/loyalty-levels/:id → hapus level (owner/admin). */
+    deleteLoyaltyLevel(tenantId: string, levelId: string): Promise<void> {
+      return request<void>(
+        `/api/tenants/${tenantId}/contacts/loyalty-levels/${levelId}`,
+        { method: "DELETE" },
+      );
+    },
+    /** GET /api/tenants/:tenantId/contacts/:id/points → saldo + level + buku besar terakhir (G18). */
+    getContactPoints(
+      tenantId: string,
+      contactId: string,
+    ): Promise<ContactPointsResponse> {
+      return request<ContactPointsResponse>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/points`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/contacts/:id/points/adjust → penyesuaian manual (owner/admin, diaudit). */
+    adjustContactPoints(
+      tenantId: string,
+      contactId: string,
+      input: AdjustContactPointsRequest,
+    ): Promise<ContactPointsResponse> {
+      return request<ContactPointsResponse>(
+        `/api/tenants/${tenantId}/contacts/${contactId}/points/adjust`,
+        { method: "POST", body: JSON.stringify(input) },
       );
     },
     /** GET /api/tenants/:tenantId/contacts/duplicates → kelompok kandidat duplikat (Fase 9B). */

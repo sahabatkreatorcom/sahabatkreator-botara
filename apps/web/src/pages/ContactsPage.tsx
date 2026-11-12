@@ -15,6 +15,9 @@ import type {
   ContactScanCandidateResponse,
   ContactScanRunResponse,
   ContactNoteResponse,
+  ContactPointsResponse,
+  LeaderboardEntry,
+  LoyaltyLevel,
   ContactResponse,
   ContactTimelineEvent,
   EffectiveOptInStatus,
@@ -279,6 +282,7 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
   >([]);
   const [showFieldManager, setShowFieldManager] = useState(false);
   const [showScan, setShowScan] = useState(false);
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
   const loadFieldDefinitions = useCallback(async () => {
     if (!tenantId) return;
     try {
@@ -582,6 +586,13 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
             className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
           >
             {t("contacts.scan.openButton")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowLeaderboard(true)}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("contacts.leaderboard.openButton")}
           </button>
           <button
             type="button"
@@ -1024,6 +1035,14 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
         />
       ) : null}
 
+      {showLeaderboard ? (
+        <LeaderboardModal
+          t={t}
+          tenantId={active.id}
+          onClose={() => setShowLeaderboard(false)}
+        />
+      ) : null}
+
       {selected ? (
         <ContactDetailModal
           t={t}
@@ -1335,6 +1354,53 @@ function ContactDetailModal({
       );
     } catch (err) {
       setNoteError(translateApiError(t, err));
+    }
+  };
+
+  // Poin loyalitas (G18): saldo + level + buku besar terakhir dari
+  // server; penyesuaian manual digerbang server (owner/admin) dan
+  // diaudit — error peran tampil apa adanya.
+  const [pointsView, setPointsView] = useState<ContactPointsResponse | null>(
+    null,
+  );
+  const [pointsError, setPointsError] = useState(false);
+  const [adjustDelta, setAdjustDelta] = useState("");
+  const [adjustNote, setAdjustNote] = useState("");
+  const [adjustError, setAdjustError] = useState<string | null>(null);
+  const [adjustSaving, setAdjustSaving] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const body = await api.contacts.getContactPoints(tenantId, contact.id);
+        if (!cancelled) setPointsView(body);
+      } catch {
+        if (!cancelled) setPointsError(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, contact.id]);
+
+  const handleAdjustPoints = async (e: FormEvent) => {
+    e.preventDefault();
+    const delta = Math.trunc(Number(adjustDelta));
+    if (!Number.isFinite(delta) || delta === 0) return;
+    setAdjustError(null);
+    setAdjustSaving(true);
+    try {
+      const body = await api.contacts.adjustContactPoints(tenantId, contact.id, {
+        points: delta,
+        ...(adjustNote.trim() ? { note: adjustNote.trim() } : {}),
+      });
+      setPointsView(body);
+      setAdjustDelta("");
+      setAdjustNote("");
+    } catch (err) {
+      setAdjustError(translateApiError(t, err));
+    } finally {
+      setAdjustSaving(false);
     }
   };
 
@@ -1686,6 +1752,103 @@ function ContactDetailModal({
             </button>
           </div>
         </form>
+
+        {/* Poin loyalitas (G18): saldo dari buku besar + level +
+            penyesuaian manual (gerbang peran di server). */}
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold text-ink">
+            {t("contacts.points.title")}
+          </h3>
+          {pointsError ? (
+            <p className="mt-2 text-xs text-danger">
+              {t("contacts.points.loadError")}
+            </p>
+          ) : pointsView === null ? (
+            <p className="mt-2 text-xs text-muted">{t("common.loading")}</p>
+          ) : (
+            <>
+              <p className="mt-2 text-sm text-ink">
+                <span className="text-lg font-bold">
+                  {pointsView.balance}
+                </span>{" "}
+                {t("contacts.points.balanceLabel")}
+                {pointsView.levelName ? (
+                  <span className="ml-2 rounded bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                    {pointsView.levelName}
+                  </span>
+                ) : null}
+              </p>
+              {pointsView.nextLevel ? (
+                <p className="mt-1 text-xs text-muted">
+                  {t("contacts.points.nextLevel", {
+                    name: pointsView.nextLevel.name,
+                    needed: pointsView.nextLevel.pointsNeeded,
+                  })}
+                </p>
+              ) : null}
+              {pointsView.entries.length > 0 ? (
+                <ul className="mt-2 space-y-1 text-xs text-muted">
+                  {pointsView.entries.slice(0, 5).map((entry) => (
+                    <li key={entry.id} className="flex justify-between gap-2">
+                      <span className="truncate">
+                        {entry.note ??
+                          t(
+                            entry.source === "manual"
+                              ? "contacts.points.sourceManual"
+                              : "contacts.points.sourceFlow",
+                          )}{" "}
+                        · {new Date(entry.createdAt).toLocaleDateString()}
+                      </span>
+                      <span
+                        className={
+                          entry.points > 0
+                            ? "font-medium text-success"
+                            : "font-medium text-danger"
+                        }
+                      >
+                        {entry.points > 0 ? `+${entry.points}` : entry.points}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mt-1 text-xs text-muted">
+                  {t("contacts.points.empty")}
+                </p>
+              )}
+              <form
+                onSubmit={handleAdjustPoints}
+                className="mt-3 flex flex-wrap items-center gap-2"
+              >
+                <input
+                  type="number"
+                  className="w-24 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+                  placeholder={t("contacts.points.adjustPlaceholder")}
+                  value={adjustDelta}
+                  onChange={(e) => setAdjustDelta(e.target.value)}
+                />
+                <input
+                  type="text"
+                  maxLength={500}
+                  className="min-w-40 flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+                  placeholder={t("contacts.points.adjustNotePlaceholder")}
+                  value={adjustNote}
+                  onChange={(e) => setAdjustNote(e.target.value)}
+                />
+                <button
+                  type="submit"
+                  disabled={adjustSaving || !adjustDelta}
+                  className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+                >
+                  {t("contacts.points.adjustButton")}
+                </button>
+              </form>
+              {adjustError ? (
+                <p className="mt-1 text-xs text-danger">{adjustError}</p>
+              ) : null}
+            </>
+          )}
+        </div>
 
         {/* Percakapan milik kontak. Hanya percakapan PESAN
             (private/group) yang diberi tautan Inbox — baris channel
@@ -3006,6 +3169,205 @@ function ContactScanModal({
           <p className="mt-3 text-sm text-ink">{importResult}</p>
         ) : null}
         <FieldError message={error} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Papan peringkat poin + pengelolaan level loyalitas (G18 butir 4).
+ * Peringkat dihitung server dari buku besar poin; level diatur
+ * tenant (tulis digerbang server owner/admin — error tampil apa
+ * adanya).
+ */
+function LeaderboardModal({
+  t,
+  tenantId,
+  onClose,
+}: {
+  t: Translate;
+  tenantId: string;
+  onClose: () => void;
+}) {
+  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null);
+  const [levels, setLevels] = useState<LoyaltyLevel[] | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [levelName, setLevelName] = useState("");
+  const [levelMin, setLevelMin] = useState("");
+  const [levelError, setLevelError] = useState<string | null>(null);
+  const [levelSaving, setLevelSaving] = useState(false);
+
+  const reload = useCallback(async () => {
+    try {
+      const [board, lv] = await Promise.all([
+        api.contacts.leaderboard(tenantId),
+        api.contacts.listLoyaltyLevels(tenantId),
+      ]);
+      setEntries(board);
+      setLevels(lv);
+    } catch {
+      setLoadError(true);
+    }
+  }, [tenantId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  const handleAddLevel = async (e: FormEvent) => {
+    e.preventDefault();
+    const min = Math.trunc(Number(levelMin));
+    if (!levelName.trim() || !Number.isFinite(min) || min < 0) return;
+    setLevelError(null);
+    setLevelSaving(true);
+    try {
+      await api.contacts.createLoyaltyLevel(tenantId, {
+        name: levelName.trim(),
+        minPoints: min,
+      });
+      setLevelName("");
+      setLevelMin("");
+      await reload();
+    } catch (err) {
+      setLevelError(translateApiError(t, err));
+    } finally {
+      setLevelSaving(false);
+    }
+  };
+
+  const handleDeleteLevel = async (levelId: string) => {
+    setLevelError(null);
+    try {
+      await api.contacts.deleteLoyaltyLevel(tenantId, levelId);
+      await reload();
+    } catch (err) {
+      setLevelError(translateApiError(t, err));
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/40 p-4">
+      <div className="w-full max-w-xl rounded-2xl bg-surface p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-ink">
+              {t("contacts.leaderboard.title")}
+            </h2>
+            <p className="mt-1 text-xs text-muted">
+              {t("contacts.leaderboard.subtitle")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-line px-3 py-1.5 text-sm text-ink"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+
+        {loadError ? (
+          <p className="mt-4 text-sm text-danger">
+            {t("contacts.leaderboard.loadError")}
+          </p>
+        ) : entries === null ? (
+          <p className="mt-4 text-sm text-muted">{t("common.loading")}</p>
+        ) : entries.length === 0 ? (
+          <p className="mt-4 text-sm text-muted">
+            {t("contacts.leaderboard.empty")}
+          </p>
+        ) : (
+          <ol className="mt-4 divide-y divide-line overflow-hidden rounded-lg border border-line">
+            {entries.map((entry, i) => (
+              <li
+                key={entry.contactId}
+                className="flex items-center gap-3 px-3 py-2 text-sm"
+              >
+                <span className="w-6 text-center font-bold text-muted">
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1 truncate font-medium text-ink">
+                  {entry.contactName}
+                </span>
+                {entry.levelName ? (
+                  <span className="rounded bg-accent/10 px-2 py-0.5 text-xs font-medium text-accent">
+                    {entry.levelName}
+                  </span>
+                ) : null}
+                <span className="font-bold text-ink">{entry.balance}</span>
+              </li>
+            ))}
+          </ol>
+        )}
+
+        <div className="mt-5 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold text-ink">
+            {t("contacts.leaderboard.levelsTitle")}
+          </h3>
+          {levels === null ? (
+            <p className="mt-2 text-xs text-muted">{t("common.loading")}</p>
+          ) : levels.length === 0 ? (
+            <p className="mt-2 text-xs text-muted">
+              {t("contacts.leaderboard.levelsEmpty")}
+            </p>
+          ) : (
+            <ul className="mt-2 space-y-1 text-sm">
+              {levels.map((level) => (
+                <li
+                  key={level.id}
+                  className="flex items-center justify-between gap-2"
+                >
+                  <span className="text-ink">
+                    {level.name}{" "}
+                    <span className="text-xs text-muted">
+                      {t("contacts.leaderboard.levelMin", {
+                        points: level.minPoints,
+                      })}
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    className="text-xs text-danger"
+                    onClick={() => void handleDeleteLevel(level.id)}
+                  >
+                    {t("contacts.leaderboard.levelDelete")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <form
+            onSubmit={handleAddLevel}
+            className="mt-3 flex flex-wrap items-center gap-2"
+          >
+            <input
+              type="text"
+              maxLength={64}
+              className="min-w-32 flex-1 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+              placeholder={t("contacts.leaderboard.levelNamePlaceholder")}
+              value={levelName}
+              onChange={(e) => setLevelName(e.target.value)}
+            />
+            <input
+              type="number"
+              min={0}
+              className="w-28 rounded-lg border border-line bg-surface px-2 py-1.5 text-sm"
+              placeholder={t("contacts.leaderboard.levelMinPlaceholder")}
+              value={levelMin}
+              onChange={(e) => setLevelMin(e.target.value)}
+            />
+            <button
+              type="submit"
+              disabled={levelSaving || !levelName.trim() || !levelMin}
+              className="rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white disabled:opacity-60"
+            >
+              {t("contacts.leaderboard.levelAdd")}
+            </button>
+          </form>
+          {levelError ? (
+            <p className="mt-1 text-xs text-danger">{levelError}</p>
+          ) : null}
+        </div>
       </div>
     </div>
   );
