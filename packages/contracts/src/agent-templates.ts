@@ -102,7 +102,7 @@ export function findAgentInstructionTemplate(
 export function extractInstructionPlaceholders(text: string): string[] {
   const seen = new Set<string>();
   const found: string[] = [];
-  for (const match of text.matchAll(/\[([^\[\]\n]{1,80})\]/g)) {
+  for (const match of text.matchAll(/\[([^[\]\n]{1,80})\]/g)) {
     const value = (match[1] ?? "").trim();
     if (value && !seen.has(value)) {
       seen.add(value);
