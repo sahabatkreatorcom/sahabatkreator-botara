@@ -844,6 +844,39 @@ diketahui pemilik hanya dua catatan perilaku jujur:
   8, 9) murni memakai data internal yang sudah ada — tidak ada
   tindakan pemilik.
 
+## Gelombang G14 — Kode Diskon & Penukaran (Tier 3 butir 14)
+
+Kode diskon commerce kini bisa dikelola di halaman Produk (daftar +
+statistik penukaran), dan diterapkan pada checkout keranjang dari
+flow chat. TIDAK ada kredensial, izin platform, atau tindakan
+pemilik yang dibutuhkan gelombang ini — hanya catatan perilaku
+agar tidak kaget:
+
+- **Kode hanya berlaku di node flow "Checkout keranjang"
+  (cart_checkout).** Di builder flow, node itu kini punya tiga kolom
+  opsional: kode statis (berlaku untuk semua checkout node itu),
+  nama field kustom kontak yang memuat kode dari pelanggan (mis.
+  jawaban questionnaire yang disimpan ke `custom:<field>` — nilai
+  field MENANG atas kode statis), dan pesan bila kode tidak berlaku
+  (checkout tetap lanjut dengan harga penuh; tanpa pesan ini
+  penolakan berjalan diam-diam tapi tercatat di detail run).
+- **Tautan bayar produk tunggal dan halaman /pay BUKAN tempat
+  memasukkan kode** — jumlahnya terkunci saat tautan dibuat, jadi
+  kotak kode di sana hanya akan jadi janji palsu. Kode selalu
+  diterapkan SEBELUM tautan dibuat, sehingga jumlah yang dibayar
+  pelanggan lewat Midtrans/Xendit/simulasi adalah total sesudah
+  diskon.
+- **Perilaku pembatalan (keputusan G14):** bila order berakhir
+  kedaluwarsa/dibatalkan TANPA dibayar, penukarannya DILEPAS —
+  kuota total dan kuota per pelanggan kembali dan kode bisa dipakai
+  lagi (terlihat sebagai hitungan "dilepas" di daftar kode). Order
+  yang LUNAS mempertahankan penukarannya selamanya.
+- **Sinkronisasi Shopify/WooCommerce dinilai di luar lingkup dan
+  TIDAK dibangun** (audit G14): commerce Botara adalah katalog
+  internal + tautan bayar; sinkronisasi katalog dua arah adalah
+  integrasi tersendiri yang besar. Kode diskon berlaku untuk
+  katalog internal saja.
+
 ---
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
@@ -852,6 +885,7 @@ penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
 Gelombang G5 (pemicu postback/quick reply/welcome) + Gelombang G6
 (pengaman AI pelengkap) + Gelombang G7 (comment-to-DM Threads) +
 Gelombang G13 (pelengkap Wacrm — tanpa tindakan pemilik baru, hanya
-catatan perilaku).
+catatan perilaku) + Gelombang G14 (kode diskon — tanpa tindakan
+pemilik baru, hanya catatan perilaku).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
