@@ -77,6 +77,7 @@ import {
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type ApiKeyAuthContext, type AppVariables } from "../../http";
+import type { RateLimiter } from "../../rate-limit";
 import { serializeAgent } from "../agents/routes";
 import { serializeAutomation } from "../automations/routes";
 import { channelAvatarUrl } from "../avatars/routes";
@@ -198,11 +199,25 @@ export interface PublicV1KbDeps {
   embeddingModelEnv?: string;
 }
 
+/**
+ * Batas laju PER KUNCI API (G10). Lapisan per-IP di index.ts berjalan
+ * pra-autentikasi dan berbagi satu bucket untuk semua kunci di balik
+ * IP yang sama; lapisan ini berjalan SESUDAH `requireApiKey` dengan
+ * bucket = id kunci, sehingga kuota benar-benar milik kunci itu.
+ * Opsional: tanpa deps, modul berperilaku seperti sebelumnya.
+ */
+export interface PublicV1RateLimitDeps {
+  limiter: RateLimiter;
+  /** Nama aturan di limiter; bawaan "v1-key". */
+  rule?: string;
+}
+
 export function createPublicV1Routes(
   bundle: AuthBundle | null,
   publisher?: RealtimePublisher | null,
   commentOpts: CommentsModuleOptions = {},
   kbDeps: PublicV1KbDeps = {},
+  rateLimitDeps?: PublicV1RateLimitDeps,
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
 
@@ -235,6 +250,18 @@ export function createPublicV1Routes(
     };
 
   app.use("/v1/*", requireApiKey);
+
+  // Batas laju per kunci (G10) — SESUDAH autentikasi, bucket = id
+  // kunci. Kunci yang tidak dikenal/dicabut sudah ditolak di atas,
+  // jadi lapisan ini hanya menghitung trafik kunci yang sah.
+  if (rateLimitDeps) {
+    app.use(
+      "/v1/*",
+      rateLimitDeps.limiter.middleware(rateLimitDeps.rule ?? "v1-key", {
+        keyFrom: (c) => c.get("apiKeyAuth")?.apiKey.id ?? null,
+      }),
+    );
+  }
 
   function requireScope(
     c: { get: (k: "apiKeyAuth") => ApiKeyAuthContext },
@@ -935,7 +962,9 @@ export function createPublicV1Routes(
       status: c.req.query("status"),
     });
     if (!query.success) {
-      return apiError(c, 422, "VALIDATION_ERROR", "Invalid appointments query");
+      // 400 seperti semua validasi query lain di /v1 (G10: envelope
+      // yang konsisten termasuk statusnya, bukan hanya bentuk badan).
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid appointments query");
     }
     const auth = c.get("apiKeyAuth");
     const rows = await listBookings(bundle.db, auth.tenantId, {

@@ -203,6 +203,10 @@ const rateLimiter = createRateLimiter({
   logger,
   rules: {
     v1: { limit: 600, windowSeconds: 60 },
+    // G10: kuota per KUNCI API (bucket = id kunci, ditegakkan di modul
+    // public-v1 sesudah autentikasi). Lebih ketat dari jaring per-IP
+    // karena bucket ini tidak dibagi dengan kunci/IP lain.
+    "v1-key": { limit: 300, windowSeconds: 60 },
     webchat: { limit: 300, windowSeconds: 60 },
     public: { limit: 120, windowSeconds: 60 },
   },
@@ -583,6 +587,8 @@ routes.route(
       embeddingProviderEnv: env.EMBEDDING_PROVIDER,
       embeddingModelEnv: env.OPENROUTER_EMBEDDING_MODEL,
     },
+    // G10: batas laju per kunci API (aturan "v1-key" di rateLimiter).
+    { limiter: rateLimiter },
   ),
 );
 // Modul webchat publik (Fase 1F) — API widget pengunjung /webchat/*.

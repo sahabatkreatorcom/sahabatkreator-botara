@@ -8,7 +8,12 @@
  *
  * Semantik:
  * - Fixed window per (aturan, IP) — cukup untuk meredam banjir/abuse,
- *   bukan kuota billing.
+ *   bukan kuota billing. Satu pengecualian (G10): aturan `v1-key`
+ *   memakai bucket per KUNCI API (opsi `keyFrom`) dan dipasang di
+ *   modul public-v1 SESUDAH autentikasi — lapisan per-IP di index.ts
+ *   tetap menjadi jaring luar pra-autentikasi, lapisan per-kunci
+ *   memastikan satu kunci yang abusif tidak menghabiskan jatah kunci
+ *   lain di balik NAT yang sama, dan sebaliknya.
  * - Redis lintas replika bila `REDIS_URL` ada (INCR + EXPIRE). Bila Redis
  *   gagal, limiter FAIL-OPEN ke memori per proses dan berhenti mencoba
  *   Redis selama 30 detik — request pengguna tidak pernah gagal karena
@@ -62,8 +67,17 @@ export interface RateLimiterOptions {
 }
 
 export interface RateLimiter {
-  /** Middleware untuk satu nama aturan di `rules`. */
-  middleware(ruleName: string): MiddlewareHandler<{ Variables: AppVariables }>;
+  /**
+   * Middleware untuk satu nama aturan di `rules`. `keyFrom` (G10)
+   * mengganti identitas bucket dari IP ke nilai turunan konteks —
+   * dipakai lapisan batas per KUNCI API di /v1 (bucket = id kunci,
+   * berjalan sesudah autentikasi). Bila `keyFrom` mengembalikan
+   * null/kosong, bucket jatuh ke IP seperti biasa.
+   */
+  middleware(
+    ruleName: string,
+    opts?: { keyFrom?: (c: Context<{ Variables: AppVariables }>) => string | null },
+  ): MiddlewareHandler<{ Variables: AppVariables }>;
   /** Status Redis untuk `/ready`: ok | error | not_configured. */
   health(): Promise<"ok" | "error" | "not_configured">;
   /** Tutup koneksi Redis (dipanggil saat shutdown/uji). */
@@ -201,6 +215,7 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
 
   function middleware(
     ruleName: string,
+    opts?: { keyFrom?: (c: Context<{ Variables: AppVariables }>) => string | null },
   ): MiddlewareHandler<{ Variables: AppVariables }> {
     return async (c, next) => {
       const rule = options.rules[ruleName];
@@ -210,8 +225,10 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
       const currentTime = now();
       const windowMs = rule.windowSeconds * 1000;
       const windowStart = Math.floor(currentTime / windowMs) * windowMs;
-      const ip = resolveClientIp(c as Context);
-      const result = await take(`${ruleName}:${ip}`, rule.windowSeconds, windowStart);
+      const bucketId =
+        opts?.keyFrom?.(c as Context<{ Variables: AppVariables }>) ||
+        resolveClientIp(c as Context);
+      const result = await take(`${ruleName}:${bucketId}`, rule.windowSeconds, windowStart);
 
       const remaining = Math.max(0, rule.limit - result.count);
       c.header("X-RateLimit-Limit", String(rule.limit));
