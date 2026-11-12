@@ -8,17 +8,43 @@ import type { TranslationKey } from "@sahabat-kreator/i18n";
  * (Fase 6E): klik menu menavigasi ke path ini, dan item aktif selalu
  * diturunkan DARI URL saat ini lewat `matchNavPath` — tidak ada state
  * "halaman aktif" terpisah di komponen mana pun.
+ *
+ * Setiap item juga tergabung dalam tepat satu KELOMPOK (`group`) —
+ * sidebar desktop dan lembar "More" mobile merender item per kelompok
+ * dengan tajuk `nav.group.*` lewat `groupNavItems`. Kelompok yang
+ * tidak punya item terlihat (mis. semua itemnya tersaring permission)
+ * tidak dirender sama sekali.
  */
 export type IconName =
   | "home" | "inbox" | "bot" | "megaphone" | "users" | "workflow" | "book"
   | "bag" | "link" | "chart" | "card" | "settings" | "shield" | "more"
   | "list" | "audit" | "flow" | "growth" | "calendar" | "post";
 
+/** Id kelompok navigasi — urutan di NAV_GROUPS adalah urutan render. */
+export type NavGroupId =
+  | "utama" | "konten" | "layanan" | "kelola" | "akun" | "sistem";
+
+export interface NavGroup {
+  id: NavGroupId;
+  labelKey: TranslationKey;
+}
+
+/** Daftar kelompok kanonis, sesuai urutan tampil di sidebar & sheet More. */
+export const NAV_GROUPS: NavGroup[] = [
+  { id: "utama", labelKey: "nav.group.utama" },
+  { id: "konten", labelKey: "nav.group.konten" },
+  { id: "layanan", labelKey: "nav.group.layanan" },
+  { id: "kelola", labelKey: "nav.group.kelola" },
+  { id: "akun", labelKey: "nav.group.akun" },
+  { id: "sistem", labelKey: "nav.group.sistem" },
+];
+
 export interface NavItem {
   id: string;
   labelKey: TranslationKey;
   icon: IconName;
   route: string;
+  group: NavGroupId;
   permission?: string;
   entitlement?: string;
   badge?: "unreadInbox" | "pendingApprovals";
@@ -27,19 +53,19 @@ export interface NavItem {
 }
 
 export const NAV_REGISTRY: NavItem[] = [
-  { id: "dashboard",   labelKey: "nav.dashboard",   icon: "home",      route: "/",            mobile: { slot: 1 },      order: { desktop: 1,  more: 0 } },
-  { id: "inbox",       labelKey: "nav.inbox",       icon: "inbox",     route: "/inbox",       badge: "unreadInbox",      mobile: { slot: 2 },      order: { desktop: 2,  more: 0 } },
-  { id: "agents",      labelKey: "nav.agents",      icon: "bot",       route: "/agents",      badge: "pendingApprovals", mobile: { slot: 3 },      order: { desktop: 3,  more: 0 } },
-  { id: "broadcasts",  labelKey: "nav.broadcasts",  icon: "megaphone", route: "/broadcasts", mobile: { slot: 4 },      order: { desktop: 4,  more: 0 } },
+  { id: "dashboard",   labelKey: "nav.dashboard", group: "utama",   icon: "home",      route: "/",            mobile: { slot: 1 },      order: { desktop: 1,  more: 0 } },
+  { id: "inbox",       labelKey: "nav.inbox", group: "utama",       icon: "inbox",     route: "/inbox",       badge: "unreadInbox",      mobile: { slot: 2 },      order: { desktop: 2,  more: 0 } },
+  { id: "agents",      labelKey: "nav.agents", group: "layanan",      icon: "bot",       route: "/agents",      badge: "pendingApprovals", mobile: { slot: 3 },      order: { desktop: 3,  more: 0 } },
+  { id: "broadcasts",  labelKey: "nav.broadcasts", group: "konten",  icon: "megaphone", route: "/broadcasts", mobile: { slot: 4 },      order: { desktop: 4,  more: 0 } },
   // Jadwal Konten (Fase 23): postingan terjadwal ke channel Telegram.
   // Bersebelahan dengan Broadcasts karena keduanya "kirim sesuatu pada
   // waktu tertentu" — bedanya broadcast punya penerima, ini tidak.
-  { id: "posts",       labelKey: "nav.posts",       icon: "post",      route: "/posts",       mobile: { slot: "more" }, order: { desktop: 4.5, more: 0.5 } },
-  { id: "contacts",    labelKey: "nav.contacts",    icon: "users",     route: "/contacts",    mobile: { slot: "more" }, order: { desktop: 5,  more: 1 } },
-  { id: "automations", labelKey: "nav.automations", icon: "workflow",  route: "/automations", mobile: { slot: "more" }, order: { desktop: 6,  more: 2 } },
+  { id: "posts",       labelKey: "nav.posts", group: "konten",       icon: "post",      route: "/posts",       mobile: { slot: "more" }, order: { desktop: 4.5, more: 0.5 } },
+  { id: "contacts",    labelKey: "nav.contacts", group: "layanan",    icon: "users",     route: "/contacts",    mobile: { slot: "more" }, order: { desktop: 5,  more: 1 } },
+  { id: "automations", labelKey: "nav.automations", group: "layanan", icon: "workflow",  route: "/automations", mobile: { slot: "more" }, order: { desktop: 6,  more: 2 } },
   // Flow Builder (Fase 8B): daftar /flows + builder canvas /flows/:flowId
   // (matchNavPath memetakan sub-path ke item ini, pola deep-link Inbox).
-  { id: "flows",       labelKey: "nav.flows",       icon: "flow",      route: "/flows",       mobile: { slot: "more" }, order: { desktop: 7,  more: 3 } },
+  { id: "flows",       labelKey: "nav.flows", group: "layanan",       icon: "flow",      route: "/flows",       mobile: { slot: "more" }, order: { desktop: 7,  more: 3 } },
   // Knowledge Base TIDAK lagi entri tersendiri (Fase 12E): ia tab di
   // dalam hub /agents bersama Agen, Antrean Saran, dan Playground
   // (keputusan user — ketiganya saling berhubungan). URL lama /knowledge
@@ -49,25 +75,25 @@ export const NAV_REGISTRY: NavItem[] = [
   // Growth Tools (Fase 13B): tautan publik per channel + landing
   // pemilih channel + analitik — mengisi celah order peninggalan
   // Knowledge (desktop 8 / more 4).
-  { id: "growth",      labelKey: "nav.growth",      icon: "growth",    route: "/growth",      mobile: { slot: "more" }, order: { desktop: 8,  more: 4 } },
-  { id: "products",    labelKey: "nav.products",    icon: "bag",       route: "/products",    mobile: { slot: "more" }, order: { desktop: 9,  more: 5 } },
+  { id: "growth",      labelKey: "nav.growth", group: "konten",      icon: "growth",    route: "/growth",      mobile: { slot: "more" }, order: { desktop: 8,  more: 4 } },
+  { id: "products",    labelKey: "nav.products", group: "konten",    icon: "bag",       route: "/products",    mobile: { slot: "more" }, order: { desktop: 9,  more: 5 } },
   // Janji Temu (Fase 13G): layanan + ketersediaan + booking + Google Calendar.
-  { id: "appointments", labelKey: "nav.appointments", icon: "calendar", route: "/appointments", mobile: { slot: "more" }, order: { desktop: 10, more: 6 } },
-  { id: "channels",    labelKey: "nav.channels",    icon: "link",      route: "/channels",    mobile: { slot: "more" }, order: { desktop: 11, more: 7 } },
-  { id: "analytics",   labelKey: "nav.analytics",   icon: "chart",     route: "/analytics",   mobile: { slot: "more" }, order: { desktop: 12, more: 8 } },
-  { id: "billing",     labelKey: "nav.billing",     icon: "card",      route: "/billing",     mobile: { slot: "more" }, order: { desktop: 13, more: 9 } },
-  { id: "settings",    labelKey: "nav.settings",    icon: "settings",  route: "/settings",    mobile: { slot: "more" }, order: { desktop: 14, more: 10 } },
+  { id: "appointments", labelKey: "nav.appointments", group: "layanan", icon: "calendar", route: "/appointments", mobile: { slot: "more" }, order: { desktop: 10, more: 6 } },
+  { id: "channels",    labelKey: "nav.channels", group: "kelola",    icon: "link",      route: "/channels",    mobile: { slot: "more" }, order: { desktop: 11, more: 7 } },
+  { id: "analytics",   labelKey: "nav.analytics", group: "kelola",   icon: "chart",     route: "/analytics",   mobile: { slot: "more" }, order: { desktop: 12, more: 8 } },
+  { id: "billing",     labelKey: "nav.billing", group: "akun",     icon: "card",      route: "/billing",     mobile: { slot: "more" }, order: { desktop: 13, more: 9 } },
+  { id: "settings",    labelKey: "nav.settings", group: "akun",    icon: "settings",  route: "/settings",    mobile: { slot: "more" }, order: { desktop: 14, more: 10 } },
   // Log integrasi (Fase 7B.1): jejak webhook & pengiriman per workspace —
   // grup utilitas bersama Settings/Admin di "More" (tab utama mobile
   // tetap 4 sesuai keputusan desain).
-  { id: "logs",        labelKey: "nav.logs",        icon: "list",      route: "/logs",        mobile: { slot: "more" }, order: { desktop: 15, more: 11 } },
+  { id: "logs",        labelKey: "nav.logs", group: "sistem",        icon: "list",      route: "/logs",        mobile: { slot: "more" }, order: { desktop: 15, more: 11 } },
   // Penelusur Audit (Fase 7B.4): jejak aksi user/agent/sistem/API key
   // per workspace dari audit_logs — bersebelahan dengan Logs.
-  { id: "audit",       labelKey: "nav.audit",       icon: "audit",     route: "/audit",       mobile: { slot: "more" }, order: { desktop: 16, more: 12 } },
+  { id: "audit",       labelKey: "nav.audit", group: "sistem",       icon: "audit",     route: "/audit",       mobile: { slot: "more" }, order: { desktop: 16, more: 12 } },
   // Panel Admin Platform (Fase 6C): `permission: "platformAdmin"` — item
   // hanya dirender untuk user ber-flag isPlatformAdmin (lihat
   // filterNavItems); gerbang sesungguhnya ada di API (non-admin → 404).
-  { id: "admin",       labelKey: "nav.admin",       icon: "shield",    route: "/admin",       permission: "platformAdmin", mobile: { slot: "more" }, order: { desktop: 17, more: 13 } },
+  { id: "admin",       labelKey: "nav.admin", group: "sistem",       icon: "shield",    route: "/admin",       permission: "platformAdmin", mobile: { slot: "more" }, order: { desktop: 17, more: 13 } },
 ];
 
 /**
@@ -84,6 +110,27 @@ export function filterNavItems(
   return items.filter(
     (i) => i.permission !== "platformAdmin" || opts.isPlatformAdmin,
   );
+}
+
+/** Satu kelompok beserta item terlihatnya, siap dirender bertajuk. */
+export interface NavItemGroup {
+  group: NavGroup;
+  items: NavItem[];
+}
+
+/**
+ * Kelompokkan daftar item yang SUDAH terurut & tersaring (desktopItems /
+ * moreItems setelah filterNavItems) menurut kelompoknya. Urutan kelompok
+ * selalu urutan kanonis NAV_GROUPS; urutan item di dalam kelompok
+ * mengikuti urutan daftar masukan (order.desktop / order.more). Kelompok
+ * tanpa item tidak muncul di hasil — jadi kelompok yang seluruh isinya
+ * tersaring permission hilang dari tampilan, bukan tampil kosong.
+ */
+export function groupNavItems(items: NavItem[]): NavItemGroup[] {
+  return NAV_GROUPS.map((group) => ({
+    group,
+    items: items.filter((i) => i.group === group.id),
+  })).filter((g) => g.items.length > 0);
 }
 
 /** Item untuk sidebar desktop: semua item terurut order.desktop. */

@@ -28,6 +28,14 @@ export const en = {
     flows: "Flows",
     growth: "Growth",
     more: "More",
+    group: {
+      utama: "Main",
+      konten: "Content",
+      layanan: "Services",
+      kelola: "Manage",
+      akun: "Account",
+      sistem: "System",
+    },
   },
   common: {
     themeLight: "Light",

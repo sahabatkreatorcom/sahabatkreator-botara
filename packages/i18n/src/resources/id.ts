@@ -27,6 +27,14 @@ export const id: Resources = {
     flows: "Flows",
     growth: "Pertumbuhan",
     more: "Lainnya",
+    group: {
+      utama: "Utama",
+      konten: "Konten",
+      layanan: "Layanan",
+      kelola: "Kelola",
+      akun: "Akun",
+      sistem: "Sistem",
+    },
   },
   common: {
     themeLight: "Terang",
