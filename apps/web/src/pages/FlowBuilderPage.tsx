@@ -18,6 +18,7 @@ import { useWorkspace } from "../workspace/WorkspaceProvider";
 import { FlowExperimentsPanel } from "./flowBuilder/FlowExperimentsPanel";
 import { NODE_TYPES } from "./flowBuilder/FlowNodeCard";
 import { FlowRunsPanel } from "./flowBuilder/FlowRunsPanel";
+import { FlowSimulatorPanel } from "./flowBuilder/FlowSimulatorPanel";
 import { FlowVersionsPanel } from "./flowBuilder/FlowVersionsPanel";
 import { NodeConfigPanel, type TenantMeta } from "./flowBuilder/NodeConfigPanel";
 import { NODE_ICON_PATHS, branchEdgeLabelProps, graphToRf, rfToGraph } from "./flowBuilder/graph";
@@ -48,7 +49,9 @@ function BuilderInner({
   const [name, setName] = useState(flow.name);
   const [nodes, setNodes, onNodesChange] = useNodesState<FlowRfNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<FlowRfEdge>([]);
-  const [tab, setTab] = useState<"canvas" | "runs" | "versions">("canvas");
+  const [tab, setTab] = useState<"canvas" | "runs" | "versions" | "simulate">(
+    "canvas",
+  );
   const [issues, setIssues] = useState<FlowGraphIssue[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -540,6 +543,7 @@ function BuilderInner({
               ["canvas", "flows.tabCanvas"],
               ["runs", "flows.tabRuns"],
               ["versions", "flows.tabVersions"],
+              ["simulate", "flows.tabSimulate"],
             ] as const
           ).map(([value, key]) => (
             <button
@@ -634,6 +638,15 @@ function BuilderInner({
           <FlowRunsPanel
             t={t}
             locale={locale}
+            tenantId={tenantId}
+            flowId={flow.id}
+            graph={currentGraph}
+          />
+        </div>
+      ) : tab === "simulate" ? (
+        <div className="mt-4 rounded-xl border border-line bg-surface p-4">
+          <FlowSimulatorPanel
+            t={t}
             tenantId={tenantId}
             flowId={flow.id}
             graph={currentGraph}

@@ -100,6 +100,8 @@ import type {
   FlowValidationResponse,
   FlowVersionListResponse,
   FlowVersionRestoreResponse,
+  FlowSimulateRequest,
+  FlowSimulateResponse,
   CreateKbDocumentRequest,
   CreatePaymentLinkRequest,
   CreateProductRequest,
@@ -2509,6 +2511,25 @@ export const api = {
       return request<FlowVersionRestoreResponse>(
         `/api/tenants/${tenantId}/flows/${flowId}/versions/${version}/restore`,
         { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/flows/:id/simulate — SIMULASI KERING
+     * (G4): body membawa graf draf ATAU nomor versi tersimpan (atau
+     * keduanya absen = graf tersimpan), teks pemicu, kontak mock, dan
+     * opsi panel (balasan simulasi, pilihan cabang A/B, item
+     * keranjang di dalam kontak mock). Server tidak menulis apa pun —
+     * respons adalah jejak langkah + efek sebagai data + hasil
+     * validasi graf.
+     */
+    simulate(
+      tenantId: string,
+      flowId: string,
+      body: FlowSimulateRequest,
+    ): Promise<FlowSimulateResponse> {
+      return request<FlowSimulateResponse>(
+        `/api/tenants/${tenantId}/flows/${flowId}/simulate`,
+        { method: "POST", body: JSON.stringify(body) },
       );
     },
     /** POST .../flows/:id/deactivate — aktif → draf (bisa diedit lagi). */
