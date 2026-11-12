@@ -350,6 +350,13 @@ function AgentFormModal({
   const [mode, setMode] = useState<AgentMode>(agent?.mode ?? "suggest");
   // Bahasa balasan agent (config.language): "" = ikuti bahasa pelanggan.
   const [language, setLanguage] = useState(agent?.config?.language ?? "");
+  // Cap balasan AI per percakapan (config.maxConversationReplies, G6):
+  // "" = bawaan runtime (20); "0" = cap nonaktif.
+  const [maxConversationReplies, setMaxConversationReplies] = useState(
+    agent?.config?.maxConversationReplies !== undefined
+      ? String(agent.config.maxConversationReplies)
+      : "",
+  );
   const [isActive, setIsActive] = useState(agent?.isActive ?? true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -483,6 +490,23 @@ function AgentFormModal({
         config.language = language;
       } else {
         delete config.language;
+      }
+      // Cap per percakapan (G6): kosong = kunci dihapus (bawaan
+      // runtime berlaku); terisi harus bilangan bulat 0–1000.
+      const capRaw = maxConversationReplies.trim();
+      if (capRaw === "") {
+        delete config.maxConversationReplies;
+      } else {
+        const capValue = Number(capRaw);
+        if (
+          !Number.isInteger(capValue) ||
+          capValue < 0 ||
+          capValue > 1000
+        ) {
+          setSubmitting(false);
+          return setError(t("agents.conversationReplyCapInvalid"));
+        }
+        config.maxConversationReplies = capValue;
       }
       const payload = {
         name: trimmedName,
@@ -715,6 +739,24 @@ function AgentFormModal({
               <option value="id">{t("agents.languageId")}</option>
               <option value="en">{t("agents.languageEn")}</option>
             </select>
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("agents.conversationReplyCapLabel")}
+            </span>
+            <input
+              type="number"
+              min={0}
+              max={1000}
+              step={1}
+              value={maxConversationReplies}
+              onChange={(e) => setMaxConversationReplies(e.target.value)}
+              placeholder={t("agents.conversationReplyCapPlaceholder")}
+              className={inputClassName}
+            />
+            <span className="mt-1 block text-[11px] text-muted">
+              {t("agents.conversationReplyCapHint")}
+            </span>
           </label>
           <fieldset>
             <legend className="mb-1 text-xs font-medium text-muted">
