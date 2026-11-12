@@ -1408,6 +1408,14 @@ export {
   releaseStuckPost,
   duplicatePost,
   cancelPost,
+  submitPostForReview,
+  approvePost,
+  rejectPost,
+  requestPostChanges,
+  getPostApprovalSettings,
+  updatePostApprovalSettings,
+  listPostApprovalHistory,
+  blockUnapprovedPostPublish,
   claimPostForPublish,
   getPostForPublish,
   getPostTargetProvider,
@@ -1419,6 +1427,8 @@ export {
   type PostMediaItem,
   type PostRecord,
   type PostPublishPayload,
+  type PostApprovalSettingsRecord,
+  type PostApprovalHistoryRecord,
 } from "./posts";
 export {
   AD_CONVERSION_REQUESTED_OUTBOX_TYPE,

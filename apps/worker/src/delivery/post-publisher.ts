@@ -1,5 +1,6 @@
 import type { Database } from "@sahabat-kreator/db";
 import {
+  blockUnapprovedPostPublish,
   getPostTargetProvider,
   type GoogleDeps,
   type MediaObjectStore,
@@ -214,6 +215,23 @@ export async function publishPost(
       `[post] ${input.postId} provider=${provider} belum punya PublisherAdapter — job dilewati`,
     );
     return { published: false, reason: "provider_unsupported" };
+  }
+  // Gerbang persetujuan (Fase Susulan S1): tenant yang mengaktifkan
+  // persetujuan wajib tidak menerbitkan postingan yang belum
+  // `approved`. Pemblokiran terjadi di core (postingan dipindah ke
+  // failed berkode `post_approval_required` + audit system) SEBELUM
+  // adapter mengklaim — adapter tidak pernah dipanggil untuk
+  // postingan yang terblokir, jadi tidak ada kiriman parsial.
+  const gate = await blockUnapprovedPostPublish(db, {
+    tenantId: input.tenantId,
+    postId: input.postId,
+    expectedScheduledAt: new Date(input.scheduledAt),
+  });
+  if (gate.blocked) {
+    console.log(
+      `[post] ${input.postId} diblokir gerbang persetujuan (belum approved)`,
+    );
+    return { published: false, reason: "approval_required" };
   }
   return adapter.publish(db, input, opts);
 }

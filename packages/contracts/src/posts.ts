@@ -33,6 +33,32 @@ export const PostStatusSchema = z.enum([
 export type PostStatus = z.infer<typeof PostStatusSchema>;
 
 /**
+ * Keadaan persetujuan postingan (Fase Susulan S1) — mesin status yang
+ * TERPISAH dari `PostStatus`: status publikasi menjawab "sudah tayang
+ * atau belum", status persetujuan menjawab "sudah boleh tayang atau
+ * belum". Alur: `draft` (belum diajukan) → `pending_review` →
+ * `approved` | `rejected` | `changes_requested`; dari `rejected` /
+ * `changes_requested` postingan dapat diajukan lagi. Menyunting isi
+ * postingan mengembalikan keadaan ke `draft` (yang disetujui harus
+ * sama dengan yang terbit).
+ *
+ * Keadaan ini hanya MENJADI GERBANG bila tenant mengaktifkan
+ * persetujuan wajib (`PostApprovalSettings.approvalRequired`);
+ * tenant yang tidak mengaktifkannya tidak pernah diblokir olehnya.
+ */
+export const PostApprovalStatusSchema = z.enum([
+  "draft",
+  "pending_review",
+  "approved",
+  "rejected",
+  "changes_requested",
+]);
+export type PostApprovalStatus = z.infer<typeof PostApprovalStatusSchema>;
+
+/** Batas catatan keputusan peninjau (penolakan / minta revisi / persetujuan). */
+export const POST_APPROVAL_NOTE_MAX = 2000;
+
+/**
  * Jenis lampiran diturunkan dari MIME, bukan dipilih pengguna — satu
  * klasifikasi, dipakai UI dan publisher.
  */
@@ -191,6 +217,16 @@ export const PostSchema = z.object({
   errorCode: z.string().nullable(),
   /** Opsi penerbitan per sasaran (privasi/AI/dst.); null = belum dipilih. */
   publishOptions: PostPublishOptionsSchema.nullable(),
+  /** Pembuat postingan; null bila akun pembuat sudah dihapus. */
+  createdByUserId: z.string().uuid().nullable(),
+  /** Keadaan persetujuan (S1); hanya menjadi gerbang bila tenant mewajibkannya. */
+  approvalStatus: PostApprovalStatusSchema,
+  /** Catatan keputusan terakhir peninjau (penolakan / minta revisi). */
+  approvalNote: z.string().nullable(),
+  approvalSubmittedByUserId: z.string().uuid().nullable(),
+  approvalSubmittedAt: z.string().datetime().nullable(),
+  approvalReviewedByUserId: z.string().uuid().nullable(),
+  approvalReviewedAt: z.string().datetime().nullable(),
   target: PostTargetSchema,
   media: z.array(PostMediaSchema),
   createdAt: z.string().datetime(),
@@ -735,6 +771,8 @@ export type SchedulePostRequest = z.infer<typeof SchedulePostRequestSchema>;
 
 export const PostListQuerySchema = z.object({
   status: PostStatusSchema.optional(),
+  /** Saringan antrean tinjauan: hanya postingan pada keadaan persetujuan ini. */
+  approvalStatus: PostApprovalStatusSchema.optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
 });
 export type PostListQuery = z.infer<typeof PostListQuerySchema>;
@@ -755,4 +793,74 @@ export const PostTargetListResponseSchema = z.object({
 });
 export type PostTargetListResponse = z.infer<
   typeof PostTargetListResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Persetujuan postingan (Fase Susulan S1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Pengaturan persetujuan tingkat tenant. `approvalRequired` adalah
+ * sakelar OPT-IN (bawaan false): menyalakannya tidak mengubah
+ * postingan yang sudah terbit, tetapi mulai saat itu gerbang
+ * penerbitan worker menolak postingan terjadwal yang belum
+ * `approved`.
+ */
+export const PostApprovalSettingsSchema = z.object({
+  approvalRequired: z.boolean(),
+});
+export type PostApprovalSettings = z.infer<typeof PostApprovalSettingsSchema>;
+
+export const UpdatePostApprovalSettingsRequestSchema = z.object({
+  approvalRequired: z.boolean(),
+});
+export type UpdatePostApprovalSettingsRequest = z.infer<
+  typeof UpdatePostApprovalSettingsRequestSchema
+>;
+
+/** Keputusan menyetujui: catatan bersifat opsional. */
+export const ApprovePostRequestSchema = z.object({
+  note: z.string().trim().max(POST_APPROVAL_NOTE_MAX).optional(),
+});
+export type ApprovePostRequest = z.infer<typeof ApprovePostRequestSchema>;
+
+/**
+ * Keputusan menolak / meminta revisi: catatan WAJIB — penolakan
+ * tanpa alasan tidak memberi pembuat apa pun untuk diperbaiki.
+ * Kekosongan ditegakkan juga di core (POST_APPROVAL_NOTE_REQUIRED),
+ * bukan hanya di skema ini, supaya jalur non-HTTP tidak bisa
+ * melewatinya.
+ */
+export const RejectPostRequestSchema = z.object({
+  note: z.string().trim().min(1).max(POST_APPROVAL_NOTE_MAX),
+});
+export type RejectPostRequest = z.infer<typeof RejectPostRequestSchema>;
+
+/**
+ * Satu entri riwayat keputusan persetujuan — diturunkan dari baris
+ * `audit_logs` (aksi `post.approval_*` + `post.publish_blocked_approval`),
+ * BUKAN tabel kedua: audit adalah sumber kebenaran riwayat, kolom
+ * `posts.approval_*` hanya potret keputusan terakhir. `actorLabel`
+ * adalah resolusi nama user sebisa server (null = tak ter-resolve,
+ * UI jatuh ke actorId).
+ */
+export const PostApprovalHistoryEntrySchema = z.object({
+  id: z.string().uuid(),
+  action: z.string(),
+  actorType: z.enum(["user", "agent", "system", "api_key"]),
+  actorId: z.string().nullable(),
+  actorLabel: z.string().nullable(),
+  /** Post jangkar tempat tindakan dilakukan (anggota grup berbagi riwayat grup). */
+  postId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type PostApprovalHistoryEntry = z.infer<
+  typeof PostApprovalHistoryEntrySchema
+>;
+
+export const PostApprovalHistoryResponseSchema = z.object({
+  items: z.array(PostApprovalHistoryEntrySchema),
+});
+export type PostApprovalHistoryResponse = z.infer<
+  typeof PostApprovalHistoryResponseSchema
 >;

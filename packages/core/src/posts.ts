@@ -10,7 +10,11 @@ import {
   postGroups,
   postMedia,
   posts,
+  tenantMembers,
+  tenants,
+  users,
   type Database,
+  type PostApprovalStatus,
   type PostStatus,
 } from "@sahabat-kreator/db";
 import {
@@ -72,7 +76,10 @@ export type PostErrorCode =
   | "POST_MEDIA_TOO_MANY"
   | "POST_MEDIA_KIND_UNSUPPORTED"
   | "POST_PUBLISH_OPTIONS_REQUIRED"
-  | "POST_PUBLISH_OPTIONS_INVALID";
+  | "POST_PUBLISH_OPTIONS_INVALID"
+  | "POST_APPROVAL_INVALID_STATE"
+  | "POST_APPROVAL_NOTE_REQUIRED"
+  | "POST_APPROVAL_SELF_REVIEW";
 
 export interface PostTarget {
   channelAccountId: string;
@@ -105,6 +112,16 @@ export interface PostRecord {
   errorCode: string | null;
   /** Opsi penerbitan per target (privasi/AI/dst.); null = belum dipilih. */
   publishOptions: PostPublishOptions | null;
+  /** Pembuat postingan; null bila akunnya sudah dihapus. */
+  createdByUserId: string | null;
+  /** Keadaan persetujuan (S1) — lihat blok persetujuan di bawah. */
+  approvalStatus: PostApprovalStatus;
+  /** Catatan keputusan terakhir peninjau; null = belum ada keputusan. */
+  approvalNote: string | null;
+  approvalSubmittedByUserId: string | null;
+  approvalSubmittedAt: Date | null;
+  approvalReviewedByUserId: string | null;
+  approvalReviewedAt: Date | null;
   target: PostTarget;
   media: PostMediaItem[];
   createdAt: Date;
@@ -217,6 +234,19 @@ function targetSelection() {
     channelTitle: conversations.title,
     providerChatId: conversations.providerChatId,
     channelDisplayName: channelAccounts.displayName,
+  };
+}
+
+/** Kolom pembuat + persetujuan (S1), dipakai bersama daftar dan muat satu. */
+function approvalSelection() {
+  return {
+    createdByUserId: posts.createdByUserId,
+    approvalStatus: posts.approvalStatus,
+    approvalNote: posts.approvalNote,
+    approvalSubmittedByUserId: posts.approvalSubmittedByUserId,
+    approvalSubmittedAt: posts.approvalSubmittedAt,
+    approvalReviewedByUserId: posts.approvalReviewedByUserId,
+    approvalReviewedAt: posts.approvalReviewedAt,
   };
 }
 
@@ -466,6 +496,7 @@ async function loadPost(
       publishOptions: posts.publishOptions,
       createdAt: posts.createdAt,
       updatedAt: posts.updatedAt,
+      ...approvalSelection(),
       ...targetSelection(),
     })
     .from(posts)
@@ -490,6 +521,13 @@ async function loadPost(
     providerMessageId: row.providerMessageId,
     errorCode: row.errorCode,
     publishOptions: parsePublishOptions(row.publishOptions),
+    createdByUserId: row.createdByUserId,
+    approvalStatus: row.approvalStatus,
+    approvalNote: row.approvalNote,
+    approvalSubmittedByUserId: row.approvalSubmittedByUserId,
+    approvalSubmittedAt: row.approvalSubmittedAt,
+    approvalReviewedByUserId: row.approvalReviewedByUserId,
+    approvalReviewedAt: row.approvalReviewedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
     target: {
@@ -542,7 +580,13 @@ async function replaceMedia(
 
 export async function listPosts(
   db: Database,
-  input: { tenantId: string; status?: PostStatus; limit?: number },
+  input: {
+    tenantId: string;
+    status?: PostStatus;
+    /** Saringan antrean tinjauan (S1): keadaan persetujuan persis. */
+    approvalStatus?: PostApprovalStatus;
+    limit?: number;
+  },
 ): Promise<PostRecord[]> {
   return withTenantDb(db, input.tenantId, async (tx) => {
     const rows = await tx
@@ -559,6 +603,7 @@ export async function listPosts(
         publishOptions: posts.publishOptions,
         createdAt: posts.createdAt,
         updatedAt: posts.updatedAt,
+        ...approvalSelection(),
         ...targetSelection(),
       })
       .from(posts)
@@ -571,6 +616,9 @@ export async function listPosts(
         and(
           eq(posts.tenantId, input.tenantId),
           input.status ? eq(posts.status, input.status) : undefined,
+          input.approvalStatus
+            ? eq(posts.approvalStatus, input.approvalStatus)
+            : undefined,
         ),
       )
       // Kalender dibaca dari jam tayang terdekat; draft (scheduled_at
@@ -594,6 +642,13 @@ export async function listPosts(
       providerMessageId: row.providerMessageId,
       errorCode: row.errorCode,
       publishOptions: parsePublishOptions(row.publishOptions),
+      createdByUserId: row.createdByUserId,
+      approvalStatus: row.approvalStatus,
+      approvalNote: row.approvalNote,
+      approvalSubmittedByUserId: row.approvalSubmittedByUserId,
+      approvalSubmittedAt: row.approvalSubmittedAt,
+      approvalReviewedByUserId: row.approvalReviewedByUserId,
+      approvalReviewedAt: row.approvalReviewedAt,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       target: {
@@ -870,6 +925,15 @@ export async function updatePost(
     if (existing.status !== "draft") {
       throw new PostDomainError("POST_NOT_EDITABLE");
     }
+    // Persetujuan menempel pada ISI (S1): suntingan apa pun pada post
+    // yang sudah pernah diajukan/disetujui membatalkan persetujuannya
+    // — keadaan kembali ke `draft` (belum diajukan) dan catatan
+    // keputusan terakhir dibersihkan. Tanpa ini, persetujuan untuk
+    // teks A bisa menerbitkan teks B. Reset hanya menyentuh baris ini;
+    // anggota grup lain mempertahankan keadaannya sampai tindakan
+    // persetujuan grup berikutnya mensinkronkan unit.
+    const approvalReset =
+      existing.approvalStatus !== "draft" ? existing.approvalStatus : null;
     await tx
       .update(posts)
       .set({
@@ -890,6 +954,16 @@ export async function updatePost(
               ),
             }
           : {}),
+        ...(approvalReset
+          ? {
+              approvalStatus: "draft" as const,
+              approvalNote: null,
+              approvalSubmittedByUserId: null,
+              approvalSubmittedAt: null,
+              approvalReviewedByUserId: null,
+              approvalReviewedAt: null,
+            }
+          : {}),
         updatedAt: new Date(),
       })
       .where(and(eq(posts.tenantId, input.tenantId), eq(posts.id, input.postId)));
@@ -901,7 +975,10 @@ export async function updatePost(
       actorType: "user",
       actorId: input.userId,
       action: "post.updated",
-      meta: { postId: input.postId },
+      meta: {
+        postId: input.postId,
+        ...(approvalReset ? { approvalResetFrom: approvalReset } : {}),
+      },
     });
     const updated = await loadPost(tx, input.tenantId, input.postId);
     if (!updated) throw new PostDomainError("POST_NOT_FOUND");
@@ -1351,6 +1428,489 @@ export async function cancelPost(
 }
 
 // ---------------------------------------------------------------------------
+// Persetujuan postingan (Fase Susulan S1)
+//
+// Model: keadaan persetujuan hidup per baris `posts`, tetapi setiap
+// transisi bekerja pada UNIT PERSETUJUAN = post jangkar + seluruh
+// anggota grup multi-targetnya. Satu konten induk = satu keputusan —
+// menyetujui separuh grup dan menolak separuhnya bukanlah keadaan
+// yang bisa diwakili alur ini, sama seperti grup dibuat dalam satu
+// transaksi. Post tunggal (group_id NULL) adalah unit satu anggota.
+//
+// Anggota yang masih BISA DITINDAK adalah yang status publikasinya
+// `draft` / `scheduled` / `failed`. Anggota yang sudah `published`,
+// sedang `publishing`, atau `cancelled` tidak diubah transisi mana
+// pun: yang sudah tayang adalah riwayat, dan keputusan atas sisa
+// grup tidak boleh menulis ulang riwayat itu.
+//
+// Peran ditegakkan lapisan API (owner/admin, gerbang yang sama dengan
+// mutasi post lain). Yang ditegakkan DI SINI adalah aturan yang
+// membutuhkan data tenant: anti-setuju-sendiri. Pembuat post tidak
+// boleh meninjau postingannya sendiri BILA ada penyetuju lain
+// (anggota owner/admin lain) di tenant — bila tidak ada (tenant satu
+// orang, atau semua anggota lain berperan agent/viewer), pembuat
+// BOLEH meninjau sendiri, karena alternatifnya adalah tenant yang
+// terkunci dari menerbitkan selamanya. Pembuat yang sudah terhapus
+// (created_by_user_id NULL) tidak memicu aturan ini.
+//
+// Catatan keputusan disimpan di baris post (`approval_note`) dan
+// TIDAK disalin ke meta audit — mengikuti preseden repo (isi catatan
+// tidak masuk audit); audit hanya mencatat aksi + pelaku + anggota
+// unit, dan dari sanalah riwayat keputusan dibaca.
+// ---------------------------------------------------------------------------
+
+/** Status publikasi yang masih bisa menerima keputusan persetujuan. */
+const APPROVAL_ACTIONABLE_STATUSES: readonly PostStatus[] = [
+  "draft",
+  "scheduled",
+  "failed",
+];
+
+interface ApprovalUnitMember {
+  id: string;
+  status: PostStatus;
+  approvalStatus: PostApprovalStatus;
+}
+
+/** Seluruh baris unit persetujuan milik post jangkar (grup atau tunggal). */
+async function loadApprovalUnit(
+  tx: DbTx,
+  tenantId: string,
+  anchor: PostRecord,
+): Promise<ApprovalUnitMember[]> {
+  if (!anchor.groupId) {
+    return [
+      {
+        id: anchor.id,
+        status: anchor.status,
+        approvalStatus: anchor.approvalStatus,
+      },
+    ];
+  }
+  return tx
+    .select({
+      id: posts.id,
+      status: posts.status,
+      approvalStatus: posts.approvalStatus,
+    })
+    .from(posts)
+    .where(
+      and(eq(posts.tenantId, tenantId), eq(posts.groupId, anchor.groupId)),
+    );
+}
+
+/** Anggota unit yang masih bisa ditindak (belum tayang / belum mati). */
+function actionableMembers(
+  unit: ApprovalUnitMember[],
+): ApprovalUnitMember[] {
+  return unit.filter((member) =>
+    APPROVAL_ACTIONABLE_STATUSES.includes(member.status),
+  );
+}
+
+/**
+ * Ajukan postingan (unit) ke tinjauan: dari `draft` / `rejected` /
+ * `changes_requested` → `pending_review`.
+ *
+ * Semua anggota yang bisa ditindak harus berada pada salah satu
+ * keadaan awal itu — unit yang campurannya memuat `pending_review`
+ * (sudah diajukan) atau `approved` (sudah disetujui) ditolak sebagai
+ * transisi liar, bukan disinkronkan diam-diam: pengguna harus tahu
+ * persis keadaan apa yang sedang ia ajukan. Pengajuan membersihkan
+ * catatan + peninjau keputusan sebelumnya (riwayatnya tetap di audit).
+ */
+export async function submitPostForReview(
+  db: Database,
+  input: { tenantId: string; userId: string; postId: string },
+): Promise<PostRecord> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const anchor = await loadPost(tx, input.tenantId, input.postId);
+    if (!anchor) throw new PostDomainError("POST_NOT_FOUND");
+    const actionable = actionableMembers(
+      await loadApprovalUnit(tx, input.tenantId, anchor),
+    );
+    if (actionable.length === 0) {
+      throw new PostDomainError("POST_APPROVAL_INVALID_STATE");
+    }
+    const submittable: readonly PostApprovalStatus[] = [
+      "draft",
+      "rejected",
+      "changes_requested",
+    ];
+    if (
+      !actionable.every((member) =>
+        submittable.includes(member.approvalStatus),
+      )
+    ) {
+      throw new PostDomainError("POST_APPROVAL_INVALID_STATE");
+    }
+    const now = new Date();
+    await tx
+      .update(posts)
+      .set({
+        approvalStatus: "pending_review",
+        approvalNote: null,
+        approvalSubmittedByUserId: input.userId,
+        approvalSubmittedAt: now,
+        approvalReviewedByUserId: null,
+        approvalReviewedAt: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(posts.tenantId, input.tenantId),
+          inArray(
+            posts.id,
+            actionable.map((member) => member.id),
+          ),
+        ),
+      );
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "post.approval_submitted",
+      meta: {
+        postId: input.postId,
+        groupId: anchor.groupId,
+        memberPostIds: actionable.map((member) => member.id),
+      },
+    });
+    const updated = await loadPost(tx, input.tenantId, input.postId);
+    if (!updated) throw new PostDomainError("POST_NOT_FOUND");
+    return updated;
+  });
+}
+
+type PostApprovalDecision = "approved" | "rejected" | "changes_requested";
+
+/**
+ * Inti keputusan peninjau (setujui / tolak / minta revisi) — satu
+ * tempat, supaya ketiga jalur menegakkan gerbang yang sama persis:
+ * unit harus seluruhnya `pending_review`, catatan wajib untuk
+ * penolakan & revisi, dan aturan anti-setuju-sendiri berlaku sama.
+ *
+ * Penolakan & permintaan revisi juga MENURUNKAN anggota yang masih
+ * `scheduled` kembali ke `draft` (jam tayang dibersihkan): konten
+ * yang ditolak tidak boleh memegang jam tayang, dan konten yang
+ * diminta revisi harus bisa disunting — edit memang hanya untuk
+ * draft. Job publish basi yang telanjur antre tidak berbahaya: klaim
+ * penerbit memeriksa status + `scheduled_at`, dan keduanya sudah
+ * berubah. Persetujuan TIDAK menyentuh jadwal — post yang disetujui
+ * sebelum jam tayangnya tetap terbit pada jamnya.
+ */
+async function reviewPostApproval(
+  db: Database,
+  input: {
+    tenantId: string;
+    userId: string;
+    postId: string;
+    decision: PostApprovalDecision;
+    note?: string | null | undefined;
+  },
+): Promise<PostRecord> {
+  const note =
+    typeof input.note === "string" && input.note.trim().length > 0
+      ? input.note.trim()
+      : null;
+  if (input.decision !== "approved" && note === null) {
+    throw new PostDomainError("POST_APPROVAL_NOTE_REQUIRED");
+  }
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const anchor = await loadPost(tx, input.tenantId, input.postId);
+    if (!anchor) throw new PostDomainError("POST_NOT_FOUND");
+    const actionable = actionableMembers(
+      await loadApprovalUnit(tx, input.tenantId, anchor),
+    );
+    if (
+      actionable.length === 0 ||
+      !actionable.every(
+        (member) => member.approvalStatus === "pending_review",
+      )
+    ) {
+      throw new PostDomainError("POST_APPROVAL_INVALID_STATE");
+    }
+
+    // Anti-setuju-sendiri: peninjau = pembuat post jangkar → hanya
+    // sah bila tenant tidak punya penyetuju (owner/admin) lain.
+    if (anchor.createdByUserId && anchor.createdByUserId === input.userId) {
+      const others = await tx
+        .select({ userId: tenantMembers.userId })
+        .from(tenantMembers)
+        .where(
+          and(
+            eq(tenantMembers.tenantId, input.tenantId),
+            inArray(tenantMembers.role, ["owner", "admin"]),
+          ),
+        );
+      const otherApprovers = others.filter(
+        (member) => member.userId !== anchor.createdByUserId,
+      );
+      if (otherApprovers.length > 0) {
+        throw new PostDomainError("POST_APPROVAL_SELF_REVIEW");
+      }
+    }
+
+    const now = new Date();
+    const memberIds = actionable.map((member) => member.id);
+    await tx
+      .update(posts)
+      .set({
+        approvalStatus: input.decision,
+        approvalNote: note,
+        approvalReviewedByUserId: input.userId,
+        approvalReviewedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(posts.tenantId, input.tenantId),
+          inArray(posts.id, memberIds),
+        ),
+      );
+
+    // Tolak / revisi: turunkan yang terjadwal menjadi draft.
+    let unscheduledCount = 0;
+    if (input.decision !== "approved") {
+      const unscheduled = await tx
+        .update(posts)
+        .set({ status: "draft", scheduledAt: null, updatedAt: now })
+        .where(
+          and(
+            eq(posts.tenantId, input.tenantId),
+            inArray(posts.id, memberIds),
+            eq(posts.status, "scheduled"),
+          ),
+        )
+        .returning({ id: posts.id });
+      unscheduledCount = unscheduled.length;
+    }
+
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action:
+        input.decision === "approved"
+          ? "post.approval_approved"
+          : input.decision === "rejected"
+            ? "post.approval_rejected"
+            : "post.approval_changes_requested",
+      meta: {
+        postId: input.postId,
+        groupId: anchor.groupId,
+        memberPostIds: memberIds,
+        ...(unscheduledCount > 0 ? { unscheduledCount } : {}),
+      },
+    });
+    const updated = await loadPost(tx, input.tenantId, input.postId);
+    if (!updated) throw new PostDomainError("POST_NOT_FOUND");
+    return updated;
+  });
+}
+
+/** Setujui postingan yang menunggu tinjauan (catatan opsional). */
+export async function approvePost(
+  db: Database,
+  input: {
+    tenantId: string;
+    userId: string;
+    postId: string;
+    note?: string | null | undefined;
+  },
+): Promise<PostRecord> {
+  return reviewPostApproval(db, { ...input, decision: "approved" });
+}
+
+/** Tolak postingan yang menunggu tinjauan (catatan WAJIB). */
+export async function rejectPost(
+  db: Database,
+  input: { tenantId: string; userId: string; postId: string; note: string },
+): Promise<PostRecord> {
+  return reviewPostApproval(db, { ...input, decision: "rejected" });
+}
+
+/** Minta revisi atas postingan yang menunggu tinjauan (catatan WAJIB). */
+export async function requestPostChanges(
+  db: Database,
+  input: { tenantId: string; userId: string; postId: string; note: string },
+): Promise<PostRecord> {
+  return reviewPostApproval(db, { ...input, decision: "changes_requested" });
+}
+
+// ---------------------------------------------------------------------------
+// Pengaturan persetujuan tenant + riwayat keputusan
+// ---------------------------------------------------------------------------
+
+export interface PostApprovalSettingsRecord {
+  approvalRequired: boolean;
+}
+
+/** Baca sakelar persetujuan wajib tenant (bawaan false = nonaktif). */
+export async function getPostApprovalSettings(
+  db: Database,
+  input: { tenantId: string },
+): Promise<PostApprovalSettingsRecord> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const [tenant] = await tx
+      .select({ postApprovalRequired: tenants.postApprovalRequired })
+      .from(tenants)
+      .where(eq(tenants.id, input.tenantId))
+      .limit(1);
+    return { approvalRequired: tenant?.postApprovalRequired ?? false };
+  });
+}
+
+/**
+ * Ubah sakelar persetujuan wajib. Pola transaksi yang sama dengan
+ * `updateTenantSlaSettings` (baris tenant ditulis dalam transaksi
+ * ber-config tenant) + audit from/to. Menyalakan sakelar tidak
+ * mengubah postingan yang sudah terbit; ia hanya mengaktifkan
+ * gerbang penerbitan untuk jam tayang berikutnya.
+ */
+export async function updatePostApprovalSettings(
+  db: Database,
+  input: { tenantId: string; userId: string; approvalRequired: boolean },
+): Promise<PostApprovalSettingsRecord> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.tenant_id', ${input.tenantId}, true)`,
+    );
+    const [before] = await tx
+      .select({ postApprovalRequired: tenants.postApprovalRequired })
+      .from(tenants)
+      .where(eq(tenants.id, input.tenantId))
+      .limit(1);
+    if (!before) throw new PostDomainError("POST_NOT_FOUND");
+    await tx
+      .update(tenants)
+      .set({
+        postApprovalRequired: input.approvalRequired,
+        updatedAt: new Date(),
+      })
+      .where(eq(tenants.id, input.tenantId));
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "user",
+      actorId: input.userId,
+      action: "post_approval.settings_updated",
+      meta: {
+        approvalRequiredFrom: before.postApprovalRequired,
+        approvalRequiredTo: input.approvalRequired,
+      },
+    });
+    return { approvalRequired: input.approvalRequired };
+  });
+}
+
+/** Aksi audit yang merupakan riwayat keputusan persetujuan satu post. */
+const POST_APPROVAL_HISTORY_ACTIONS = [
+  "post.approval_submitted",
+  "post.approval_approved",
+  "post.approval_rejected",
+  "post.approval_changes_requested",
+  "post.publish_blocked_approval",
+] as const;
+
+export interface PostApprovalHistoryRecord {
+  id: string;
+  action: string;
+  actorType: "user" | "agent" | "system" | "api_key";
+  actorId: string | null;
+  /** Nama/email user pelaku, nama komponen untuk system; null = tak ter-resolve. */
+  actorLabel: string | null;
+  /** Post jangkar pada entri audit (anggota grup berbagi riwayat yang sama). */
+  postId: string | null;
+  createdAt: Date;
+}
+
+/**
+ * Riwayat keputusan persetujuan sebuah post — dibaca dari
+ * `audit_logs`, bukan tabel kedua. Entri milik unit yang sama
+ * ditemukan lewat `meta.postId` (jangkar tempat tindakan dilakukan)
+ * ATAU `meta.groupId` (untuk post dalam grup, tindakan pada anggota
+ * mana pun adalah riwayat grup yang sama).
+ */
+export async function listPostApprovalHistory(
+  db: Database,
+  input: { tenantId: string; postId: string; limit?: number },
+): Promise<PostApprovalHistoryRecord[]> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const [anchor] = await tx
+      .select({ id: posts.id, groupId: posts.groupId })
+      .from(posts)
+      .where(
+        and(eq(posts.tenantId, input.tenantId), eq(posts.id, input.postId)),
+      )
+      .limit(1);
+    if (!anchor) throw new PostDomainError("POST_NOT_FOUND");
+
+    const groupMatch = anchor.groupId
+      ? sql` OR ${auditLogs.meta} ->> 'groupId' = ${anchor.groupId}`
+      : sql``;
+    const rows = await tx
+      .select({
+        id: auditLogs.id,
+        action: auditLogs.action,
+        actorType: auditLogs.actorType,
+        actorId: auditLogs.actorId,
+        meta: auditLogs.meta,
+        createdAt: auditLogs.createdAt,
+      })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.tenantId, input.tenantId),
+          inArray(auditLogs.action, [...POST_APPROVAL_HISTORY_ACTIONS]),
+          sql`(${auditLogs.meta} ->> 'postId' = ${input.postId}${groupMatch})`,
+        ),
+      )
+      .orderBy(desc(auditLogs.createdAt), desc(auditLogs.id))
+      .limit(Math.min(100, Math.max(1, input.limit ?? 50)));
+
+    // Resolusi label pelaku — pola yang sama dengan penelusur audit:
+    // user → nama/email dari tabel users; system → actorId itu sendiri.
+    const userIds = [
+      ...new Set(
+        rows
+          .filter((row) => row.actorType === "user" && row.actorId)
+          .map((row) => row.actorId as string),
+      ),
+    ];
+    const labels = new Map<string, string>();
+    if (userIds.length > 0) {
+      const found = await tx
+        .select({ id: users.id, name: users.name, email: users.email })
+        .from(users)
+        .where(inArray(users.id, userIds));
+      for (const user of found) {
+        labels.set(
+          user.id,
+          user.name && user.name.trim().length > 0 ? user.name : user.email,
+        );
+      }
+    }
+    return rows.map((row) => {
+      const meta = (row.meta ?? {}) as Record<string, unknown>;
+      return {
+        id: row.id,
+        action: row.action,
+        actorType: row.actorType,
+        actorId: row.actorId,
+        actorLabel:
+          row.actorType === "system"
+            ? row.actorId
+            : row.actorId
+              ? (labels.get(row.actorId) ?? null)
+              : null,
+        postId: typeof meta.postId === "string" ? meta.postId : null,
+        createdAt: row.createdAt,
+      };
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Sisi worker — klaim, muat untuk dikirim, penanda hasil
 // ---------------------------------------------------------------------------
 
@@ -1371,6 +1931,93 @@ export interface PostPublishPayload {
     fileName: string | null;
     kind: PostMediaKind;
   }>;
+}
+
+/**
+ * Gerbang persetujuan pada jam tayang (S1) — dipanggil dispatcher
+ * worker SEBELUM adapter mana pun mengklaim postingan.
+ *
+ * Bila tenant mengaktifkan persetujuan wajib dan postingan belum
+ * `approved`, fungsi ini MEMBLOKIR penerbitan secara tercatat:
+ * postingan dipindah `scheduled → failed` dengan kode persis
+ * `post_approval_required` (terlihat di UI sebagai alasan kegagalan,
+ * lengkap dengan petunjuknya) + baris audit `post.publish_blocked_approval`
+ * oleh actor system. Bukan gagal diam-diam, bukan terbit diam-diam.
+ *
+ * Penjaga atomiknya sama dengan klaim penerbit: transisi hanya
+ * terjadi bila baris MASIH `scheduled` pada `scheduled_at` yang
+ * disepakati job ini. Job basi milik penjadwalan lama (post sudah
+ * dijadwal ulang / dibatalkan / sudah ditangani) tidak memblokir apa
+ * pun — dispatcher meneruskan ke adapter dan klaim di sana yang
+ * memutuskan, seperti sebelum gerbang ini ada.
+ *
+ * Aturan jam tayang yang sudah lewat (keputusan S1): yang dinilai
+ * adalah keadaan SAAT JOB BERJALAN. Post yang disetujui sesudah jam
+ * tayangnya tetapi sebelum job-nya berjalan tetap terbit oleh job
+ * itu. Post yang sudah terlanjur terblokir TIDAK terbit otomatis
+ * sesudah disetujui — pembuat menjadwalkan ulang secara eksplisit
+ * (tombol Coba Lagi / retryPost yang sudah ada), karena penerbitan
+ * kejutan pada jam yang tidak lagi diharapkan lebih buruk daripada
+ * satu klik yang terlihat.
+ */
+export async function blockUnapprovedPostPublish(
+  db: Database,
+  input: { tenantId: string; postId: string; expectedScheduledAt: Date },
+): Promise<{ blocked: boolean }> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const [tenant] = await tx
+      .select({ postApprovalRequired: tenants.postApprovalRequired })
+      .from(tenants)
+      .where(eq(tenants.id, input.tenantId))
+      .limit(1);
+    if (!tenant?.postApprovalRequired) return { blocked: false };
+
+    const [post] = await tx
+      .select({
+        approvalStatus: posts.approvalStatus,
+        groupId: posts.groupId,
+      })
+      .from(posts)
+      .where(
+        and(eq(posts.tenantId, input.tenantId), eq(posts.id, input.postId)),
+      )
+      .limit(1);
+    if (!post || post.approvalStatus === "approved") {
+      return { blocked: false };
+    }
+
+    const blocked = await tx
+      .update(posts)
+      .set({
+        status: "failed",
+        errorCode: "post_approval_required",
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(posts.tenantId, input.tenantId),
+          eq(posts.id, input.postId),
+          eq(posts.status, "scheduled"),
+          eq(posts.scheduledAt, input.expectedScheduledAt),
+        ),
+      )
+      .returning({ id: posts.id });
+    if (blocked.length === 0) return { blocked: false };
+
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "system",
+      actorId: "post-publisher",
+      action: "post.publish_blocked_approval",
+      meta: {
+        postId: input.postId,
+        groupId: post.groupId,
+        approvalStatus: post.approvalStatus,
+        scheduledAt: input.expectedScheduledAt.toISOString(),
+      },
+    });
+    return { blocked: true };
+  });
 }
 
 /**

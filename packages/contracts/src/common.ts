@@ -255,6 +255,13 @@ export const ErrorCodeSchema = z.enum([
   // pengguna, atau kombinasinya tidak sah (konten bermerek privat).
   "POST_PUBLISH_OPTIONS_REQUIRED",
   "POST_PUBLISH_OPTIONS_INVALID",
+  // Fase Susulan S1: alur persetujuan postingan — transisi persetujuan
+  // tidak sah dari keadaan sekarang, catatan keputusan wajib kosong,
+  // atau peninjau adalah pembuat post itu sendiri padahal ada
+  // penyetuju lain di tenant.
+  "POST_APPROVAL_INVALID_STATE",
+  "POST_APPROVAL_NOTE_REQUIRED",
+  "POST_APPROVAL_SELF_REVIEW",
   // Gelombang Perbaikan /contacts: berkas impor CSV melewati batas
   // baris per impor (MAX_IMPORT_ROWS di core).
   "CONTACTS_IMPORT_TOO_MANY_ROWS",
