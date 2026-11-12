@@ -642,6 +642,40 @@ dipindah juga ke postingan. Yang berubah untuk pemilik:
 
 ---
 
+## Perbaikan Avatar Inbox (2026-11-12) — batas platform foto kontak
+
+Di luar roadmap content schedule; dicatat di sini karena ini daftar
+berjalan batas platform yang perlu diketahui pemilik.
+
+- **Sudah diperbaiki di kode (bukan tindakan pemilik)**: baris inbox
+  `kind='channel'` (sasaran linimasa Page/IG/Threads/Bluesky/
+  YouTube/LinkedIn/Pinterest/Google Business/TikTok) kini menampilkan
+  foto akun channel-nya sendiri; sebelumnya serializer hanya membaca
+  foto kontak sehingga seluruh baris itu berinisial padahal foto akun
+  tersimpan. Kontak DM lama Telegram/Messenger/Instagram yang belum
+  berfoto kini di-backfill otomatis saat daftar inbox/kontak dibuka.
+- **Telegram — bisa**: foto profil pengguna diambil resmi lewat Bot
+  API (`getUserProfilePhotos`) saat pesan pertama + backfill.
+  Grup: avatar baris grup adalah foto kontak jangkarnya, Telegram
+  tidak memberi jalan mengambil foto grup lewat jalur yang dipakai.
+  Channel Telegram: bot TIDAK bisa mengambil foto channel lewat
+  `getUserProfilePhotos` (itu API pengguna) — baris channel Telegram
+  tetap berinisial judulnya, dan SENGAJA tidak ditempeli foto bot
+  (itu foto yang salah untuk baris tersebut).
+- **Messenger & Instagram — bisa**: foto profil pengirim diambil
+  resmi lewat Graph API (`profile_pic` / `profile_picture_url`)
+  dengan token Page/akun, saat pesan pertama + backfill.
+- **WhatsApp — TIDAK BISA (batas platform)**: WhatsApp Cloud API
+  tidak menyediakan endpoint foto profil pengguna; webhook hanya
+  membawa NAMA profil. Kontak/percakapan WhatsApp akan selalu tampil
+  berinisial — bukan kerusakan, dan tidak ada kredensial/pengaturan
+  pemilik yang bisa mengubahnya.
+- **Webchat — TIDAK BISA**: pengunjung anonim tidak punya foto
+  profil; baris webchat tampil berinisial.
+- **Tindakan pemilik**: tidak ada.
+
+---
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan.
