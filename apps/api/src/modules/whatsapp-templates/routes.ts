@@ -4,6 +4,7 @@ import {
   CreateWhatsAppTemplateRequestSchema,
   SyncWhatsAppTemplatesRequestSchema,
   SyncWhatsAppTemplatesResponseSchema,
+  UpdateWhatsAppTemplateRequestSchema,
   WhatsAppTemplateListQuerySchema,
   WhatsAppTemplateListResponseSchema,
   WhatsAppTemplateResponseSchema,
@@ -17,6 +18,7 @@ import {
   getWhatsAppTemplateById,
   listWhatsAppTemplates,
   recordCreatedWhatsAppTemplate,
+  recordEditedWhatsAppTemplate,
   replaceSyncedWhatsAppTemplates,
 } from "@sahabat-kreator/core";
 import type { ChannelAccount, WhatsAppTemplate } from "@sahabat-kreator/db";
@@ -41,6 +43,11 @@ import { resolveTenantForUser } from "../tenants/guard";
  *          tarik daftar dari Meta → ganti cermin (owner/admin)
  *   POST   /tenants/:tenantId/whatsapp-templates
  *          buat template di Meta + catat cermin (owner/admin)
+ *   PATCH  /tenants/:tenantId/whatsapp-templates/:id
+ *          perbaiki template REJECTED di Meta (Graph POST
+ *          /{template_id}) + catat cermin — satu-satunya jalur ubah;
+ *          APPROVED tidak diubah di tempat dan PENDING terkunci,
+ *          keduanya ditolak 409 WHATSAPP_TEMPLATE_NOT_EDITABLE (G10)
  *   DELETE /tenants/:tenantId/whatsapp-templates/:id
  *          hapus di Meta (berbasis nama) + hapus cermin (owner/admin)
  *
@@ -187,6 +194,65 @@ function graphFailure(c: AppContext, err: unknown, operation: string) {
   return apiError(c, 503, "INTERNAL_ERROR", "Meta Graph API is unreachable");
 }
 
+/** Bentuk formulir yang dipakai bersama buat & perbaiki. */
+interface TemplateFormData {
+  headerText?: string;
+  bodyText: string;
+  bodyExamples?: string[];
+  footerText?: string;
+  buttons?: Array<{ type: "URL" | "QUICK_REPLY"; text: string; url?: string }>;
+}
+
+/** Validasi formulir (pesan error) — dipakai jalur buat & perbaiki. */
+function validateTemplateForm(data: TemplateFormData): string | null {
+  const variableCount = countTemplateVariables(data.bodyText);
+  if (
+    data.bodyExamples !== undefined &&
+    data.bodyExamples.length !== variableCount
+  ) {
+    return "Body examples must match the number of template variables";
+  }
+  if (data.headerText && countTemplateVariables(data.headerText) > 0) {
+    return "Header text cannot contain variables in this form";
+  }
+  if (data.buttons?.some((b) => b.type === "URL" && !b.url)) {
+    return "URL buttons require a url";
+  }
+  return null;
+}
+
+/** Susun komponen Meta dari formulir — dipakai jalur buat & perbaiki. */
+function buildTemplateComponents(
+  data: TemplateFormData,
+): WhatsAppTemplateComponent[] {
+  const components: WhatsAppTemplateComponent[] = [];
+  if (data.headerText) {
+    components.push({ type: "HEADER", format: "TEXT", text: data.headerText });
+  }
+  const bodyComponent: WhatsAppTemplateComponent = {
+    type: "BODY",
+    text: data.bodyText,
+  };
+  if (data.bodyExamples && data.bodyExamples.length > 0) {
+    bodyComponent.example = { body_text: [data.bodyExamples] };
+  }
+  components.push(bodyComponent);
+  if (data.footerText) {
+    components.push({ type: "FOOTER", text: data.footerText });
+  }
+  if (data.buttons && data.buttons.length > 0) {
+    components.push({
+      type: "BUTTONS",
+      buttons: data.buttons.map((b) =>
+        b.type === "URL"
+          ? { type: "URL", text: b.text, url: b.url }
+          : { type: "QUICK_REPLY", text: b.text },
+      ),
+    });
+  }
+  return components;
+}
+
 export function createWhatsAppTemplatesRoutes(
   bundle: AuthBundle | null,
   opts: WhatsAppTemplatesModuleOptions = {},
@@ -200,6 +266,7 @@ export function createWhatsAppTemplatesRoutes(
     app.get(base, unavailable);
     app.post(`${base}/sync`, unavailable);
     app.post(base, unavailable);
+    app.patch(`${base}/:id`, unavailable);
     app.delete(`${base}/:id`, unavailable);
     return app;
   }
@@ -310,6 +377,7 @@ export function createWhatsAppTemplatesRoutes(
           language: t.language,
           category: t.category,
           status: t.status,
+          statusReason: t.rejectedReason,
           components: t.components,
           bodyText: derived.bodyText,
           variableCount: derived.variableCount,
@@ -334,35 +402,9 @@ export function createWhatsAppTemplatesRoutes(
     }
     const data = parsed.data;
     const variableCount = countTemplateVariables(data.bodyText);
-    if (
-      data.bodyExamples !== undefined &&
-      data.bodyExamples.length !== variableCount
-    ) {
-      return apiError(
-        c,
-        400,
-        "VALIDATION_ERROR",
-        "Body examples must match the number of template variables",
-      );
-    }
-    if (
-      data.headerText &&
-      countTemplateVariables(data.headerText) > 0
-    ) {
-      return apiError(
-        c,
-        400,
-        "VALIDATION_ERROR",
-        "Header text cannot contain variables in this form",
-      );
-    }
-    if (data.buttons?.some((b) => b.type === "URL" && !b.url)) {
-      return apiError(
-        c,
-        400,
-        "VALIDATION_ERROR",
-        "URL buttons require a url",
-      );
+    const formError = validateTemplateForm(data);
+    if (formError) {
+      return apiError(c, 400, "VALIDATION_ERROR", formError);
     }
     const gate = await loadWhatsAppAccount(
       c,
@@ -374,31 +416,7 @@ export function createWhatsAppTemplatesRoutes(
     const clientGate = buildClient(c, opts, gate.account);
     if ("error" in clientGate) return clientGate.error;
 
-    const components: WhatsAppTemplateComponent[] = [];
-    if (data.headerText) {
-      components.push({ type: "HEADER", format: "TEXT", text: data.headerText });
-    }
-    const bodyComponent: WhatsAppTemplateComponent = {
-      type: "BODY",
-      text: data.bodyText,
-    };
-    if (data.bodyExamples && data.bodyExamples.length > 0) {
-      bodyComponent.example = { body_text: [data.bodyExamples] };
-    }
-    components.push(bodyComponent);
-    if (data.footerText) {
-      components.push({ type: "FOOTER", text: data.footerText });
-    }
-    if (data.buttons && data.buttons.length > 0) {
-      components.push({
-        type: "BUTTONS",
-        buttons: data.buttons.map((b) =>
-          b.type === "URL"
-            ? { type: "URL", text: b.text, url: b.url }
-            : { type: "QUICK_REPLY", text: b.text },
-        ),
-      });
-    }
+    const components = buildTemplateComponents(data);
 
     let created;
     try {
@@ -424,12 +442,92 @@ export function createWhatsAppTemplatesRoutes(
         language: data.language,
         category: created.category,
         status: created.status,
+        statusReason: null,
         components,
         bodyText: data.bodyText,
         variableCount,
       },
     });
     return c.json(serializeTemplate(row), 201);
+  });
+
+  // ---- Perbaiki template REJECTED -------------------------------------------
+  app.patch(`${base}/:id`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const id = c.req.param("id");
+    if (!id || !z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "WhatsApp template not found");
+    }
+    const row = await getWhatsAppTemplateById(bundle.db, {
+      tenantId: g.tenant.id,
+      templateId: id,
+    });
+    if (!row) {
+      return apiError(c, 404, "NOT_FOUND", "WhatsApp template not found");
+    }
+    // Aturan ubah per status (G10): hanya REJECTED yang bisa diperbaiki
+    // di tempat. APPROVED harus lahir sebagai template baru (mengubah
+    // yang sudah disetujui di tempat akan mengacaukan broadcast yang
+    // sedang memakainya); PENDING terkunci selama Meta meninjau.
+    if (row.status !== "REJECTED") {
+      return apiError(
+        c,
+        409,
+        "WHATSAPP_TEMPLATE_NOT_EDITABLE",
+        "Only rejected templates can be edited in place; create a new template instead",
+      );
+    }
+    if (!row.metaTemplateId) {
+      return apiError(
+        c,
+        422,
+        "META_TEMPLATE_INVALID",
+        "Template has no Meta id recorded; sync from Meta first",
+      );
+    }
+    const json = await readJson(c);
+    const parsed = UpdateWhatsAppTemplateRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid template payload");
+    }
+    const data = parsed.data;
+    const formError = validateTemplateForm(data);
+    if (formError) {
+      return apiError(c, 400, "VALIDATION_ERROR", formError);
+    }
+    const gate = await loadWhatsAppAccount(
+      c,
+      bundle,
+      g.tenant.id,
+      row.channelAccountId,
+    );
+    if ("error" in gate) return gate.error;
+    const clientGate = buildClient(c, opts, gate.account);
+    if ("error" in clientGate) return clientGate.error;
+
+    const components = buildTemplateComponents(data);
+    try {
+      await clientGate.client.editMessageTemplate(row.metaTemplateId, {
+        category: data.category,
+        components,
+      });
+    } catch (err) {
+      return graphFailure(c, err, "edit");
+    }
+    const updated = await recordEditedWhatsAppTemplate(bundle.db, {
+      tenantId: g.tenant.id,
+      userId: g.appUser.id,
+      templateId: row.id,
+      category: data.category,
+      components,
+      bodyText: data.bodyText,
+      variableCount: countTemplateVariables(data.bodyText),
+    });
+    if (!updated) {
+      return apiError(c, 404, "NOT_FOUND", "WhatsApp template not found");
+    }
+    return c.json(serializeTemplate(updated));
   });
 
   // ---- Hapus template ----------------------------------------------------------
