@@ -310,6 +310,22 @@ export function startMetaDeliveryPoller(
               })
             ).providerMessageId;
           }
+          // G17: katalog natif — muatan daftar interaktif dibentuk
+          // menjadi pesan daftar WhatsApp resmi; body-nya adalah
+          // contentText (daftar terbaca manusia) baris yang sama.
+          if (delivery.interactivePayload?.kind === "whatsapp_list") {
+            const list = delivery.interactivePayload;
+            return (
+              await waClient.sendInteractiveListMessage({
+                phoneNumberId: delivery.accountExternalId,
+                to: delivery.recipientExternalId,
+                bodyText: delivery.contentText ?? "",
+                buttonText: list.buttonText,
+                sections: list.sections,
+                ...(quotedRawId ? { contextMessageId: quotedRawId } : {}),
+              })
+            ).providerMessageId;
+          }
           return (
                 await waClient.sendTextMessage({
                   phoneNumberId: delivery.accountExternalId,
@@ -343,6 +359,18 @@ export function startMetaDeliveryPoller(
                   ),
               )
             : delivery.accountExternalId;
+        // G17: katalog natif — template generik Send API (satu
+        // elemen per produk + tombol postback Tambah ke Keranjang).
+        if (delivery.interactivePayload?.kind === "generic_template") {
+          return (
+            await client.sendGenericTemplateMessage({
+              accountExternalId: sendObjectId,
+              recipientExternalId: delivery.recipientExternalId,
+              elements: delivery.interactivePayload.elements,
+              recipientCommentId: delivery.providerCommentId,
+            })
+          ).providerMessageId;
+        }
         return (
           await client.sendMessage({
             accountExternalId: sendObjectId,

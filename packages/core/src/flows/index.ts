@@ -263,3 +263,12 @@ export {
   type FlowWebhookPayloadResult,
   type StartFlowWebhookRunResult,
 } from "./webhook-trigger";
+export {
+  CATALOG_ADD_POSTBACK_PREFIX,
+  GENERIC_TEMPLATE_MAX_ELEMENTS,
+  WHATSAPP_LIST_MAX_ROWS,
+  buildCatalogMessage,
+  catalogProductIdFromSignal,
+  type BuiltCatalogMessage,
+  type CatalogMessageFormat,
+} from "./catalog-native";

@@ -368,6 +368,12 @@ export const FlowNodeTypeSchema = z.enum([
   "send_ad_conversion",
   // G17 — tambah baris ke Google Sheets tenant (layanan 'sheets').
   "append_sheet_row",
+  // G17 — katalog commerce dalam format NATIF kanal (daftar
+  // interaktif WhatsApp / template generik Messenger-IG; kanal lain
+  // fallback teks bernomor yang sama seperti show_catalog).
+  "send_catalog",
+  // G17 — rangkuman keranjang aktif kontak + cabang has_items/empty.
+  "cart_summary",
 ]);
 export type FlowNodeType = z.infer<typeof FlowNodeTypeSchema>;
 
@@ -552,6 +558,27 @@ export const FlowNodeConfigSchema = z.union([
       .regex(/^[A-Z]{3}$/)
       .optional(),
   }),
+  // G17 — send_catalog: bentuk config SAMA PERSIS show_catalog
+  // (intro/deskripsi/tenggat parkir/percobaan/prompt/pesan sukses) —
+  // yang berbeda hanyalah FORMAT pesan keluar per kanal (natif vs
+  // teks) dan keduanya berbagi mesin parkir + pemrosesan balasan
+  // katalog yang sama. Keabsahan rinci ditegakkan validasi aktivasi
+  // di core seperti show_catalog.
+  z.object({
+    introText: z.string().min(1).max(1000).optional(),
+    showDescription: z.boolean().optional(),
+    amount: z.number().int().min(0).max(100_000),
+    unit: z.enum(["seconds", "minutes", "hours"]),
+    maxInvalidAttempts: z.number().int().min(1).max(5),
+    invalidPrompt: z.string().min(1).max(1000).optional(),
+    addedMessage: z.string().min(1).max(1000).optional(),
+  }),
+  // G17 — cart_summary: hanya pesan keranjang-kosong opsional
+  // (cabang "empty"); cabang "has_items" mengirim rangkuman
+  // renderCartSummaryText dari mesin commerce yang ada.
+  z.object({
+    emptyMessage: z.string().min(1).max(1000).optional(),
+  }),
   // G17 — append_sheet_row: bentuk kasar; keabsahan rinci (id
   // spreadsheet non-kosong, ≥1 kolom ber-header + templat nilai)
   // ditegakkan validasi aktivasi di core. Nilai kolom adalah templat
@@ -695,6 +722,9 @@ export const FlowEdgeBranchSchema = z.enum([
   // Fase 13G
   "booked",
   "slot_taken",
+  // G17 — cart_summary: keranjang kontak berisi / kosong.
+  "has_items",
+  "empty",
 ]);
 export type FlowEdgeBranch = z.infer<typeof FlowEdgeBranchSchema>;
 

@@ -1312,6 +1312,63 @@ export class MetaGraphClient extends GraphHttpClient {
   }
 
   /**
+   * Template GENERIK Send API (G17 — katalog natif node
+   * send_catalog): satu elemen per produk dengan tombol postback;
+   * ketukan pelanggan kembali sebagai postback ber-payload yang sama
+   * persis dengan yang dikonfigurasi di sini (`catalog_add:<id>`).
+   * Berlaku untuk Messenger maupun Instagram (keduanya Send API).
+   * Batas platform (maks 10 elemen, judul/subtitle 80) ditegakkan
+   * pembangun muatan di core.
+   */
+  async sendGenericTemplateMessage(input: {
+    accountExternalId: string;
+    recipientExternalId: string;
+    elements: Array<{
+      title: string;
+      subtitle?: string;
+      buttons: Array<{
+        type: "postback";
+        title: string;
+        payload: string;
+      }>;
+    }>;
+    recipientCommentId?: string | null;
+  }): Promise<{ providerMessageId: string }> {
+    const attachment = {
+      type: "template",
+      payload: {
+        template_type: "generic",
+        elements: input.elements.map((el) => ({
+          title: el.title,
+          ...(el.subtitle ? { subtitle: el.subtitle } : {}),
+          buttons: el.buttons.map((b) => ({
+            type: b.type,
+            title: b.title,
+            payload: b.payload,
+          })),
+        })),
+      },
+    };
+    const body = await this.postJson<{ message_id?: string }>(
+      `${encodeURIComponent(input.accountExternalId)}/messages`,
+      input.recipientCommentId
+        ? {
+            recipient: { comment_id: input.recipientCommentId },
+            message: { attachment },
+          }
+        : {
+            recipient: { id: input.recipientExternalId },
+            messaging_type: "RESPONSE",
+            message: { attachment },
+          },
+    );
+    if (typeof body.message_id !== "string" || !body.message_id) {
+      throw new MetaGraphError(200, null, "missing_message_id");
+    }
+    return { providerMessageId: body.message_id };
+  }
+
+  /**
    * Balasan PUBLIK pada sebuah komentar (Fase 10B):
    * - Instagram: `POST /{comment-id}/replies` body { message }.
    * - Messenger/Page: `POST /{comment-id}/comments` body { message }.

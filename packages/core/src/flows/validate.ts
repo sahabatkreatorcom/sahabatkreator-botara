@@ -81,6 +81,80 @@ export async function tenantCustomFieldKeys(
  * Validasi bentuk config satu node (tanpa konteks DB). Mengembalikan
  * daftar masalah; kosong = sah. Dipakai validasi aktivasi penuh.
  */
+/**
+ * Bentuk config katalog (show_catalog 13F & send_catalog G17 —
+ * keduanya berbagi bentuk + mesin parkir yang sama; yang berbeda
+ * hanya format pesan keluarnya). `label` = tipe node untuk pesan.
+ */
+function validateCatalogNodeConfig(
+  c: Record<string, unknown>,
+  label: string,
+  err: (code: string, message: string) => void,
+): void {
+  if (
+    c.introText !== undefined &&
+    (!isNonEmptyString(c.introText) || c.introText.length > 1000)
+  ) {
+    err(
+      "CATALOG_INTRO_INVALID",
+      "Node " + label + " membutuhkan introText string non-kosong ≤ 1000 karakter bila diisi",
+    );
+  }
+  if (c.showDescription !== undefined && typeof c.showDescription !== "boolean") {
+    err(
+      "CATALOG_SHOW_DESCRIPTION_INVALID",
+      "Node " + label + " membutuhkan showDescription boolean bila diisi",
+    );
+  }
+  const amount = c.amount;
+  if (
+    typeof amount !== "number" ||
+    !Number.isInteger(amount) ||
+    amount < 0
+  ) {
+    err(
+      "CATALOG_AMOUNT_INVALID",
+      "Node " + label + " membutuhkan config.amount (tenggat per parkir) bilangan bulat ≥ 0",
+    );
+  }
+  if (c.unit !== "seconds" && c.unit !== "minutes" && c.unit !== "hours") {
+    err(
+      "CATALOG_UNIT_INVALID",
+      "Node " + label + " membutuhkan unit 'seconds'|'minutes'|'hours'",
+    );
+  }
+  const attempts = c.maxInvalidAttempts;
+  if (
+    typeof attempts !== "number" ||
+    !Number.isInteger(attempts) ||
+    attempts < 1 ||
+    attempts > 5
+  ) {
+    err(
+      "CATALOG_ATTEMPTS_INVALID",
+      "Node " + label + " membutuhkan config.maxInvalidAttempts bilangan bulat 1..5",
+    );
+  }
+  if (
+    c.invalidPrompt !== undefined &&
+    (!isNonEmptyString(c.invalidPrompt) || c.invalidPrompt.length > 1000)
+  ) {
+    err(
+      "CATALOG_INVALID_PROMPT_INVALID",
+      "Node " + label + " membutuhkan invalidPrompt string non-kosong ≤ 1000 karakter bila diisi",
+    );
+  }
+  if (
+    c.addedMessage !== undefined &&
+    (!isNonEmptyString(c.addedMessage) || c.addedMessage.length > 1000)
+  ) {
+    err(
+      "CATALOG_ADDED_MESSAGE_INVALID",
+      "Node " + label + " membutuhkan addedMessage string non-kosong ≤ 1000 karakter bila diisi",
+    );
+  }
+}
+
 export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
   const issues: FlowGraphIssue[] = [];
   const err = (code: string, message: string) =>
@@ -590,71 +664,10 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
       }
       break;
     }
-    case "show_catalog": {
-      if (
-        c.introText !== undefined &&
-        (!isNonEmptyString(c.introText) || c.introText.length > 1000)
-      ) {
-        err(
-          "CATALOG_INTRO_INVALID",
-          "Node show_catalog membutuhkan introText string non-kosong ≤ 1000 karakter bila diisi",
-        );
-      }
-      if (c.showDescription !== undefined && typeof c.showDescription !== "boolean") {
-        err(
-          "CATALOG_SHOW_DESCRIPTION_INVALID",
-          "Node show_catalog membutuhkan showDescription boolean bila diisi",
-        );
-      }
-      const amount = c.amount;
-      if (
-        typeof amount !== "number" ||
-        !Number.isInteger(amount) ||
-        amount < 0
-      ) {
-        err(
-          "CATALOG_AMOUNT_INVALID",
-          "Node show_catalog membutuhkan config.amount (tenggat per parkir) bilangan bulat ≥ 0",
-        );
-      }
-      if (c.unit !== "seconds" && c.unit !== "minutes" && c.unit !== "hours") {
-        err(
-          "CATALOG_UNIT_INVALID",
-          "Node show_catalog membutuhkan unit 'seconds'|'minutes'|'hours'",
-        );
-      }
-      const attempts = c.maxInvalidAttempts;
-      if (
-        typeof attempts !== "number" ||
-        !Number.isInteger(attempts) ||
-        attempts < 1 ||
-        attempts > 5
-      ) {
-        err(
-          "CATALOG_ATTEMPTS_INVALID",
-          "Node show_catalog membutuhkan config.maxInvalidAttempts bilangan bulat 1..5",
-        );
-      }
-      if (
-        c.invalidPrompt !== undefined &&
-        (!isNonEmptyString(c.invalidPrompt) || c.invalidPrompt.length > 1000)
-      ) {
-        err(
-          "CATALOG_INVALID_PROMPT_INVALID",
-          "Node show_catalog membutuhkan invalidPrompt string non-kosong ≤ 1000 karakter bila diisi",
-        );
-      }
-      if (
-        c.addedMessage !== undefined &&
-        (!isNonEmptyString(c.addedMessage) || c.addedMessage.length > 1000)
-      ) {
-        err(
-          "CATALOG_ADDED_MESSAGE_INVALID",
-          "Node show_catalog membutuhkan addedMessage string non-kosong ≤ 1000 karakter bila diisi",
-        );
-      }
+    case "show_catalog":
+    case "send_catalog":
+      validateCatalogNodeConfig(c, node.type, err);
       break;
-    }
     case "cart_checkout": {
       if (
         c.emptyMessage !== undefined &&
@@ -696,6 +709,21 @@ export function validateFlowNodeConfig(node: FlowGraphNode): FlowGraphIssue[] {
         err(
           "CHECKOUT_DISCOUNT_MESSAGE_INVALID",
           "Node cart_checkout membutuhkan discountInvalidMessage string non-kosong ≤ 1000 karakter bila diisi",
+        );
+      }
+      break;
+    }
+    case "cart_summary": {
+      // G17: satu-satunya config adalah pesan keranjang-kosong
+      // opsional (cabang "empty"); isi cabang "has_items" selalu
+      // rangkuman mesin commerce.
+      if (
+        c.emptyMessage !== undefined &&
+        (!isNonEmptyString(c.emptyMessage) || c.emptyMessage.length > 1000)
+      ) {
+        err(
+          "CART_SUMMARY_EMPTY_MESSAGE_INVALID",
+          "Node cart_summary membutuhkan emptyMessage string non-kosong ≤ 1000 karakter bila diisi",
         );
       }
       break;
@@ -890,6 +918,19 @@ export async function validateFlowGraph(
       required: [
         { branch: "checked_out", code: "CHECKOUT_BRANCH_CHECKED_OUT_MISSING", label: "Node cart_checkout membutuhkan edge branch 'checked_out'" },
         { branch: "empty_cart", code: "CHECKOUT_BRANCH_EMPTY_CART_MISSING", label: "Node cart_checkout membutuhkan edge branch 'empty_cart'" },
+      ],
+    },
+    send_catalog: {
+      required: [
+        { branch: "added", code: "CATALOG_BRANCH_ADDED_MISSING", label: "Node send_catalog membutuhkan edge branch 'added'" },
+        { branch: "invalid", code: "CATALOG_BRANCH_INVALID_MISSING", label: "Node send_catalog membutuhkan edge branch 'invalid'" },
+        { branch: "timeout", code: "CATALOG_BRANCH_TIMEOUT_MISSING", label: "Node send_catalog membutuhkan edge branch 'timeout'" },
+      ],
+    },
+    cart_summary: {
+      required: [
+        { branch: "has_items", code: "CART_SUMMARY_BRANCH_HAS_ITEMS_MISSING", label: "Node cart_summary membutuhkan edge branch 'has_items'" },
+        { branch: "empty", code: "CART_SUMMARY_BRANCH_EMPTY_MISSING", label: "Node cart_summary membutuhkan edge branch 'empty'" },
       ],
     },
     book_appointment: {

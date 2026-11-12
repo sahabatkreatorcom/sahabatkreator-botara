@@ -1028,6 +1028,24 @@ pemilik platform, sekali:
 5. Tenant lalu menghubungkan akun Google-nya dari **Saluran →
    Google → Google Sheets**; spreadsheet tujuan harus bisa diakses
    (dimiliki/dibagikan ke) akun yang memberi consent itu.
+3. **Pesan katalog natif + rangkuman keranjang (G17 butir 3)** —
+   **tanpa tindakan pemilik baru**: node "Kirim katalog (natif)" dan
+   "Rangkuman keranjang" memakai katalog commerce + keranjang per
+   kontak yang sudah ada dan token kanal yang sudah terhubung.
+   Perilaku per kanal yang perlu diketahui pemilik (bukan bug):
+   WhatsApp mengirim daftar interaktif resmi dan Messenger/Instagram
+   kartu produk bertombol — keduanya dibatasi platform ke **10 produk
+   pertama** (pemotongan tercatat di riwayat langkah; produk ke-11+
+   tidak tampil di format natif, tapi tetap bisa dijangkau lewat node
+   "Tampilkan katalog" teks biasa yang memuat semua produk); kanal
+   lain (Telegram, webchat) menerima daftar teks bernomor yang sama
+   seperti sebelumnya. Pesan katalog TIPE commerce WhatsApp
+   (`product_list`) SENGAJA tidak dipakai: format itu mensyaratkan
+   katalog Meta Commerce yang tersinkron (retailer_id per produk)
+   yang tidak dimiliki produk Botara — bila pemilik kelak menyinkronkan
+   katalog ke Meta Commerce Manager, format itu bisa ditambahkan.
+   Rangkuman keranjang hanya membaca keranjang aktif kontak; checkout
+   tetap lewat node Checkout keranjang yang sudah ada.
 
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
@@ -1043,6 +1061,7 @@ platform: developer token Google Ads + proyek OAuth Ads; tindakan
 tenant: dataset + token Meta / akun + aksi konversi Google Ads) +
 Gelombang G17 (ekstensi flow — butir 1 pemicu webhook tanpa tindakan
 pemilik; butir 2 Sheets: tindakan platform proyek Cloud Sheets +
-proyek/consent tenant; butir 3–4 menyusul di bagian G17 yang sama).
+proyek/consent tenant; butir 3 katalog natif tanpa tindakan pemilik
+baru, hanya catatan perilaku; butir 4 menyusul di bagian G17 yang sama).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._

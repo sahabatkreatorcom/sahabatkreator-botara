@@ -51,7 +51,9 @@ export type FlowBranch =
   | "checked_out"
   | "empty_cart"
   | "booked"
-  | "slot_taken";
+  | "slot_taken"
+  | "has_items"
+  | "empty";
 
 export interface FlowGraphEdge {
   from: string;
@@ -96,6 +98,8 @@ export const NODE_TYPES = new Set([
   // G16 — konversi iklan
   "send_ad_conversion",
   "append_sheet_row",
+  "send_catalog",
+  "cart_summary",
 ]);
 
 /**
@@ -126,6 +130,8 @@ const FLOW_BRANCHES: readonly FlowBranch[] = [
   "empty_cart",
   "booked",
   "slot_taken",
+  "has_items",
+  "empty",
 ];
 
 function isValidFlowPosition(

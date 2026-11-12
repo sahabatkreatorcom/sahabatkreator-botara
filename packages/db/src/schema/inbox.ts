@@ -255,6 +255,46 @@ export interface MessageTriggerSignal {
   title: string | null;
 }
 
+/**
+ * Muatan interaktif natif kanal pada pesan keluar (G17) — bentuk
+ * kolom `messages.interactive_payload`. Dua bentuk resmi:
+ * - `whatsapp_list`: pesan daftar interaktif WhatsApp Cloud API —
+ *   body-nya adalah content_text baris pesan; baris (row) id-nya =
+ *   id produk, dan ketukan pelanggan kembali sebagai sinyal
+ *   quick_reply ber-payload id itu.
+ * - `generic_template`: template generik Send API (Messenger &
+ *   Instagram) — satu elemen per produk dengan tombol postback
+ *   ber-payload `catalog_add:<productId>`; ketukannya kembali
+ *   sebagai sinyal postback.
+ * Batas platform ditegakkan pembangunnya di core (maks 10 baris /
+ * 10 elemen, judul terpotong ke batas masing-masing API).
+ */
+export type MessageInteractivePayload =
+  | {
+      kind: "whatsapp_list";
+      buttonText: string;
+      sections: Array<{
+        title: string;
+        rows: Array<{
+          id: string;
+          title: string;
+          description?: string;
+        }>;
+      }>;
+    }
+  | {
+      kind: "generic_template";
+      elements: Array<{
+        title: string;
+        subtitle?: string;
+        buttons: Array<{
+          type: "postback";
+          title: string;
+          payload: string;
+        }>;
+      }>;
+    };
+
 export const messages = pgTable(
   "messages",
   {
@@ -390,6 +430,15 @@ export const messages = pgTable(
        */
       headerMediaId?: string;
     }>(),
+    /**
+     * Muatan interaktif NATIF kanal (G17) untuk pesan keluar node
+     * flow send_catalog: bentuk terstruktur yang dibentuk poller
+     * pengiriman menjadi panggilan API natif kanal (daftar interaktif
+     * WhatsApp / template generik Messenger-Instagram). content_text
+     * baris yang sama tetap daftar teks terbaca manusia (body daftar
+     * WhatsApp + fallback inbox). NULL untuk pesan non-katalog-natif.
+     */
+    interactivePayload: jsonb("interactive_payload").$type<MessageInteractivePayload>(),
     /**
      * Id komentar Meta yang menjadi alamat kirim pesan ini (Fase 10B):
      * DM privat balasan-atas-komentar (private reply) dikirim Send API

@@ -934,6 +934,89 @@ export function simulateFlowRun(
         return { type: "park", reason: "waiting_for_catalog_choice" };
       }
 
+      case "send_catalog": {
+        // G17: katalog NATIF — formatnya per-KANAL percakapan saat
+        // run sungguhan (daftar WA / template Messenger / teks), dan
+        // satu flow melayani semua kanal, jadi simulator menampilkan
+        // render TEKS-nya (isi yang sama yang menjadi body/fallback)
+        // dan mencatat format sebagai bergantung-kanal secara jujur.
+        // Efek + parkir sama seperti show_catalog.
+        const config = catalogConfigOf(node);
+        const products = options.catalogProducts;
+        if (!products) {
+          pushStep(node, {
+            outcome: "simulated",
+            reason: "catalog_data_unavailable",
+          });
+          pushEffect("catalog_message", node, "recorded", {
+            note: "catalog_data_unavailable",
+          });
+          pushEffect("park", node, "faithful", {
+            reason: "waiting_for_catalog_choice",
+          });
+          return { type: "park", reason: "waiting_for_catalog_choice" };
+        }
+        if (products.length === 0) {
+          throw new SimNodeError("send_catalog tanpa produk aktif", "catalog_empty");
+        }
+        const intro = config.introText
+          ? renderMessageText(config.introText, { name: contact.name }, rng)
+          : null;
+        const text = renderCatalogText(products as unknown as Product[], {
+          introText: intro,
+          showDescription: config.showDescription,
+        });
+        pushEffect("send_message", node, "faithful", {
+          text,
+          via: "send_catalog",
+        });
+        pushStep(node, {
+          outcome: "catalog_shown",
+          format: "channel_dependent",
+          productCount: products.length,
+          productIds: products.map((p) => p.id),
+        });
+        pushEffect("catalog_message", node, "recorded", {
+          format: "channel_dependent",
+          productCount: products.length,
+        });
+        pushEffect("park", node, "faithful", {
+          reason: "waiting_for_catalog_choice",
+          productCount: products.length,
+        });
+        return { type: "park", reason: "waiting_for_catalog_choice" };
+      }
+
+      case "cart_summary": {
+        // G17: cabang mengikuti jumlah item keranjang mock panel —
+        // pola cart_checkout di bawah.
+        const itemCount = options.cartItemCount ?? 0;
+        if (itemCount > 0) {
+          pushStep(node, {
+            outcome: "summary_sent",
+            simulated: true,
+            itemCount,
+          });
+          pushEffect("send_message", node, "recorded", {
+            via: "cart_summary",
+            note: "cart_summary_from_live_cart",
+          });
+          return { type: "advance", branch: "has_items" };
+        }
+        const emptyText =
+          typeof c.emptyMessage === "string" && c.emptyMessage
+            ? renderMessageText(c.emptyMessage, { name: contact.name }, rng)
+            : null;
+        if (emptyText) {
+          pushEffect("send_message", node, "faithful", {
+            text: emptyText,
+            via: "cart_summary",
+          });
+        }
+        pushStep(node, { outcome: "cart_empty" });
+        return { type: "advance", branch: "empty" };
+      }
+
       case "cart_checkout": {
         const config = cartCheckoutConfigOf(node);
         const itemCount = options.cartItemCount ?? 0;

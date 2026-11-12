@@ -1406,9 +1406,15 @@ export function NodeConfigPanel({
         </div>
       ) : null}
 
-      {type === "show_catalog" ? (
+      {type === "show_catalog" || type === "send_catalog" ? (
         <div className="space-y-3">
-          <p className="text-xs text-muted">{t("flows.catalogHint")}</p>
+          <p className="text-xs text-muted">
+            {t(
+              type === "send_catalog"
+                ? "flows.sendCatalogHint"
+                : "flows.catalogHint",
+            )}
+          </p>
           <div>
             <label className={labelClass} htmlFor="cfg-catalog-intro">
               {t("flows.catalogIntroLabel")}
@@ -1696,6 +1702,27 @@ export function NodeConfigPanel({
               placeholder={t("flows.appointmentBookedMessagePlaceholder")}
               value={str(config.bookedMessage)}
               onChange={(e) => set({ bookedMessage: e.target.value })}
+            />
+          </div>
+        </div>
+      ) : null}
+
+      {type === "cart_summary" ? (
+        <div className="space-y-3">
+          <p className="text-xs text-muted">{t("flows.cartSummaryHint")}</p>
+          <div>
+            <label className={labelClass} htmlFor="cfg-cartsummary-empty">
+              {t("flows.checkoutEmptyMessageLabel")}
+            </label>
+            <textarea
+              id="cfg-cartsummary-empty"
+              className={inputClass}
+              rows={2}
+              maxLength={1000}
+              disabled={readOnly}
+              placeholder={t("flows.checkoutEmptyMessagePlaceholder")}
+              value={str(config.emptyMessage)}
+              onChange={(e) => set({ emptyMessage: e.target.value })}
             />
           </div>
         </div>

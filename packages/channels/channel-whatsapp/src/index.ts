@@ -777,6 +777,60 @@ export class WhatsAppCloudClient extends GraphHttpClient {
     }
     return { providerMessageId: wamid };
   }
+
+  /**
+   * Pesan DAFTAR interaktif (G17 — katalog natif node send_catalog):
+   * `type: "interactive"` dengan `interactive.type: "list"`. Body
+   * adalah teks daftar terbaca manusia; pelanggan mengetuk tombol
+   * untuk membuka daftar dan memilih satu baris — pilihan kembali
+   * sebagai pesan interactive list_reply yang id-nya = id baris
+   * (normalisasi webhook mengangkatnya menjadi sinyal quick_reply).
+   * Batas platform (maks 10 baris, judul 24, deskripsi 72) ditegakkan
+   * pembangun muatan di core, bukan di sini.
+   */
+  async sendInteractiveListMessage(input: {
+    phoneNumberId: string;
+    to: string;
+    bodyText: string;
+    buttonText: string;
+    sections: Array<{
+      title: string;
+      rows: Array<{ id: string; title: string; description?: string }>;
+    }>;
+    contextMessageId?: string;
+  }): Promise<{ providerMessageId: string }> {
+    const body = await this.postJson<{
+      messages?: Array<{ id?: string }>;
+    }>(`${encodeURIComponent(input.phoneNumberId)}/messages`, {
+      messaging_product: "whatsapp",
+      recipient_type: "individual",
+      to: input.to,
+      type: "interactive",
+      interactive: {
+        type: "list",
+        body: { text: input.bodyText },
+        action: {
+          button: input.buttonText,
+          sections: input.sections.map((section) => ({
+            title: section.title,
+            rows: section.rows.map((row) => ({
+              id: row.id,
+              title: row.title,
+              ...(row.description ? { description: row.description } : {}),
+            })),
+          })),
+        },
+      },
+      ...(input.contextMessageId
+        ? { context: { message_id: input.contextMessageId } }
+        : {}),
+    });
+    const wamid = body.messages?.[0]?.id;
+    if (typeof wamid !== "string" || !wamid) {
+      throw new WhatsAppGraphError(200, null, "missing_message_id");
+    }
+    return { providerMessageId: wamid };
+  }
 }
 
 // ---------------------------------------------------------------------------

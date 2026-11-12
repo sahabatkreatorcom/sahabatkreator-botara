@@ -68,6 +68,7 @@ import {
 import {
   checkoutCartTx,
   getCartView,
+  getCartViewTx,
   listActiveCatalogProductsTx,
   prepareOrderCheckoutLink,
   renderCartSummaryText,
@@ -134,10 +135,12 @@ import {
   exitParkedCatalog,
   exitParkedQuestionnaire,
   normalizeText,
+  queueFlowOutboundInteractive,
   queueFlowOutboundText,
   resolveParkedWaitReply,
   skipMissingQuestionnaireTargets,
 } from "./evaluate";
+import { buildCatalogMessage } from "./catalog-native";
 
 // ---------------------------------------------------------------------------
 // Eksekusi run (sisi worker, job `flow.step`)
@@ -1183,6 +1186,128 @@ async function executeNodeInTx(
       };
     }
 
+    case "send_catalog": {
+      // G17: katalog commerce dalam format NATIF kanal — daftar
+      // interaktif WhatsApp / template generik Messenger-IG; kanal
+      // tanpa format natif setara menerima daftar teks bernomor
+      // yang sama seperti show_catalog (fallback jujur, tercatat di
+      // detail langkah sebagai format "text"). Parkir + pemrosesan
+      // balasan BERBAGI mesin show_catalog (context.catalog yang
+      // sama; balasan sah = nomor teks, ketukan daftar WA, atau
+      // postback template). Yang diparkir adalah produk yang
+      // BENAR-BENAR tampil (format natif terpotong ke batas
+      // platform; pemotongan tercatat).
+      if (!ctx.contact) throw new FlowNodeError("kontak run tidak ditemukan");
+      if (!ctx.conversation) {
+        throw new FlowNodeError("percakapan run tidak ditemukan");
+      }
+      const config = catalogConfigOf(node);
+      const listed = await listActiveCatalogProductsTx(tx, tenantId);
+      if (listed.length === 0) {
+        throw new FlowNodeError(
+          "send_catalog tanpa produk aktif",
+          "catalog_empty",
+        );
+      }
+      const intro = config.introText
+        ? renderMessageText(config.introText, { name: ctx.contact.name })
+        : null;
+      const built = buildCatalogMessage(ctx.conversation.provider, listed, {
+        sectionTitle: intro,
+      });
+      const textBody = renderCatalogText(built.shown, {
+        introText: intro,
+        showDescription: config.showDescription,
+      });
+      const outboundId = built.payload
+        ? await queueFlowOutboundInteractive(tx, tenantId, run, ctx.conversation, {
+            text: textBody,
+            interactivePayload: built.payload,
+          })
+        : await queueFlowOutboundText(
+            tx,
+            tenantId,
+            run,
+            ctx.conversation,
+            textBody,
+          );
+      const state: CatalogRunState = {
+        nodeId: node.id,
+        productIds: built.shown.map((p) => p.id),
+        attempts: 0,
+        listedAt: new Date().toISOString(),
+      };
+      return {
+        detail: {
+          outcome: "catalog_shown",
+          format: built.format,
+          productCount: state.productIds.length,
+          totalProducts: listed.length,
+          truncated: built.truncated,
+          productIds: state.productIds,
+          outboundMessageId: outboundId,
+        },
+        parkWaitReplyMs: config.timeoutMs,
+        contextPatch: { catalog: state },
+        outboundMessageId: outboundId,
+      };
+    }
+
+    case "cart_summary": {
+      // G17: rangkuman keranjang AKTIF kontak run dari mesin
+      // commerce yang ada (bukan keranjang kedua): berisi → kirim
+      // renderCartSummaryText + branch "has_items"; kosong/belum
+      // ada → branch "empty" (+ emptyMessage bila dikonfigurasi).
+      // Kelanjutan checkout tetap komposisi graf menuju
+      // cart_checkout.
+      if (!ctx.contact) throw new FlowNodeError("kontak run tidak ditemukan");
+      if (!ctx.conversation) {
+        throw new FlowNodeError("percakapan run tidak ditemukan");
+      }
+      const view = await getCartViewTx(tx, tenantId, run.contactId);
+      if (view && view.itemCount > 0) {
+        const outboundId = await queueFlowOutboundText(
+          tx,
+          tenantId,
+          run,
+          ctx.conversation,
+          renderCartSummaryText(view),
+        );
+        return {
+          detail: {
+            outcome: "summary_sent",
+            itemCount: view.itemCount,
+            totalIdr: view.totalIdr,
+            outboundMessageId: outboundId,
+          },
+          branch: "has_items",
+          outboundMessageId: outboundId,
+        };
+      }
+      const emptyText =
+        typeof c.emptyMessage === "string" && c.emptyMessage
+          ? renderMessageText(c.emptyMessage, { name: ctx.contact.name })
+          : null;
+      if (emptyText) {
+        const outboundId = await queueFlowOutboundText(
+          tx,
+          tenantId,
+          run,
+          ctx.conversation,
+          emptyText,
+        );
+        return {
+          detail: { outcome: "cart_empty", outboundMessageId: outboundId },
+          branch: "empty",
+          outboundMessageId: outboundId,
+        };
+      }
+      return {
+        detail: { outcome: "cart_empty" },
+        branch: "empty",
+      };
+    }
+
     case "goto_flow": {
       const targetId = String(c.flowId ?? "");
       if (!targetId || !isUuidLike(targetId)) {
@@ -1485,6 +1610,7 @@ export async function executeFlowStep(
       (node.type === "wait_reply" ||
         node.type === "questionnaire" ||
         node.type === "show_catalog" ||
+        node.type === "send_catalog" ||
         node.type === "book_appointment") &&
       parkedCtx.wait &&
       parkedCtx.wait.nodeId === node.id
@@ -1536,7 +1662,7 @@ export async function executeFlowStep(
             );
             return { applied: true, status: r.status };
           }
-          if (node.type === "show_catalog") {
+          if (node.type === "show_catalog" || node.type === "send_catalog") {
             const cState = freshCtx.catalog;
             const r = await exitParkedCatalog(
               tx,

@@ -22,6 +22,7 @@ import {
   type ChannelAccount,
   type Database,
   type Message,
+  type MessageInteractivePayload,
   type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
@@ -1061,6 +1062,12 @@ export interface MetaQueuedDelivery {
    * Byte-nya dibaca pengirim di konteks tenant masing-masing.
    */
   mediaId: string | null;
+  /**
+   * Muatan interaktif natif kanal (G17, node send_catalog): poller
+   * membentuk panggilan API natif dari bentuk ini (daftar interaktif
+   * WhatsApp / template generik Messenger-IG). Null untuk pesan lain.
+   */
+  interactivePayload: MessageInteractivePayload | null;
 }
 
 /**
@@ -1119,6 +1126,7 @@ export async function listQueuedMetaDeliveries(
         conversationId: messages.conversationId,
         contentText: messages.contentText,
         templatePayload: messages.templatePayload,
+        interactivePayload: messages.interactivePayload,
         providerCommentId: messages.providerCommentId,
         replyToMessageId: messages.replyToMessageId,
         mediaId: messages.mediaId,

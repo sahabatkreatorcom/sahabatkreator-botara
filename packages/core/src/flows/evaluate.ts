@@ -37,6 +37,7 @@ import {
   type Conversation,
   type Database,
   type FlowRun,
+  type MessageInteractivePayload,
   type MessageTriggerSignal,
 } from "@sahabat-kreator/db";
 import {
@@ -94,6 +95,7 @@ import {
 import {
   catalogConfigOf,
 } from "./catalog";
+import { catalogProductIdFromSignal } from "./catalog-native";
 import {
   appointmentConfigOf,
 } from "./appointment";
@@ -318,6 +320,53 @@ export async function queueFlowOutboundText(
       senderType: "system",
       type: "text",
       contentText: text,
+      status: "queued",
+    })
+    .returning();
+  const now = new Date();
+  await tx
+    .update(conversations)
+    .set({ lastMessageAt: now, updatedAt: now })
+    .where(eq(conversations.id, run.conversationId));
+  await tx.insert(outboxEvents).values({
+    tenantId,
+    type: "message.queued",
+    payload: {
+      provider: conversation.provider,
+      conversationId: run.conversationId,
+      messageId: outbound.id,
+      via: "flow",
+      flowId: run.flowId,
+      runId: run.id,
+    },
+  });
+  return outbound.id;
+}
+
+/**
+ * Varian queueFlowOutboundText dengan muatan interaktif NATIF kanal
+ * (G17, node send_catalog): teks tetap disimpan sebagai content_text
+ * (body daftar WhatsApp + bacaan fallback inbox), bentuk
+ * terstrukturnya di interactive_payload untuk dibentuk poller
+ * pengiriman menjadi panggilan API natif.
+ */
+export async function queueFlowOutboundInteractive(
+  tx: DbTx,
+  tenantId: string,
+  run: FlowRun,
+  conversation: Conversation,
+  input: { text: string; interactivePayload: MessageInteractivePayload },
+): Promise<string> {
+  const [outbound] = await tx
+    .insert(messages)
+    .values({
+      tenantId,
+      conversationId: run.conversationId,
+      direction: "outbound",
+      senderType: "system",
+      type: "text",
+      contentText: input.text,
+      interactivePayload: input.interactivePayload,
       status: "queued",
     })
     .returning();
@@ -837,7 +886,9 @@ export async function exitParkedCatalog(
     runId: run.id,
     seq,
     nodeId: node.id,
-    nodeType: "show_catalog",
+    // G17: send_catalog berbagi mesin parkir ini — baris langkah
+    // penutup tercatat dengan tipe node yang sebenarnya.
+    nodeType: node.type,
     detail: { ...input.detail, branch: input.branch },
   });
   const nextId = nextNodeId(graph, node.id, input.branch);
@@ -864,7 +915,7 @@ export async function exitParkedCatalog(
         flowRunId: run.id,
         conversationId: run.conversationId,
         stepCount: run.stepCount + 1,
-        reason: `show_catalog_${input.branch}`,
+        reason: `${node.type}_${input.branch}`,
       },
     });
     return { status: "completed", nextStepSeq: seq + 1 };
@@ -897,7 +948,7 @@ async function parkCatalog(
     runId: run.id,
     seq,
     nodeId: node.id,
-    nodeType: "show_catalog",
+    nodeType: node.type,
     detail,
   });
   const resumeAt = new Date(now.getTime() + timeoutMs);
@@ -946,7 +997,17 @@ async function processParkedCatalogReply(
   run: FlowRun,
   graph: FlowGraphData,
   node: FlowGraphNode,
-  input: { messageId: string; messageText: string },
+  input: {
+    messageId: string;
+    messageText: string;
+    /**
+     * Sinyal tombol pesan ini (G17): pada node send_catalog, ketukan
+     * daftar WhatsApp (quick_reply ber-payload id produk) dan tombol
+     * postback template generik (`catalog_add:<id>`) adalah pilihan
+     * katalog yang sah — setara mengetik nomornya, qty 1.
+     */
+    signal?: MessageTriggerSignal | null;
+  },
 ): Promise<{ status: FlowRunStatus; nextStepSeq: number } | null> {
   const config = catalogConfigOf(node);
   const ctxData = runContextOf(run);
@@ -1039,10 +1100,18 @@ async function processParkedCatalogReply(
     return null;
   };
 
-  const selection = parseCatalogSelection(
-    input.messageText,
-    state.productIds.length,
+  // Pilihan dari SINYAL tombol lebih dulu (G17): id produk dari
+  // ketukan natif dipetakan kembali ke indeks daftar parkir agar
+  // seluruh jalur lanjutan (cek aktif, tambah keranjang, ringkasan)
+  // identik dengan pilihan teks. Sinyal asing / id di luar daftar
+  // parkir jatuh ke parsing teks seperti biasa.
+  const signalProductId = catalogProductIdFromSignal(
+    input.signal,
+    state.productIds,
   );
+  const selection = signalProductId
+    ? { index: state.productIds.indexOf(signalProductId), qty: 1 }
+    : parseCatalogSelection(input.messageText, state.productIds.length);
   if (!selection) {
     return failSelection("not_a_selection", {});
   }
@@ -1085,6 +1154,7 @@ async function processParkedCatalogReply(
       productId: product.id,
       productName: product.name,
       qty: selection.qty,
+      selectionSource: signalProductId ? `signal_${input.signal?.kind}` : "text",
       unitPriceIdr: product.priceIdr,
       cartTotalIdr: view.totalIdr,
       cartItemCount: view.itemCount,
@@ -1482,7 +1552,13 @@ async function processParkedAppointmentReply(
 async function resumeParkedFlowRuns(
   tx: DbTx,
   tenantId: string,
-  input: { conversationId: string; messageId: string; messageText: string },
+  input: {
+    conversationId: string;
+    messageId: string;
+    messageText: string;
+    /** Sinyal tombol pesan ini (G5/G17) — pilihan katalog natif. */
+    signal?: MessageTriggerSignal | null;
+  },
   deps: { db: Database; googleDeps?: GoogleDeps },
 ): Promise<{
   waitReplyRunIds: string[];
@@ -1545,7 +1621,7 @@ async function resumeParkedFlowRuns(
       questionnaireRunIds.push(run.id);
       continue;
     }
-    if (node.type === "show_catalog") {
+    if (node.type === "show_catalog" || node.type === "send_catalog") {
       if (!ctx.catalog || ctx.catalog.nodeId !== node.id) {
         continue;
       }
@@ -1558,6 +1634,7 @@ async function resumeParkedFlowRuns(
         {
           messageId: input.messageId,
           messageText: input.messageText,
+          signal: input.signal ?? null,
         },
       );
       if (exited && exited.status === "running") {
@@ -1791,6 +1868,7 @@ export async function startFlowRunsForInboundMessage(
         conversationId,
         messageId,
         messageText: input.messageText,
+        signal: input.triggerSignal ?? null,
       },
       { db, googleDeps: opts?.googleDeps },
     ),
