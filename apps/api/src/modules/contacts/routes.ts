@@ -1,7 +1,12 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import {
+  ContactBulkRequestSchema,
+  ContactBulkResponseSchema,
+  ContactConversationListResponseSchema,
   ContactDuplicatesResponseSchema,
+  ContactImportRequestSchema,
+  ContactImportResponseSchema,
   ContactListResponseSchema,
   ContactResponseSchema,
   CreateContactRequestSchema,
@@ -10,13 +15,18 @@ import {
   type ContactResponse,
 } from "@sahabat-kreator/contracts";
 import {
+  buildContactsCsv,
+  bulkApplyContactsAction,
   createContact,
   effectiveOptInStatus,
   findDuplicateContacts,
   getContact,
+  importContactsFromCsv,
+  listContactConversations,
   listContactPlatforms,
   listContactPhotoFetchCandidates,
   listContacts,
+  listContactsForExport,
   listProfilePhotoOwnerIds,
   listSegmentMemberIds,
   mapContactsToSelfChannelAccounts,
@@ -163,6 +173,15 @@ const ListContactsQuerySchema = z.object({
   offset: z.coerce.number().int().min(0).default(0),
   /** Fase 13C: saring ke anggota segmen ini (evaluator tunggal core). */
   segmentId: z.string().uuid().optional(),
+  /** Saring ke satu tahap pipeline persis (filter daftar utama). */
+  stage: z.string().trim().min(1).max(64).optional(),
+});
+
+/** Query ekspor CSV: filter yang sama dengan daftar (tanpa pagination). */
+const ExportContactsQuerySchema = z.object({
+  search: z.string().max(255).optional(),
+  segmentId: z.string().uuid().optional(),
+  stage: z.string().trim().min(1).max(64).optional(),
 });
 
 /**
@@ -171,6 +190,19 @@ const ListContactsQuerySchema = z.object({
  *   GET   /tenants/:tenantId/contacts        daftar + total (?search=&limit=&offset=)
  *   GET   /tenants/:tenantId/contacts/:id    detail; bukan milik tenant → 404
  *   PATCH /tenants/:tenantId/contacts/:id    ubah name/tags/pipeline_stage/opt_in_status
+ *
+ * Daftar utama (GET di atas) adalah permukaan CRM: ia meneruskan
+ * `excludeSelfChannelContacts` ke core sehingga kontak AKUN-SENDIRI
+ * (jangkar akun channel yang hanya punya percakapan linimasa) tidak
+ * tampil di sini — sejajar saringan Inbox kemarin. Permukaan lain
+ * (duplikat di modul ini, segmen/broadcast/postingan di core, API
+ * publik v1) TIDAK disaring dan perilakunya tidak berubah.
+ *
+ * Route tambahan gelombang perbaikan /contacts:
+ *   GET   /tenants/:tenantId/contacts/export           unduh CSV sesuai filter daftar
+ *   POST  /tenants/:tenantId/contacts/import           impor CSV (laporan per baris)
+ *   POST  /tenants/:tenantId/contacts/bulk             satu aksi untuk banyak kontak
+ *   GET   /tenants/:tenantId/contacts/:id/conversations  percakapan milik kontak
  * Wajib sesi + membership workspace (non-member → 404 TENANT_NOT_FOUND,
  * pola Fase 1B). Logika domain ada di @sahabat-kreator/core (RLS tenant).
  */
@@ -185,7 +217,11 @@ export function createContactsRoutes(
     app.post(base, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(base, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/duplicates`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/export`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/import`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/bulk`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/:id/conversations`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/merge`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.patch(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
@@ -219,6 +255,26 @@ export function createContactsRoutes(
     return c.json(serializeContact(contact), 201);
   });
 
+  /**
+   * Fase 13C: filter segmen — keanggotaan diselesaikan evaluator
+   * core lebih dulu; segmen tak dikenal → null (route menjawab 404,
+   * bukan daftar kosong, agar UI bisa membedakan segmen terhapus
+   * dari segmen kosong). Dipakai daftar utama & ekspor agar filter
+   * keduanya tidak pernah berbeda.
+   */
+  const resolveSegmentOnlyIds = async (
+    tenantId: string,
+    segmentId: string | undefined,
+  ): Promise<string[] | undefined | null> => {
+    if (!segmentId) return undefined;
+    const memberIds = await listSegmentMemberIds(
+      bundle.db,
+      tenantId,
+      segmentId,
+    );
+    return memberIds ?? null;
+  };
+
   app.get(base, async (c) => {
     const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
     if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
@@ -226,25 +282,24 @@ export function createContactsRoutes(
     if (!query.success) {
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid query parameters");
     }
-    // Fase 13C: filter segmen — keanggotaan diselesaikan evaluator
-    // core lebih dulu; segmen tak dikenal → 404 (bukan daftar kosong,
-    // agar UI bisa membedakan segmen terhapus dari segmen kosong).
-    let onlyIds: string[] | undefined;
-    if (query.data.segmentId) {
-      const memberIds = await listSegmentMemberIds(
-        bundle.db,
-        tenant.id,
-        query.data.segmentId,
-      );
-      if (!memberIds) {
-        return apiError(c, 404, "NOT_FOUND", "Segment not found");
-      }
-      onlyIds = memberIds;
+    const onlyIds = await resolveSegmentOnlyIds(tenant.id, query.data.segmentId);
+    if (onlyIds === null) {
+      return apiError(c, 404, "NOT_FOUND", "Segment not found");
     }
     const result = await listContacts(
       bundle.db,
       { tenantId: tenant.id },
-      { ...query.data, onlyIds },
+      {
+        search: query.data.search,
+        limit: query.data.limit,
+        offset: query.data.offset,
+        stage: query.data.stage,
+        onlyIds,
+        // Daftar utama CRM: kontak akun-sendiri tidak tampil (lihat
+        // header modul). Total ikut tersaring — ia memang hitungan
+        // daftar ini, bukan sensus kontak tenant.
+        excludeSelfChannelContacts: true,
+      },
     );
     const listedIds = result.contacts.map((row) => row.id);
     // Avatar efektif & platform dihitung bersamaan: keduanya query
@@ -301,6 +356,123 @@ export function createContactsRoutes(
     return c.json(body);
   });
 
+  // GET /tenants/:tenantId/contacts/export — unduh CSV berisi
+  // SELURUH kontak yang cocok dengan filter daftar utama yang aktif
+  // (search/segmentId/stage + saringan akun-sendiri), bukan hanya
+  // halaman yang sedang tampil. Didaftarkan sebelum "/:id".
+  app.get(`${base}/export`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const query = ExportContactsQuerySchema.safeParse(c.req.query());
+    if (!query.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid query parameters");
+    }
+    const onlyIds = await resolveSegmentOnlyIds(tenant.id, query.data.segmentId);
+    if (onlyIds === null) {
+      return apiError(c, 404, "NOT_FOUND", "Segment not found");
+    }
+    const rows = await listContactsForExport(
+      bundle.db,
+      { tenantId: tenant.id },
+      {
+        search: query.data.search,
+        stage: query.data.stage,
+        onlyIds,
+        excludeSelfChannelContacts: true,
+      },
+    );
+    const csv = buildContactsCsv(
+      rows.map((row) => ({
+        name: row.name,
+        phone: row.phone,
+        email: row.email,
+        tags: row.tags,
+        pipelineStage: row.pipelineStage,
+        optInEffectiveStatus: effectiveOptInStatus(row),
+      })),
+    );
+    return c.body(csv, 200, {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": 'attachment; filename="contacts.csv"',
+    });
+  });
+
+  // POST /tenants/:tenantId/contacts/import — impor CSV (body JSON
+  // {csv}); jawaban adalah LAPORAN: berapa masuk, baris duplikat
+  // terlewat, baris tidak sah beralasan (mesin di core).
+  app.post(`${base}/import`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = ContactImportRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid import payload");
+    }
+    const result = await importContactsFromCsv(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      parsed.data.csv,
+    );
+    if (result.kind === "too_many_rows") {
+      return apiError(
+        c,
+        422,
+        "CONTACTS_IMPORT_TOO_MANY_ROWS",
+        "CSV file has too many rows",
+      );
+    }
+    return c.json(
+      ContactImportResponseSchema.parse({
+        imported: result.imported,
+        duplicates: result.duplicates,
+        invalid: result.invalid,
+      }),
+    );
+  });
+
+  // POST /tenants/:tenantId/contacts/bulk — satu aksi untuk banyak
+  // kontak. Aksi `delete` destruktif (cascade percakapan+pesan) →
+  // digerbang owner/admin seperti merge; aksi lain boleh semua
+  // member (sejajar PATCH kontak biasa).
+  app.post(`${base}/bulk`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = ContactBulkRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid bulk payload");
+    }
+    if (
+      parsed.data.action === "delete" &&
+      tenant.role !== "owner" &&
+      tenant.role !== "admin"
+    ) {
+      return apiError(c, 403, "FORBIDDEN", "Only workspace owners and admins can delete contacts");
+    }
+    const result = await bulkApplyContactsAction(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      parsed.data,
+    );
+    return c.json(
+      ContactBulkResponseSchema.parse({
+        action: parsed.data.action,
+        succeeded: result.succeeded.length,
+        failed: result.failed,
+      }),
+    );
+  });
+
   app.get(`${base}/:id`, async (c) => {
     const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
     if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
@@ -316,6 +488,40 @@ export function createContactsRoutes(
     ]);
     return c.json(
       serializeContact(contact, avatarUrl, platforms.get(id) ?? []),
+    );
+  });
+
+  // GET /tenants/:tenantId/contacts/:id/conversations — percakapan
+  // milik kontak untuk panel detail. Semua kind dikembalikan apa
+  // adanya (termasuk `channel`); keputusan tautan Inbox ada di UI:
+  // hanya percakapan pesan (private/group) yang boleh ditautkan,
+  // baris channel adalah linimasa dan Inbox menyaringnya keluar.
+  app.get(`${base}/:id/conversations`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    if (!z.string().uuid().safeParse(id).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    }
+    const contact = await getContact(bundle.db, { tenantId: tenant.id }, id);
+    if (!contact) return apiError(c, 404, "NOT_FOUND", "Contact not found");
+    const rows = await listContactConversations(
+      bundle.db,
+      { tenantId: tenant.id },
+      id,
+    );
+    return c.json(
+      ContactConversationListResponseSchema.parse({
+        conversations: rows.map((row) => ({
+          id: row.id,
+          provider: row.provider,
+          kind: row.kind,
+          title: row.title,
+          status: row.status,
+          lastMessageAt: row.lastMessageAt?.toISOString() ?? null,
+          createdAt: row.createdAt.toISOString(),
+        })),
+      }),
     );
   });
 

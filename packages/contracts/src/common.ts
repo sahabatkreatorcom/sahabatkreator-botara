@@ -236,6 +236,9 @@ export const ErrorCodeSchema = z.enum([
   // pengguna, atau kombinasinya tidak sah (konten bermerek privat).
   "POST_PUBLISH_OPTIONS_REQUIRED",
   "POST_PUBLISH_OPTIONS_INVALID",
+  // Gelombang Perbaikan /contacts: berkas impor CSV melewati batas
+  // baris per impor (MAX_IMPORT_ROWS di core).
+  "CONTACTS_IMPORT_TOO_MANY_ROWS",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",
