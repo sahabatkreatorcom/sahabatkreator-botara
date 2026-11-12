@@ -116,7 +116,9 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 //   broadcast_recurrence_occurrences)
 // + 2 tabel Gelombang G11 / migrasi 0034 (outbound_webhook_endpoints,
 //   outbound_webhook_deliveries)
-assert.equal(Number(tablesRes.rows[0].count), 72);
+// + 4 tabel Gelombang G12 / migrasi 0035 (deal_pipelines, deal_stages,
+//   deals, deal_stage_events)
+assert.equal(Number(tablesRes.rows[0].count), 76);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(

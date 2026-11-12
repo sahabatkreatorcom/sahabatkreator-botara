@@ -34,7 +34,7 @@
 --
 -- Isolasi tenant: pola yang sama dengan seluruh tabel ber-tenant_id
 -- (RLS `tenant_isolation` dengan app_tenant_id()). Empat tabel baru
--- → hitungan db verify naik 70 → 74 tabel, 96 → 100 policy.
+-- → hitungan db verify naik 72 → 76 tabel, 99 → 103 policy.
 
 -- ---------------------------------------------------------------------------
 -- tenants.default_currency
