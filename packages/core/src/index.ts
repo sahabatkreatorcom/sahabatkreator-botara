@@ -277,6 +277,7 @@ export {
   normalizeAgentTag,
   resolveAgentLlmProvider,
   runAgentPlayground,
+  runAgentPlaygroundDraft,
   AGENT_DAILY_RESPONSE_CAP,
   AGENT_USAGE_REF_TYPE,
   AGENT_PLAYGROUND_USAGE_REF_TYPE,

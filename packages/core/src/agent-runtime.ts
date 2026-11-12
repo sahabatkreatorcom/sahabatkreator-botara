@@ -1055,22 +1055,30 @@ async function toPlaygroundIntent(
  * Riwayat percakapan berasal dari klien (hanya hidup di browser) dan
  * diperlakukan sebagai konteks uji, bukan data tenant.
  */
-export async function runAgentPlayground(
+/**
+ * Ekor bersama playground: menjalankan SATU lari uji kering untuk
+ * record agent yang SUDAH dimuat/dibangun pemanggil — dipakai
+ * `runAgentPlayground` (agent tersimpan) dan
+ * `runAgentPlaygroundDraft` (agent sintetis di memori). Jalur ini
+ * tidak pernah mengembalikan `agent_not_found`: keberadaan agent
+ * adalah tanggung jawab pemanggil. `draft: true` menandai baris
+ * usage lari draf (meta.draft) agar bisa dibedakan dari lari agent
+ * tersimpan tanpa mengubah refType playground.
+ */
+async function runPlaygroundForAgent(
   db: Database,
   provider: LlmProvider,
   input: {
     tenantId: string;
-    agentId: string;
+    agent: Agent;
     message: string;
     history?: Array<{ role: "user" | "assistant"; content: string }>;
     embeddingProvider?: EmbeddingProvider | null;
+    draft?: boolean;
   },
 ): Promise<AgentPlaygroundOutcome> {
-  const { tenantId, agentId } = input;
+  const { tenantId, agent } = input;
   const ctx = { tenantId };
-
-  const agent = await getAgent(db, ctx, agentId);
-  if (!agent) return { kind: "agent_not_found" };
 
   const runId = crypto.randomUUID();
   const historyMessages: LlmChatMessage[] = (input.history ?? [])
@@ -1123,6 +1131,7 @@ export async function runAgentPlayground(
       tokensOut: usage.tokensOut,
       playground: true,
       mode: agent.mode,
+      ...(input.draft ? { draft: true } : {}),
     };
     if (usage.costUsd !== undefined) {
       meta.costUsd = usage.costUsd;
@@ -1151,4 +1160,77 @@ export async function runAgentPlayground(
     retrieval: draft.retrieval,
     usage,
   };
+}
+
+export async function runAgentPlayground(
+  db: Database,
+  provider: LlmProvider,
+  input: {
+    tenantId: string;
+    agentId: string;
+    message: string;
+    history?: Array<{ role: "user" | "assistant"; content: string }>;
+    embeddingProvider?: EmbeddingProvider | null;
+  },
+): Promise<AgentPlaygroundOutcome> {
+  const agent = await getAgent(db, { tenantId: input.tenantId }, input.agentId);
+  if (!agent) return { kind: "agent_not_found" };
+  return runPlaygroundForAgent(db, provider, {
+    tenantId: input.tenantId,
+    agent,
+    message: input.message,
+    history: input.history,
+    embeddingProvider: input.embeddingProvider,
+  });
+}
+
+/**
+ * Satu lari PLAYGROUND untuk konfigurasi DRAF (gelombang Templat
+ * Instruction): isi formulir buat/edit agent saat ini, sebelum agent
+ * tersimpan. Record agent SINTETIS dibangun di memori saja (id acak,
+ * tidak aktif, tidak pernah ditulis ke tabel `agents`) lalu dijalankan
+ * lewat ekor bersama yang sama persis dengan playground tersimpan —
+ * prompt, retrieval, niat tool, dan jaminan keringnya identik.
+ * Perbedaannya hanya pada metering: baris usage playground untuk lari
+ * draf membawa penanda tambahan `draft: true` di meta. Karena agent
+ * sintetis selalu "ada", `agent_not_found` tidak mungkin di jalur ini.
+ */
+export async function runAgentPlaygroundDraft(
+  db: Database,
+  provider: LlmProvider,
+  input: {
+    tenantId: string;
+    draft: {
+      name?: string;
+      systemPrompt: string;
+      model?: string;
+      mode?: "auto" | "suggest";
+      language?: string | null;
+    };
+    message: string;
+    history?: Array<{ role: "user" | "assistant"; content: string }>;
+    embeddingProvider?: EmbeddingProvider | null;
+  },
+): Promise<AgentPlaygroundOutcome> {
+  const now = new Date();
+  const agent: Agent = {
+    id: crypto.randomUUID(),
+    tenantId: input.tenantId,
+    name: input.draft.name ?? "",
+    systemPrompt: input.draft.systemPrompt,
+    model: input.draft.model ?? "",
+    mode: input.draft.mode ?? "suggest",
+    isActive: false,
+    config: input.draft.language ? { language: input.draft.language } : {},
+    createdAt: now,
+    updatedAt: now,
+  };
+  return runPlaygroundForAgent(db, provider, {
+    tenantId: input.tenantId,
+    agent,
+    message: input.message,
+    history: input.history,
+    embeddingProvider: input.embeddingProvider,
+    draft: true,
+  });
 }
