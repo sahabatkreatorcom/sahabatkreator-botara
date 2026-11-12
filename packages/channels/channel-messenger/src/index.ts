@@ -1599,7 +1599,9 @@ export interface ThreadsProfile {
  * Klien Threads API: publikasi + OAuth connect (BUKAN inbox).
  *
  * Ia berbagi plumbing HTTP Graph dengan MetaGraphClient, tetapi bukan
- * adapter inbox dan tidak punya metode pesan/webhook. Threads memakai
+ * adapter inbox: API Threads tidak menyediakan pesan privat/DM, jadi
+ * kelas ini hanya punya metode konten + balasan/moderasi balasan (G7),
+ * tanpa metode pesan. Threads memakai
  * host `graph.threads.net` dan versi v1.0; tokennya adalah Threads
  * user access token dari aplikasi Threads yang terpisah.
  *
@@ -1641,6 +1643,13 @@ export class ThreadsGraphClient extends GraphHttpClient {
     videoUrl?: string;
     children?: string[];
     isCarouselItem?: boolean;
+    /**
+     * G7 — balasan publik pada media Threads lain: id media yang
+     * dibalas (`reply_to_id`, cakupan `threads_content_publish`).
+     * Container balasan diterbitkan lewat `publishThreadsContainer`
+     * seperti container biasa.
+     */
+    replyToId?: string;
   }): Promise<{ containerId: string }> {
     const payload: Record<string, string | boolean> = {
       media_type: input.mediaType,
@@ -1650,6 +1659,7 @@ export class ThreadsGraphClient extends GraphHttpClient {
     if (input.videoUrl) payload.video_url = input.videoUrl;
     if (input.children) payload.children = input.children.join(",");
     if (input.isCarouselItem) payload.is_carousel_item = true;
+    if (input.replyToId) payload.reply_to_id = input.replyToId;
     const body = await this.postJson<{ id?: string }>(
       `${encodeURIComponent(input.threadsUserId)}/threads`,
       payload,
@@ -1679,6 +1689,24 @@ export class ThreadsGraphClient extends GraphHttpClient {
     );
     if (!body.id) throw new ThreadsGraphError(200, null, "missing_post_id");
     return { providerPostId: body.id };
+  }
+
+  /**
+   * Sembunyikan / tampilkan balasan Threads (G7, moderasi komentar):
+   * `POST /{reply-id}/manage_reply` body { hide: true|false }, cakupan
+   * `threads_manage_replies`. Menyembunyikan balasan juga menyembunyikan
+   * seluruh sub-pohon balasannya (perilaku platform). API Threads TIDAK
+   * punya endpoint pesan privat/DM sama sekali — kelas ini sengaja tidak
+   * menyediakan metode DM.
+   */
+  async manageThreadsReply(input: {
+    replyId: string;
+    hide: boolean;
+  }): Promise<void> {
+    await this.postJson(
+      `${encodeURIComponent(input.replyId)}/manage_reply`,
+      { hide: input.hide },
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -2321,6 +2349,134 @@ export function parseMetaCommentEvents(
             ? new Date(value.created_time * 1000)
             : null,
       });
+    }
+  }
+  return events;
+}
+
+/** Satu event balasan yang dinormalisasi dari payload webhook Threads (G7). */
+export interface ThreadsReplyEvent {
+  /**
+   * Threads user ID pemilik postingan akar (`root_post.owner_id`) —
+   * kunci pemetaan akun Threads yang terhubung. null bila payload tidak
+   * membawanya: tanpa cakupan `threads_read_replies`, platform
+   * menyembunyikan field `root_post`/`replied_to` dari payload, dan
+   * lapisan pemanggil mencatatnya sebagai peristiwa tak-terpetakan
+   * (bukan dibuang diam-diam).
+   */
+  ownerExternalId: string | null;
+  /** Id media balasan di Threads — kunci dedup bersama akun. */
+  providerCommentId: string;
+  /** Id postingan akar (`root_post.id`); null bila field disembunyikan. */
+  mediaId: string | null;
+  /** Id media yang dibalas langsung (`replied_to.id`); null untuk balasan tingkat pertama / field disembunyikan. */
+  parentId: string | null;
+  /**
+   * Username penulis balasan. Payload webhook Threads TIDAK membawa id
+   * pengguna penulis — username adalah satu-satunya identitas penulis
+   * yang tersedia, dan lapisan core memakainya sebagai identitas
+   * eksternal penulis untuk provider ini.
+   */
+  authorUsername: string;
+  /** Isi balasan. */
+  text: string;
+  /** Waktu balasan menurut provider (ISO 8601); null bila absen/rusak. */
+  providerCreatedAt: Date | null;
+}
+
+interface ThreadsReplyValue {
+  id?: string;
+  text?: string;
+  username?: string;
+  timestamp?: string | number;
+  root_post?: { id?: string; owner_id?: string };
+  replied_to?: { id?: string };
+}
+
+interface ThreadsWebhookPayload {
+  values?:
+    | { field?: string; value?: ThreadsReplyValue }
+    | Array<{ field?: string; value?: ThreadsReplyValue }>;
+  entry?: Array<{
+    id?: string;
+    changes?: Array<{ field?: string; value?: ThreadsReplyValue }>;
+  }>;
+}
+
+function toThreadsReplyEvent(
+  value: ThreadsReplyValue,
+  entryExternalId: string | null,
+): ThreadsReplyEvent | null {
+  if (typeof value.id !== "string" || !value.id) return null;
+  if (typeof value.username !== "string" || !value.username) return null;
+  const ownerId =
+    typeof value.root_post?.owner_id === "string" &&
+    value.root_post.owner_id
+      ? value.root_post.owner_id
+      : entryExternalId;
+  let providerCreatedAt: Date | null = null;
+  if (typeof value.timestamp === "string" && value.timestamp) {
+    const parsed = new Date(value.timestamp);
+    providerCreatedAt = Number.isNaN(parsed.getTime()) ? null : parsed;
+  } else if (typeof value.timestamp === "number" && value.timestamp > 0) {
+    providerCreatedAt = new Date(
+      value.timestamp < 1e12 ? value.timestamp * 1000 : value.timestamp,
+    );
+  }
+  return {
+    ownerExternalId: ownerId,
+    providerCommentId: value.id,
+    mediaId:
+      typeof value.root_post?.id === "string" && value.root_post.id
+        ? value.root_post.id
+        : null,
+    parentId:
+      typeof value.replied_to?.id === "string" && value.replied_to.id
+        ? value.replied_to.id
+        : null,
+    authorUsername: value.username,
+    text: typeof value.text === "string" ? value.text : "",
+    providerCreatedAt,
+  };
+}
+
+/**
+ * Menormalkan event BALASAN dari payload webhook Threads (G7, field
+ * langganan `replies`, cakupan `threads_basic` + `threads_read_replies`).
+ * Bentuk resmi payload Threads BERBEDA dari webhook Meta klasik —
+ * datar, bukan entry/changes:
+ *   { app_id, topic, target_id, time, subscription_id,
+ *     values: { field: "replies", value: { id, text, username,
+ *       timestamp, root_post: { id, owner_id }, replied_to: { id } } } }
+ * `values` ditoleransi sebagai objek tunggal maupun array satu elemen.
+ * Bentuk entry/changes (field 'replies') juga diterima secara defensif
+ * — `entry.id` menjadi kunci akun cadangan bila `root_post` absen.
+ * Field selain 'replies' (mis. 'mentions') BUKAN komentar atas postingan
+ * milik akun dan tidak menghasilkan event di sini.
+ */
+export function parseThreadsReplyEvents(
+  payload: unknown,
+): ThreadsReplyEvent[] {
+  if (typeof payload !== "object" || payload === null) return [];
+  const body = payload as ThreadsWebhookPayload;
+  const events: ThreadsReplyEvent[] = [];
+  const valuesList = Array.isArray(body.values)
+    ? body.values
+    : body.values
+      ? [body.values]
+      : [];
+  for (const item of valuesList) {
+    if (item?.field !== "replies" || !item.value) continue;
+    const event = toThreadsReplyEvent(item.value, null);
+    if (event) events.push(event);
+  }
+  for (const entry of body.entry ?? []) {
+    const entryId =
+      typeof entry?.id === "string" && entry.id ? entry.id : null;
+    for (const change of entry?.changes ?? []) {
+      if (change?.field !== "replies" || !change.value) continue;
+      const event = toThreadsReplyEvent(change.value, entryId);
+      if (event) events.push(event);
     }
   }
   return events;
