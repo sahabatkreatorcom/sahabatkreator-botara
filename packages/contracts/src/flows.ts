@@ -36,6 +36,13 @@ import { z } from "zod";
  * Tipe node v1 dan config-nya:
  * - trigger       { kind: "keyword", keywords: string[], match:
  *                   "exact"|"contains" } | { kind: "any_message" }
+ *                   | { kind: "postback", payloads: string[] }
+ *                   | { kind: "quick_reply", payloads: string[] }
+ *                   | { kind: "welcome" } — G5: payload dicocokkan
+ *                   PERSIS ke sinyal pesan (trigger_signal); welcome
+ *                   menyala untuk pesan masuk pertama kontak. Urutan
+ *                   prioritas antar kelas pemicu hidup di
+ *                   packages/core/src/trigger-priority.ts.
  * - send_message  { text } — teks keluar `queued`, variabel {name}.
  * - condition     { predicate: "has_tag", tag }
  *                 | { predicate: "stage_equals", stage }
@@ -304,6 +311,19 @@ export const FlowTriggerConfigSchema = z.discriminatedUnion("kind", [
     match: z.enum(["exact", "contains"]),
   }),
   z.object({ kind: z.literal("any_message") }),
+  // G5: pemicu sinyal — ketukan tombol dicocokkan PERSIS dari payload
+  // yang dibawa pesan (messages.trigger_signal). 'postback' = postback
+  // Meta / callback Telegram; 'quick_reply' = payload quick reply.
+  z.object({
+    kind: z.literal("postback"),
+    payloads: z.array(z.string().min(1).max(255)).min(1).max(20),
+  }),
+  z.object({
+    kind: z.literal("quick_reply"),
+    payloads: z.array(z.string().min(1).max(255)).min(1).max(20),
+  }),
+  // G5: pemicu pesan pertama kontak (sekali per kontak per flow).
+  z.object({ kind: z.literal("welcome") }),
 ]);
 export type FlowTriggerConfig = z.infer<typeof FlowTriggerConfigSchema>;
 

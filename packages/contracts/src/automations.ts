@@ -15,6 +15,36 @@ import { z } from "zod";
 export const AutomationMatchSchema = z.enum(["exact", "contains"]);
 export type AutomationMatch = z.infer<typeof AutomationMatchSchema>;
 
+/**
+ * Jenis pemicu automation (kolom trigger_type di DB):
+ * - 'keyword'     : teks pesan cocok dengan keywords (Fase 2A/2C).
+ * - 'comment'     : teks komentar publik di satu akun (Fase 10B).
+ * - 'postback'    : ketukan tombol postback (Meta) / callback_query
+ *                   (Telegram) — payload dicocokkan PERSIS (G5).
+ * - 'quick_reply' : ketukan quick reply yang membawa payload (Meta
+ *                   quick reply, balasan tombol/list WhatsApp) (G5).
+ * - 'welcome'     : pesan MASUK PERTAMA seorang kontak (G5).
+ * Kolom `kind` tetap keluarga AKSI ('keyword' balasan langsung,
+ * 'sequence' pendaftaran rangkaian, 'comment' aturan komentar) —
+ * pemicu dan aksi ortogonal sejak G5.
+ */
+export const AutomationTriggerTypeSchema = z.enum([
+  "keyword",
+  "comment",
+  "postback",
+  "quick_reply",
+  "welcome",
+]);
+export type AutomationTriggerType = z.infer<
+  typeof AutomationTriggerTypeSchema
+>;
+
+/** Payload tombol untuk pemicu postback/quick_reply: 1–10 string mesin. */
+const AutomationPayloadsSchema = z
+  .array(z.string().trim().min(1).max(255))
+  .min(1)
+  .max(10);
+
 export const AutomationKindSchema = z.enum([
   "keyword",
   "sequence",
@@ -107,10 +137,61 @@ export type CreateCommentAutomationRequest = z.infer<
   typeof CreateCommentAutomationRequestSchema
 >;
 
+/**
+ * Aturan pemicu SINYAL (G5): ketukan tombol postback / quick reply.
+ * `payloads` dicocokkan PERSIS (case-sensitive) ke payload yang dibawa
+ * pesan (messages.trigger_signal). Aksi mengikuti `kind`:
+ * 'keyword' = balasan langsung (`text` wajib), 'sequence' =
+ * pendaftaran rangkaian (`steps` wajib). Tanpa keywords/match —
+ * payload adalah string mesin, bukan teks manusia.
+ */
+export const CreateSignalAutomationRequestSchema = z
+  .object({
+    triggerType: z.enum(["postback", "quick_reply"]),
+    kind: z.enum(["keyword", "sequence"]).default("keyword"),
+    name: AutomationNameSchema,
+    payloads: AutomationPayloadsSchema,
+    /** Wajib bila kind='keyword': isi balasan langsung. */
+    text: z.string().trim().min(1).max(4096).optional(),
+    /** Wajib bila kind='sequence': 1–10 langkah rangkaian. */
+    steps: z.array(AutomationStepInputSchema).min(1).max(10).optional(),
+  })
+  .refine((v) => (v.kind === "keyword" ? !!v.text : !!v.steps), {
+    message: "text is required for kind='keyword'; steps for kind='sequence'",
+  });
+export type CreateSignalAutomationRequest = z.infer<
+  typeof CreateSignalAutomationRequestSchema
+>;
+
+/**
+ * Aturan WELCOME (G5): menyala untuk PESAN MASUK PERTAMA seorang
+ * kontak — sekali per kontak per aturan (riwayat run adalah
+ * penjaganya). Tanpa syarat pencocokan tambahan; aksi mengikuti
+ * `kind` seperti aturan sinyal.
+ */
+export const CreateWelcomeAutomationRequestSchema = z
+  .object({
+    triggerType: z.literal("welcome"),
+    kind: z.enum(["keyword", "sequence"]).default("keyword"),
+    name: AutomationNameSchema,
+    /** Wajib bila kind='keyword': isi balasan sambutan. */
+    text: z.string().trim().min(1).max(4096).optional(),
+    /** Wajib bila kind='sequence': 1–10 langkah rangkaian. */
+    steps: z.array(AutomationStepInputSchema).min(1).max(10).optional(),
+  })
+  .refine((v) => (v.kind === "keyword" ? !!v.text : !!v.steps), {
+    message: "text is required for kind='keyword'; steps for kind='sequence'",
+  });
+export type CreateWelcomeAutomationRequest = z.infer<
+  typeof CreateWelcomeAutomationRequestSchema
+>;
+
 export const CreateAutomationRequestSchema = z.union([
   CreateKeywordAutomationRequestSchema,
   CreateSequenceAutomationRequestSchema,
   CreateCommentAutomationRequestSchema,
+  CreateSignalAutomationRequestSchema,
+  CreateWelcomeAutomationRequestSchema,
 ]);
 export type CreateAutomationRequest = z.infer<
   typeof CreateAutomationRequestSchema
@@ -120,6 +201,8 @@ export const UpdateAutomationRequestSchema = z
   .object({
     name: z.string().trim().min(1).max(255).optional(),
     keywords: AutomationKeywordsSchema.optional(),
+    /** G5 — hanya bermakna untuk aturan triggerType postback/quick_reply. */
+    payloads: AutomationPayloadsSchema.optional(),
     match: AutomationMatchSchema.optional(),
     text: z.string().trim().min(1).max(4096).optional(),
     isActive: z.boolean().optional(),
@@ -138,10 +221,12 @@ export type UpdateAutomationRequest = z.infer<
 export const AutomationResponseSchema = z.object({
   id: z.string().uuid(),
   name: z.string(),
-  triggerType: z.enum(["keyword", "comment"]),
+  triggerType: AutomationTriggerTypeSchema,
   /** Jenis automation (Fase 2C): 'keyword' (balasan langsung) | 'sequence' | 'comment' (Fase 10B). */
   kind: AutomationKindSchema,
   keywords: z.array(z.string()),
+  /** G5: payload tombol untuk triggerType postback/quick_reply; kosong untuk pemicu lain. */
+  payloads: z.array(z.string()),
   match: AutomationMatchSchema,
   actionType: z.literal("send_message"),
   /** Isi balasan untuk kind='keyword'; untuk sequence selalu string kosong. */
