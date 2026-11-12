@@ -1201,6 +1201,36 @@ yang harus dilakukan pemilik bila ingin melanjutkan.
   ≥2.000 (verifikasi bisnis) agar nomor memenuhi syarat saat
   program suara diputuskan.
 
+## Fase Susulan S1 — Alur Persetujuan Postingan (2026-11-13)
+
+**Tidak ada tindakan pemilik.** Fitur ini internal (tanpa kredensial,
+izin platform, atau persetujuan eksternal baru): sakelar per tenant
+"Persetujuan wajib sebelum terbit" di Pengaturan → Jadwal &
+Persetujuan Postingan, bawaan **nonaktif** sehingga perilaku tenant
+yang ada tidak berubah. Catatan perilaku yang perlu diketahui
+pemilik platform:
+
+- Bila sakelar aktif, postingan terjadwal yang belum berstatus
+  **disetujui** TIDAK terbit pada jam tayangnya: worker menandainya
+  gagal berkode `post_approval_required` (terlihat di daftar
+  postingan + riwayat keputusan), bukan menahannya diam-diam.
+  Penjadwalan sendiri tetap diizinkan sebelum persetujuan.
+- Persetujuan dinilai pada saat job penerbitan berjalan: postingan
+  yang disetujui sesudah jam tayang lewat tetapi sebelum job-nya
+  diproses tetap terbit. Yang sudah terlanjur terblokir TIDAK terbit
+  otomatis sesudah disetujui — pembuat menjadwalkan ulang dengan
+  tombol Coba lagi (keputusan sadar, mencegah terbitan kejutan).
+- Penyetuju adalah owner/admin tenant. Pembuat tidak boleh
+  menyetujui postingannya sendiri bila masih ada owner/admin lain;
+  pengecualian jujur: tenant yang hanya punya SATU owner/admin
+  boleh menyetujui sendiri agar tidak terkunci dari menerbitkan.
+- Penolakan dan permintaan revisi WAJIB menyertakan catatan yang
+  tampil ke pembuat; penolakan/perubahan pada postingan terjadwal
+  menurunkannya kembali ke draft. Menyunting isi postingan mengatur
+  ulang persetujuannya ke draft (yang disetujui harus sama dengan
+  yang terbit). Untuk grup multi-target, satu pengajuan dan satu
+  keputusan berlaku untuk seluruh anggota grup.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
