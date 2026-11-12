@@ -353,7 +353,7 @@ export function DealsPage({ t, locale }: DealsPageProps) {
       <div className="mt-5 flex flex-wrap items-end gap-3">
         <div>
           <label className="block text-xs font-medium text-muted" htmlFor="deal-pipeline-select">
-            Pipeline
+            {t("deals.pipelineLabel")}
           </label>
           <select
             id="deal-pipeline-select"

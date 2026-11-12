@@ -3002,6 +3002,7 @@ export const id: Resources = {
     subtitle: "Pipeline penjualan workspace ini — satu kontak boleh punya banyak deal, masing-masing dengan nilai dan mata uangnya sendiri.",
     newDeal: "Deal baru",
     newPipeline: "Pipeline baru",
+    pipelineLabel: "Pipeline",
     pipelineNameLabel: "Nama pipeline",
     pipelineNamePlaceholder: "cth. Penjualan online",
     createPipeline: "Buat pipeline",

@@ -3003,6 +3003,7 @@ export const en = {
     subtitle: "Sales pipelines for this workspace — a contact can have many deals, each with its own value and currency.",
     newDeal: "New deal",
     newPipeline: "New pipeline",
+    pipelineLabel: "Pipeline",
     pipelineNameLabel: "Pipeline name",
     pipelineNamePlaceholder: "e.g. Online sales",
     createPipeline: "Create pipeline",
