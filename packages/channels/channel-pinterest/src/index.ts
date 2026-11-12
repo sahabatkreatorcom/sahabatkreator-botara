@@ -6,13 +6,17 @@
  * di paket ini, dan paket ini SENGAJA bukan `ChannelAdapter`. Satu
  * post = satu Pin pada SATU board milik akun yang terhubung.
  *
- * Keputusan board (disengaja, konsisten dengan parameter platform
- * yang dibawakan di tempat lain — mis. kategori bawaan YouTube):
- * board tujuan adalah board PERTAMA akun menurut `GET /v5/boards`.
- * Model post tidak punya konsep board dan UI tidak menambah pemilih
- * board gelombang ini; pemilihan board per postingan adalah
- * pengembangan lanjutan. Akun tanpa board sama sekali gagal aman
- * dengan `pinterest_board_missing` SEBELUM Pin dibuat.
+ * Keputusan board: Pin WAJIB masuk sebuah board (`board_id` pada
+ * `POST /v5/pins` — Pinterest tidak mengenal Pin tanpa board).
+ * Pemilik workspace bisa memilih board tujuan PER AKUN di Channels
+ * (pemilih board; pilihan tersimpan di kolom akun + dibuatkan dari
+ * pemilih yang sama lewat `POST /v5/boards`). Penerbit memutuskan
+ * board lewat `resolvePinBoard`: pilihan tersimpan yang masih ada
+ * di daftar board akun menang; pilihan yang sudah hilang di sisi
+ * Pinterest jatuh ke board PERTAMA akun (dengan penanda agar
+ * pemanggil mencatatnya); tanpa pilihan → board pertama seperti
+ * perilaku awal. Akun tanpa board sama sekali gagal aman dengan
+ * `pinterest_board_missing` SEBELUM Pin dibuat.
  *
  * Media Pin — dua jalur `media_source`, dipilih dari MIME gambar:
  * - JPEG/PNG → `image_base64`: biner dibaca dari object store privat
@@ -37,6 +41,9 @@
  */
 
 export const DEFAULT_PINTEREST_API_BASE = "https://api.pinterest.com";
+
+/** Batas halaman daftar board yang diikuti `listBoards` (25/halaman). */
+const MAX_BOARD_PAGES = 10;
 
 /** Batas judul Pin (karakter) — ditegakkan capability lewat maxTitle di core. */
 export const PINTEREST_TITLE_MAX = 100;
@@ -84,6 +91,31 @@ export interface PinterestBoard {
   name: string | null;
 }
 
+/**
+ * Privasi board yang boleh dibuat dari pemilih board. API v5 juga
+ * mengenal `SECRET`, tetapi board rahasia menuntut scope terpisah
+ * (`boards:write_secret`) yang SENGAJA tidak diminta connect kita —
+ * jadi SECRET tidak ditawarkan di sini.
+ */
+export type PinterestBoardPrivacy = "PUBLIC" | "PROTECTED";
+
+/** Hasil keputusan board tujuan satu Pin (lihat `resolvePinBoard`). */
+export interface PinterestPinBoardResolution {
+  /** Board tujuan final; null bila akun tidak punya board sama sekali. */
+  boardId: string | null;
+  /** Asal boardId: pilihan tersimpan pemilik / board pertama / tidak ada. */
+  source: "chosen" | "first" | "missing";
+  /**
+   * true bila ada pilihan tersimpan tetapi board-nya tidak ditemukan
+   * lagi di daftar board akun (dihapus/diubah di Pinterest) sehingga
+   * keputusan jatuh ke board pertama — pemanggil WAJIB mencatatnya
+   * secara jujur, bukan diam-diam.
+   */
+  preferredMissing: boolean;
+  /** Daftar board akun yang menjadi dasar keputusan. */
+  boards: PinterestBoard[];
+}
+
 /** Hasil exchange/refresh token OAuth Pinterest. */
 export interface PinterestOAuthTokenResult {
   accessToken: string;
@@ -109,6 +141,13 @@ interface PinterestErrorBody {
 
 interface BoardsResponse {
   items?: Array<{ id?: unknown; name?: unknown }>;
+  /** Penanda halaman berikutnya daftar board API v5; kosong = terakhir. */
+  bookmark?: unknown;
+}
+
+interface CreateBoardResponse {
+  id?: unknown;
+  name?: unknown;
 }
 
 interface CreatePinResponse {
@@ -292,17 +331,37 @@ export class PinterestClient {
     };
   }
 
-  /** Daftar board milik akun (satu halaman cukup untuk board bawaan). */
+  /**
+   * Daftar board milik akun — mengikuti paginasi `bookmark` API v5
+   * sampai habis, dibatasi MAX_BOARD_PAGES halaman agar akun dengan
+   * board sangat banyak tidak memicu panggilan tanpa batas. Urutan
+   * mengikuti urutan provider (board pertama daftar = board pertama
+   * akun, dasar fallback penerbit sejak Gelombang 3).
+   */
   async listBoards(accessToken: string): Promise<PinterestBoard[]> {
-    const body = (await this.request(accessToken, "/v5/boards?page_size=25", {
-      method: "GET",
-    })) as BoardsResponse;
-    return (body.items ?? [])
-      .filter((item) => typeof item.id === "string")
-      .map((item) => ({
-        id: item.id as string,
-        name: typeof item.name === "string" ? item.name : null,
-      }));
+    const boards: PinterestBoard[] = [];
+    let bookmark: string | null = null;
+    for (let page = 0; page < MAX_BOARD_PAGES; page += 1) {
+      const path = bookmark
+        ? `/v5/boards?page_size=25&bookmark=${encodeURIComponent(bookmark)}`
+        : "/v5/boards?page_size=25";
+      const body = (await this.request(accessToken, path, {
+        method: "GET",
+      })) as BoardsResponse;
+      for (const item of body.items ?? []) {
+        if (typeof item.id !== "string") continue;
+        boards.push({
+          id: item.id,
+          name: typeof item.name === "string" ? item.name : null,
+        });
+      }
+      bookmark =
+        typeof body.bookmark === "string" && body.bookmark
+          ? body.bookmark
+          : null;
+      if (!bookmark) break;
+    }
+    return boards;
   }
 
   /**
@@ -313,6 +372,89 @@ export class PinterestClient {
   async resolveDefaultBoardId(accessToken: string): Promise<string | null> {
     const boards = await this.listBoards(accessToken);
     return boards[0]?.id ?? null;
+  }
+
+  /**
+   * Putuskan board tujuan SATU Pin dari pilihan tersimpan pemilik
+   * (per akun, dari pemilih board Channels):
+   * - pilihan masih ada di daftar board akun → pakai pilihan itu;
+   * - pilihan tersimpan tetapi sudah hilang di Pinterest → jatuh ke
+   *   board pertama dengan `preferredMissing: true` (pemanggil
+   *   mencatatnya — keputusan tidak boleh senyap);
+   * - tanpa pilihan → board pertama (perilaku awal Gelombang 3);
+   * - akun tanpa board → `boardId: null` (pemanggil memetakannya
+   *   ke `pinterest_board_missing`).
+   */
+  async resolvePinBoard(
+    accessToken: string,
+    preferredBoardId: string | null,
+  ): Promise<PinterestPinBoardResolution> {
+    const boards = await this.listBoards(accessToken);
+    if (boards.length === 0) {
+      return {
+        boardId: null,
+        source: "missing",
+        preferredMissing: Boolean(preferredBoardId),
+        boards,
+      };
+    }
+    if (preferredBoardId) {
+      const chosen = boards.find((board) => board.id === preferredBoardId);
+      if (chosen) {
+        return {
+          boardId: chosen.id,
+          source: "chosen",
+          preferredMissing: false,
+          boards,
+        };
+      }
+      return {
+        boardId: boards[0]!.id,
+        source: "first",
+        preferredMissing: true,
+        boards,
+      };
+    }
+    return {
+      boardId: boards[0]!.id,
+      source: "first",
+      preferredMissing: false,
+      boards,
+    };
+  }
+
+  /**
+   * Buat board baru milik akun (`POST /v5/boards`, scope
+   * `boards:write` yang sudah diminta connect). Badan mengikuti
+   * bentuk resmi API v5: `name` wajib; `description` opsional
+   * (diabaikan bila kosong); `privacy` PUBLIC/PROTECTED — SECRET
+   * tidak ditawarkan karena scope-nya tidak kita minta. Board yang
+   * baru dibuat langsung bisa dipilih sebagai board tujuan.
+   */
+  async createBoard(
+    accessToken: string,
+    input: {
+      name: string;
+      description?: string | undefined;
+      privacy?: PinterestBoardPrivacy | undefined;
+    },
+  ): Promise<PinterestBoard> {
+    const description = input.description?.trim();
+    const body = (await this.request(accessToken, "/v5/boards", {
+      method: "POST",
+      body: {
+        name: input.name,
+        ...(description ? { description } : {}),
+        privacy: input.privacy ?? "PUBLIC",
+      },
+    })) as CreateBoardResponse;
+    if (typeof body.id !== "string" || !body.id) {
+      throw new PinterestApiError(201, "missing_board_id");
+    }
+    return {
+      id: body.id,
+      name: typeof body.name === "string" ? body.name : input.name,
+    };
   }
 
   /** Buat Pin; mengembalikan id Pin yang menjadi providerMessageId. */
