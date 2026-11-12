@@ -1,5 +1,7 @@
 import { and, eq, inArray, ne } from "drizzle-orm";
 import {
+  channelIdentities,
+  conversations,
   messageReactions,
   messages,
   type Database,
@@ -164,6 +166,82 @@ async function setActorReactionTx(
       emoji: input.emoji,
     })
     .onConflictDoNothing();
+}
+
+export interface ReactionTarget {
+  messageId: string;
+  conversationId: string;
+  /** Provider percakapan (whatsapp, telegram, …). */
+  provider: string;
+  channelAccountId: string;
+  /** Id pesan di provider (mentah, sesuai yang disimpan ingest). */
+  providerMessageId: string | null;
+  /** Alamat chat provider percakapan (Telegram chat.id); null bila tak ada. */
+  providerChatId: string | null;
+  /**
+   * Id eksternal kontak pada akun channel ini (wa_id untuk WhatsApp —
+   * alamat `to` reaksi Cloud API); null bila identitas tak ditemukan.
+   */
+  contactExternalId: string | null;
+}
+
+/**
+ * Target pengiriman reaksi untuk lapisan API: pesan + percakapan +
+ * alamat provider-nya dalam SATU kueri tenant. Null bila pesan bukan
+ * milik tenant ini.
+ */
+export async function getReactionTarget(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  messageId: string,
+): Promise<ReactionTarget | null> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const [row] = await tx
+      .select({
+        messageId: messages.id,
+        conversationId: messages.conversationId,
+        provider: conversations.provider,
+        channelAccountId: conversations.channelAccountId,
+        providerMessageId: messages.providerMessageId,
+        providerChatId: conversations.providerChatId,
+        contactId: conversations.contactId,
+      })
+      .from(messages)
+      .innerJoin(
+        conversations,
+        eq(messages.conversationId, conversations.id),
+      )
+      .where(
+        and(
+          eq(messages.tenantId, ctx.tenantId),
+          eq(messages.id, messageId),
+        ),
+      )
+      .limit(1);
+    if (!row) return null;
+
+    const [identity] = await tx
+      .select({ externalUserId: channelIdentities.externalUserId })
+      .from(channelIdentities)
+      .where(
+        and(
+          eq(channelIdentities.tenantId, ctx.tenantId),
+          eq(channelIdentities.contactId, row.contactId),
+          eq(channelIdentities.channelAccountId, row.channelAccountId),
+        ),
+      )
+      .limit(1);
+
+    return {
+      messageId: row.messageId,
+      conversationId: row.conversationId,
+      provider: row.provider,
+      channelAccountId: row.channelAccountId,
+      providerMessageId: row.providerMessageId,
+      providerChatId: row.providerChatId,
+      contactExternalId: identity?.externalUserId ?? null,
+    };
+  });
 }
 
 export type ApplyUserReactionResult =

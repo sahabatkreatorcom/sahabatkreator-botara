@@ -10,6 +10,7 @@ import {
   PinterestBoardSelectRequestSchema,
   PinterestBoardsResponseSchema,
   TrashChannelRequestSchema,
+  WhatsAppNumberHealthResponseSchema,
   type ChannelAccountResponse,
 } from "@sahabat-kreator/contracts";
 import {
@@ -642,6 +643,7 @@ export function createChannelsRoutes(
     app.get(`${base}/:channelId/pinterest-boards`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.put(`${base}/:channelId/pinterest-board`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:channelId/pinterest-boards`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/:channelId/whatsapp-health`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
   }
 
@@ -989,6 +991,88 @@ export function createChannelsRoutes(
       );
     } catch (err) {
       return pinterestBoardsUnavailable(c, err);
+    }
+  });
+
+  /**
+   * Kesehatan nomor WhatsApp (G13 butir 5): snapshot LANGSUNG dari
+   * Graph saat diminta kartu Saluran — rating kualitas + tingkatan
+   * batas pesan nomor ini. Bukan data simpanan dan tidak di-cache:
+   * `fetchedAt` menyatakan waktu ambilnya. Keadaan tidak tersedia
+   * (bukan WhatsApp / belum terhubung / Graph menolak) dikembalikan
+   * sebagai available:false + errorCode aman — BUKAN error HTTP —
+   * karena kartu tetap harus bisa dirender. Baca untuk semua member
+   * (data operasional akun, tanpa rahasia; token tidak pernah keluar).
+   */
+  app.get(`${base}/:channelId/whatsapp-health`, async (c) => {
+    const tenant = await resolveTenantForUser(
+      bundle,
+      c.req.param("tenantId"),
+      c.get("appUser").id,
+    );
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const channelId = c.req.param("channelId");
+    if (!channelId || !z.string().uuid().safeParse(channelId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Channel not found");
+    }
+    const fetchedAt = new Date().toISOString();
+    const unavailable = (errorCode: string) =>
+      c.json(
+        WhatsAppNumberHealthResponseSchema.parse({
+          available: false,
+          qualityRating: null,
+          messagingLimitTier: null,
+          throughputLevel: null,
+          nameStatus: null,
+          codeVerificationStatus: null,
+          errorCode,
+          fetchedAt,
+        }),
+      );
+    const account = await getChannelAccount(
+      bundle.db,
+      { tenantId: tenant.id },
+      channelId,
+    );
+    if (!account) return apiError(c, 404, "NOT_FOUND", "Channel not found");
+    if (account.provider !== "whatsapp") return unavailable("not_whatsapp");
+    if (account.status !== "connected" || !account.accessTokenEncrypted) {
+      return unavailable("whatsapp_not_connected");
+    }
+    if (!opts.channelTokenSecret) return unavailable("credentials_unavailable");
+    const token = decryptChannelSecret(
+      opts.channelTokenSecret,
+      account.accessTokenEncrypted,
+    );
+    if (!token) return unavailable("credentials_unavailable");
+    try {
+      const client = new WhatsAppCloudClient({
+        baseUrl: opts.metaApiBase,
+        apiVersion: account.graphApiVersion ?? META_GRAPH_API_VERSION,
+        accessToken: token,
+      });
+      const health = await client.getPhoneNumberHealth(account.externalId);
+      return c.json(
+        WhatsAppNumberHealthResponseSchema.parse({
+          available: true,
+          qualityRating: health.qualityRating,
+          messagingLimitTier: health.messagingLimitTier,
+          throughputLevel: health.throughputLevel,
+          nameStatus: health.nameStatus,
+          codeVerificationStatus: health.codeVerificationStatus,
+          errorCode: null,
+          fetchedAt,
+        }),
+      );
+    } catch (err) {
+      const code =
+        err instanceof WhatsAppGraphError && err.graphCode !== null
+          ? `meta_graph_${err.graphCode}`
+          : "meta_graph_error";
+      console.error(
+        `[channels] kesehatan nomor WhatsApp ${account.id} gagal (${code})`,
+      );
+      return unavailable(code);
     }
   });
 

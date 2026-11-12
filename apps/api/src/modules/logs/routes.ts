@@ -93,6 +93,14 @@ function serializeFailedMessage(
     contactName: m.contactName,
     contentPreview: m.contentPreview,
     errorCode: m.errorCode,
+    // G13 butir 6: detail teknis (deskripsi Graph + fbtrace) ikut tampil.
+    errorDetail: m.errorDetail
+      ? {
+          description: m.errorDetail.description ?? null,
+          subcode: m.errorDetail.subcode ?? null,
+          fbtraceId: m.errorDetail.fbtraceId ?? null,
+        }
+      : null,
     createdAt: m.createdAt.toISOString(),
   });
 }

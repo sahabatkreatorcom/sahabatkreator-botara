@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "@sahabat-kreator/ai": "workspace:*",
+    "@sahabat-kreator/channel-core": "workspace:*",
     "@sahabat-kreator/channel-google-business": "workspace:*",
     "@sahabat-kreator/channel-bluesky": "workspace:*",
     "@sahabat-kreator/channel-linkedin": "workspace:*",

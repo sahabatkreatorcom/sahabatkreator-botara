@@ -191,11 +191,13 @@ export { getReplyTimeReport, medianSeconds } from "./reply-times";
 export {
   applyUserReaction,
   contactActorKey,
+  getReactionTarget,
   recordContactReaction,
   summarizeMessageReactions,
   userActorKey,
   type ApplyUserReactionResult,
   type MessageReactionSummary,
+  type ReactionTarget,
 } from "./reactions";
 export {
   listConversations,

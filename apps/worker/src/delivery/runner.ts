@@ -7,6 +7,7 @@ import {
   markOutboundMessageSent,
   recordIntegrationLog,
 } from "@sahabat-kreator/core";
+import { GraphApiError } from "@sahabat-kreator/channel-core";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 
 /**
@@ -240,12 +241,26 @@ export function startDeliveryPoller<D extends QueuedDeliveryBase>(
           console.error(
             `[${spec.name}] pengiriman pesan ${delivery.messageId} gagal: ${code}${detail}`,
           );
+          // G13 butir 6: error Graph membawa detail teknis (deskripsi
+          // resmi + subkode + fbtrace_id) — simpan ke pesan agar panel
+          // pesan gagal menampilkannya sebagai detail teknis di
+          // samping penjelasan bahasa awam dari kode. Error non-Graph
+          // (Telegram/jaringan) tidak punya detail semacam ini.
+          const errorDetail =
+            err instanceof GraphApiError
+              ? {
+                  description: err.description,
+                  subcode: err.graphSubcode,
+                  fbtraceId: err.fbtraceId,
+                }
+              : undefined;
           await markOutboundMessageFailed(
             db,
             ctx,
             delivery.messageId,
             `${spec.name}-poller`,
             code,
+            errorDetail,
           );
           await logOut(delivery, "failed", code);
           await nudgeStatus("message.failed");

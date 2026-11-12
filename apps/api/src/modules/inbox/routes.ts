@@ -6,16 +6,23 @@ import {
   ConversationResponseSchema,
   ConversationStatusSchema,
   MessageListResponseSchema,
+  MessageReactionResponseSchema,
+  PROVIDER_REACTION_SUPPORTED,
   SendMessageRequestSchema,
   SendMediaMessageRequestSchema,
   SendTemplateMessageRequestSchema,
   SetAgentEnabledRequestSchema,
+  SetMessageReactionRequestSchema,
   UpdateConversationStatusRequestSchema,
   type ConversationResponse,
 } from "@sahabat-kreator/contracts";
 import {
+  applyUserReaction,
   assignConversation,
   computeMessagingWindow,
+  decryptChannelSecret,
+  getChannelAccount,
+  getReactionTarget,
   listContactPhotoFetchCandidates,
   listConversations,
   listMessagesPage,
@@ -28,8 +35,14 @@ import {
   queueTemplateMessage,
   setConversationAgentEnabled,
   setConversationStatus,
+  summarizeMessageReactions,
   type ConversationWithSummary,
 } from "@sahabat-kreator/core";
+import { META_GRAPH_API_VERSION } from "@sahabat-kreator/config";
+import {
+  WhatsAppCloudClient,
+  WhatsAppGraphError,
+} from "@sahabat-kreator/channel-whatsapp";
 import type { RealtimePublisher } from "@sahabat-kreator/queue";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
@@ -114,10 +127,23 @@ const ListMessagesQuerySchema = z.object({
  * sedang terhubung. Pengunjung offline tetap `queued` sampai reconnect.
  * Wajib sesi + membership (pola Fase 1B/1D).
  */
+/** Opsi pengiriman reaksi keluar (G13 butir 11) — pola opsi modul lain. */
+export interface InboxReactionOptions {
+  /** Material kunci enkripsi kredensial channel (env CHANNEL_TOKEN_SECRET). */
+  channelTokenSecret?: string;
+  /** Base URL Graph API (env META_API_BASE; default graph.facebook.com). */
+  metaApiBase?: string;
+  /** Base URL Bot API (env TELEGRAM_API_BASE; default api.telegram.org). */
+  telegramApiBase?: string;
+  /** fetch pengganti untuk uji; bawaan fetch global. */
+  fetchImpl?: typeof fetch;
+}
+
 export function createInboxRoutes(
   bundle: AuthBundle | null,
   publisher?: RealtimePublisher | null,
   photoBackfillOpts?: ContactPhotoBackfillOptions,
+  reactionOpts: InboxReactionOptions = {},
 ) {
   const app = new Hono<{ Variables: AppVariables }>();
   const base = "/tenants/:tenantId/conversations";
@@ -131,6 +157,7 @@ export function createInboxRoutes(
     app.post(`${base}/:id/media`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.patch(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/:id/agent`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/:id/messages/:messageId/reaction`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     return app;
   }
 
@@ -332,8 +359,18 @@ export function createInboxRoutes(
     // lewat core langsung dan tidak menandai terbaca. Pemuatan halaman
     // lama (`before`) tetap dihitung membaca — utasnya sama.
     await markConversationRead(bundle.db, { tenantId: tenant.id }, id);
+    // G13 butir 11: tempel ringkasan reaksi per pesan (satu kueri
+    // agregat core untuk seluruh halaman — bukan N+1).
+    const reactionMap = await summarizeMessageReactions(
+      bundle.db,
+      { tenantId: tenant.id },
+      page.messages.map((m) => m.id),
+      c.get("appUser").id,
+    );
     const body = MessageListResponseSchema.parse({
-      messages: page.messages.map(serializeMessage),
+      messages: page.messages.map((m) =>
+        serializeMessage({ ...m, reactions: reactionMap.get(m.id) ?? [] }),
+      ),
       hasMore: page.hasMore,
     });
     return c.json(body);
@@ -717,6 +754,205 @@ export function createInboxRoutes(
       return apiError(c, 404, "NOT_FOUND", "Conversation not found");
     }
     return respondWithConversation(c, tenant.id, id);
+  });
+
+  /**
+   * G13 butir 11: tetapkan reaksi emoji sesi ini pada satu pesan.
+   * Urutan yang jujur: gerbang kemampuan provider (kontrak
+   * PROVIDER_REACTION_SUPPORTED) → kirim ke provider → SIMPAN lokal
+   * hanya sesudah provider menerima. Kegagalan provider = 502 dan
+   * tidak ada baris reaksi yang lahir, agar UI tidak pernah
+   * menampilkan reaksi yang tidak benar-benar terkirim.
+   * Semantik toggle: emoji sama dengan reaksi aktif saya = cabut;
+   * `emoji: null` = cabut.
+   */
+  app.post(`${base}/:id/messages/:messageId/reaction`, async (c) => {
+    const appUser = c.get("appUser");
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), appUser.id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const id = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    if (
+      !z.string().uuid().safeParse(id).success ||
+      !z.string().uuid().safeParse(messageId).success
+    ) {
+      return apiError(c, 404, "NOT_FOUND", "Message not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = SetMessageReactionRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid reaction payload");
+    }
+
+    const target = await getReactionTarget(
+      bundle.db,
+      { tenantId: tenant.id },
+      messageId,
+    );
+    if (!target || target.conversationId !== id) {
+      return apiError(c, 404, "NOT_FOUND", "Message not found");
+    }
+    if (!PROVIDER_REACTION_SUPPORTED[target.provider]) {
+      return apiError(
+        c,
+        422,
+        "REACTION_NOT_SUPPORTED",
+        "This provider does not support sending reactions",
+      );
+    }
+
+    // Toggle: menetapkan emoji yang sama dengan yang aktif = mencabut.
+    const currentMap = await summarizeMessageReactions(
+      bundle.db,
+      { tenantId: tenant.id },
+      [messageId],
+      appUser.id,
+    );
+    const mineEmoji =
+      currentMap.get(messageId)?.find((r) => r.mine)?.emoji ?? null;
+    const effective =
+      parsed.data.emoji !== null && parsed.data.emoji === mineEmoji
+        ? null
+        : parsed.data.emoji;
+
+    const account = await getChannelAccount(
+      bundle.db,
+      { tenantId: tenant.id },
+      target.channelAccountId,
+    );
+    if (!account?.accessTokenEncrypted || !reactionOpts.channelTokenSecret) {
+      return apiError(
+        c,
+        503,
+        "REACTION_UNAVAILABLE",
+        "Channel credentials are not available for reaction delivery",
+      );
+    }
+    const token = decryptChannelSecret(
+      reactionOpts.channelTokenSecret,
+      account.accessTokenEncrypted,
+    );
+    if (!token) {
+      return apiError(
+        c,
+        503,
+        "REACTION_UNAVAILABLE",
+        "Channel credentials could not be decrypted",
+      );
+    }
+
+    try {
+      if (target.provider === "whatsapp") {
+        if (!target.providerMessageId || !target.contactExternalId) {
+          return apiError(
+            c,
+            422,
+            "REACTION_TARGET_UNADDRESSABLE",
+            "The message has no provider address for a reaction",
+          );
+        }
+        // Id tersimpan majemuk meta:<phone_number_id>:<wamid> (pola 7A);
+        // Cloud API hanya mau wamid-nya.
+        const raw = target.providerMessageId;
+        const wamid = raw.startsWith("meta:")
+          ? raw.split(":").slice(2).join(":")
+          : raw;
+        const client = new WhatsAppCloudClient({
+          baseUrl: reactionOpts.metaApiBase,
+          apiVersion: account.graphApiVersion ?? META_GRAPH_API_VERSION,
+          accessToken: token,
+          fetchImpl: reactionOpts.fetchImpl,
+        });
+        await client.sendReaction({
+          phoneNumberId: account.externalId,
+          to: target.contactExternalId,
+          messageId: wamid,
+          emoji: effective ?? "",
+        });
+      } else if (target.provider === "telegram") {
+        const chatId = target.providerChatId ?? target.contactExternalId;
+        const numericId = Number(target.providerMessageId);
+        if (!chatId || !target.providerMessageId || !Number.isFinite(numericId)) {
+          return apiError(
+            c,
+            422,
+            "REACTION_TARGET_UNADDRESSABLE",
+            "The message has no provider address for a reaction",
+          );
+        }
+        const base = (
+          reactionOpts.telegramApiBase ?? "https://api.telegram.org"
+        ).replace(/\/+$/, "");
+        const res = await (reactionOpts.fetchImpl ?? fetch)(
+          `${base}/bot${token}/setMessageReaction`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              chat_id: chatId,
+              message_id: numericId,
+              reaction: effective
+                ? [{ type: "emoji", emoji: effective }]
+                : [],
+            }),
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        const body = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          description?: string;
+        } | null;
+        if (!res.ok || !body?.ok) {
+          throw new Error(
+            body?.description ?? `telegram_http_${res.status}`,
+          );
+        }
+      }
+    } catch (err) {
+      const code =
+        err instanceof WhatsAppGraphError && err.graphCode !== null
+          ? `meta_graph_${err.graphCode}`
+          : "provider_error";
+      console.error(
+        `[inbox] pengiriman reaksi ${target.provider} gagal (${code}): ${
+          err instanceof Error ? err.message.slice(0, 200) : "unknown"
+        }`,
+      );
+      return apiError(
+        c,
+        502,
+        "REACTION_DELIVERY_FAILED",
+        "The provider rejected the reaction",
+        { errorCode: code },
+      );
+    }
+
+    const applied = await applyUserReaction(
+      bundle.db,
+      { tenantId: tenant.id, userId: appUser.id },
+      { messageId, emoji: effective },
+    );
+    if (applied.kind === "message_not_found") {
+      return apiError(c, 404, "NOT_FOUND", "Message not found");
+    }
+    if (publisher) {
+      await publisher.publishNudge({
+        kind: "conversation.updated",
+        tenantId: tenant.id,
+        conversationId: id,
+      });
+    }
+    return c.json(
+      MessageReactionResponseSchema.parse({
+        messageId,
+        reactions: applied.reactions,
+      }),
+    );
   });
 
   return app;

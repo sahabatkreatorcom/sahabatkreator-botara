@@ -23,6 +23,7 @@ import {
   removeMember,
   resolveEmailConfig,
   revokeInvitation,
+  touchUserPresence,
   updateMemberRole,
   type Invitation,
   type PlatformSettingsOptions,
@@ -82,6 +83,7 @@ function serializeMember(
     name: row.name,
     role: row.role,
     isSelf: row.userId === selfUserId,
+    lastSeenAt: row.lastSeenAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
   };
 }
@@ -119,6 +121,7 @@ export function createTeamRoutes(
     const unavailable = (c: AppContext) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured");
     app.get(membersBase, unavailable);
+    app.post("/tenants/:tenantId/team/heartbeat", unavailable);
     app.get(invitationsBase, unavailable);
     app.post(invitationsBase, unavailable);
     app.delete(`${invitationsBase}/:id`, unavailable);
@@ -167,6 +170,18 @@ export function createTeamRoutes(
       members: rows.map((row) => serializeMember(row, g.appUser.id)),
     });
     return c.json(body);
+  });
+
+  // ---- Detak kehadiran (G13 butir 9) ---------------------------------------
+  // Klien mengirim detak berkala selama sesi aktif; core menjinakkan
+  // tulisnya (maks ±1 tulis/45 dtk per user). Keanggotaan tenant pada
+  // URL adalah gerbangnya — detak user non-member ditolak 404 seperti
+  // permukaan tim lain. Respons sengaja kosong-minimal.
+  app.post("/tenants/:tenantId/team/heartbeat", async (c) => {
+    const g = await guard(c);
+    if ("error" in g) return g.error;
+    await touchUserPresence(bundle.db, g.appUser.id);
+    return c.json({ ok: true });
   });
 
   // ---- Daftar undangan (owner/admin) ----------------------------------------

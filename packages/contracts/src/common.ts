@@ -170,6 +170,13 @@ export const ErrorCodeSchema = z.enum([
   "API_KEY_REVOKED",
   "API_KEY_SCOPE_DENIED",
   "MESSAGING_WINDOW_CLOSED",
+  // G13 butir 11: reaksi pesan — provider tanpa API reaksi keluar →
+  // 422; pesan tanpa alamat provider → 422; kredensial channel tak
+  // tersedia → 503; provider menolak pengiriman → 502.
+  "REACTION_NOT_SUPPORTED",
+  "REACTION_TARGET_UNADDRESSABLE",
+  "REACTION_UNAVAILABLE",
+  "REACTION_DELIVERY_FAILED",
   // Fase 16C: kirim template dari inbox — provider bukan WhatsApp → 422;
   // template tidak ada di akun percakapan ini → 404; status belum
   // APPROVED → 422; jumlah/nilai parameter tidak cocok → 422.

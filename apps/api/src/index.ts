@@ -428,7 +428,11 @@ const contactPhotoBackfillOpts = {
 routes.route("/", createContactsRoutes(authBundle, contactPhotoBackfillOpts));
 routes.route(
   "/",
-  createInboxRoutes(authBundle, realtimePublisher, contactPhotoBackfillOpts),
+  createInboxRoutes(authBundle, realtimePublisher, contactPhotoBackfillOpts, {
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    metaApiBase: env.META_API_BASE,
+    telegramApiBase: env.TELEGRAM_API_BASE,
+  }),
 );
 // Modul channels (Fase 1F, telegram 6A) — manajemen channel workspace
 // /tenants/:tenantId/channels. Opsi telegram: kunci enkripsi kredensial +
