@@ -2413,8 +2413,11 @@ function oneHotVector(index: number): string {
   // google_connections beserta tenant_isolation-nya → tabel 64,
   // policy 89. Tabel lama google_calendar_connections TIDAK di-drop
   // (arsip), jadi hitungan tabel bertambah, bukan bergeser.
-  assert.equal(counts.rows[0].tables, "64");
-  assert.equal(counts.rows[0].policies, "89");
+  // 2026-11-12: migrasi 0027 (Templat Instruction /agents) menambah
+  // agent_instruction_templates beserta tenant_isolation-nya → tabel 65,
+  // policy 90.
+  assert.equal(counts.rows[0].tables, "65");
+  assert.equal(counts.rows[0].policies, "90");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
