@@ -16,6 +16,7 @@
     "verify:tiktok-oauth": "tsx scripts/verify-tiktok-oauth.ts",
     "verify:tiktok-avatar-r2": "tsx scripts/verify-tiktok-avatar-r2.ts",
     "verify:inbox-avatars": "tsx scripts/verify-inbox-avatars.ts",
+    "verify:inbox-filter": "tsx scripts/verify-inbox-filter.ts",
     "verify:tiktok-webhook": "tsx scripts/verify-tiktok-webhook.ts",
     "verify:threads-webhook": "tsx scripts/verify-threads-webhook.ts",
     "verify:linkedin-oauth": "tsx scripts/verify-linkedin-oauth.ts",
