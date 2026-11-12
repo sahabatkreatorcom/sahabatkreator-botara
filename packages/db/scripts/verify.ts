@@ -138,7 +138,10 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 //   contact_scan_candidates — pindai pelanggan otomatis)
 // + 2 tabel Gelombang G18 / migrasi 0045 (loyalty_levels,
 //   contact_point_ledger — gamifikasi poin kontak)
-assert.equal(Number(tablesRes.rows[0].count), 88);
+// + 5 tabel Fase Susulan S2 / migrasi 0047 (post_recurrence_rules,
+//   post_recurrence_occurrences, post_queue_items, post_queue_slots,
+//   post_queue_slot_firings — jadwal berulang postingan + antrean rutin)
+assert.equal(Number(tablesRes.rows[0].count), 93);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -348,7 +351,15 @@ const policies = await db.query<{ count: string }>(
 // Migrasi 0045 (Gelombang G18 — gamifikasi) menambah
 // `loyalty_levels` dan `contact_point_ledger`, masing-masing
 // dengan tenant_isolation → 116.
-assert.equal(Number(policies.rows[0].count), 116);
+//
+// Migrasi 0047 (Fase Susulan S2 — jadwal berulang postingan +
+// antrean rutin) menambah `post_recurrence_rules`
+// (tenant_isolation + system_post_recurrence_scan),
+// `post_recurrence_occurrences` (tenant_isolation),
+// `post_queue_items` (tenant_isolation), `post_queue_slots`
+// (tenant_isolation + system_post_recurrence_scan), dan
+// `post_queue_slot_firings` (tenant_isolation) → 123.
+assert.equal(Number(policies.rows[0].count), 123);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2541,8 +2552,15 @@ function oneHotVector(index: number): string {
   // 2026-11-13: migrasi 0045 (Gelombang G18 — gamifikasi) menambah
   // loyalty_levels & contact_point_ledger (masing-masing
   // tenant_isolation) → tabel 88, policy 116.
-  assert.equal(counts.rows[0].tables, "88");
-  assert.equal(counts.rows[0].policies, "116");
+  // 2026-11-13: migrasi 0047 (Fase Susulan S2 — jadwal berulang
+  // postingan + antrean rutin) menambah post_recurrence_rules
+  // (tenant_isolation + system_post_recurrence_scan),
+  // post_recurrence_occurrences, post_queue_items (tenant_isolation),
+  // post_queue_slots (tenant_isolation +
+  // system_post_recurrence_scan), post_queue_slot_firings
+  // (tenant_isolation) → tabel 93, policy 123.
+  assert.equal(counts.rows[0].tables, "93");
+  assert.equal(counts.rows[0].policies, "123");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

@@ -58,6 +58,19 @@ export class PostDomainError extends Error {
   }
 }
 
+/**
+ * Aktor audit alternatif (pola yang sama seperti createBroadcast
+ * G9): materialisasi sistem — penyapu jadwal berulang + antrean
+ * rutin S2 — menulis audit sebagai sistem, bukan seolah-olah
+ * pemilik aturan membuat postingan itu manual. Tanpa bidang ini
+ * audit ditulis sebagai user `userId` (perilaku lama).
+ */
+export interface PostAuditActor {
+  actorType: "user" | "system";
+  actorId: string;
+  meta?: Record<string, unknown>;
+}
+
 export type PostErrorCode =
   | "POST_NOT_FOUND"
   | "POST_TARGET_NOT_FOUND"
@@ -724,7 +737,8 @@ async function insertDraftPost(
   tx: DbTx,
   input: {
     tenantId: string;
-    userId: string;
+    /** Pembuat baris (kolom created_by_user_id); null = dibuat sistem. */
+    userId: string | null;
     target: ResolvedPostTarget;
     conversationId: string;
     groupId: string | null;
@@ -765,7 +779,9 @@ export async function createPost(
   db: Database,
   input: {
     tenantId: string;
-    userId: string;
+    userId: string | null;
+    /** S2: aktor audit alternatif untuk pembuatan oleh sistem. */
+    auditActor?: PostAuditActor;
     conversationId: string;
     title: string;
     caption: string;
@@ -792,13 +808,14 @@ export async function createPost(
     });
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "post.created",
       meta: {
         postId,
         conversationId: input.conversationId,
         mediaCount: input.mediaIds.length,
+        ...(input.auditActor?.meta ?? {}),
       },
     });
     const created = await loadPost(tx, input.tenantId, postId);
@@ -826,7 +843,9 @@ export async function createPostGroup(
   db: Database,
   input: {
     tenantId: string;
-    userId: string;
+    userId: string | null;
+    /** S2: aktor audit alternatif untuk pembuatan oleh sistem. */
+    auditActor?: PostAuditActor;
     title: string;
     caption: string;
     mediaIds: string[];
@@ -882,14 +901,15 @@ export async function createPostGroup(
     }
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "post_group.created",
       meta: {
         groupId: group!.id,
         postIds,
         targetCount: postIds.length,
         mediaCount: input.mediaIds.length,
+        ...(input.auditActor?.meta ?? {}),
       },
     });
 
@@ -989,7 +1009,13 @@ export async function updatePost(
 /** Hapus permanen — hanya draft/cancelled. Yang pernah terbit adalah riwayat. */
 export async function deletePost(
   db: Database,
-  input: { tenantId: string; userId: string; postId: string },
+  input: {
+    tenantId: string;
+    userId: string | null;
+    /** S2: aktor audit alternatif untuk penghapusan oleh sistem. */
+    auditActor?: PostAuditActor;
+    postId: string;
+  },
 ): Promise<void> {
   await withTenantDb(db, input.tenantId, async (tx) => {
     const existing = await loadPost(tx, input.tenantId, input.postId);
@@ -1002,10 +1028,14 @@ export async function deletePost(
       .where(and(eq(posts.tenantId, input.tenantId), eq(posts.id, input.postId)));
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "post.deleted",
-      meta: { postId: input.postId, status: existing.status },
+      meta: {
+        postId: input.postId,
+        status: existing.status,
+        ...(input.auditActor?.meta ?? {}),
+      },
     });
   });
 }
@@ -1156,7 +1186,9 @@ export async function schedulePost(
   db: Database,
   input: {
     tenantId: string;
-    userId: string;
+    userId: string | null;
+    /** S2: aktor audit alternatif untuk penjadwalan oleh sistem. */
+    auditActor?: PostAuditActor;
     postId: string;
     scheduledAt?: Date | null;
   },
@@ -1190,13 +1222,14 @@ export async function schedulePost(
     });
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "post.scheduled",
       meta: {
         postId: input.postId,
         scheduledAt: requested.toISOString(),
         mediaCount: existing.media.length,
+        ...(input.auditActor?.meta ?? {}),
       },
     });
 
@@ -1402,7 +1435,13 @@ export async function duplicatePost(
 
 export async function cancelPost(
   db: Database,
-  input: { tenantId: string; userId: string; postId: string },
+  input: {
+    tenantId: string;
+    userId: string | null;
+    /** S2: aktor audit alternatif untuk pembatalan oleh sistem. */
+    auditActor?: PostAuditActor;
+    postId: string;
+  },
 ): Promise<PostRecord> {
   return withTenantDb(db, input.tenantId, async (tx) => {
     const existing = await loadPost(tx, input.tenantId, input.postId);
@@ -1416,10 +1455,10 @@ export async function cancelPost(
       .where(and(eq(posts.tenantId, input.tenantId), eq(posts.id, input.postId)));
     await tx.insert(auditLogs).values({
       tenantId: input.tenantId,
-      actorType: "user",
-      actorId: input.userId,
+      actorType: input.auditActor?.actorType ?? "user",
+      actorId: input.auditActor?.actorId ?? input.userId,
       action: "post.cancelled",
-      meta: { postId: input.postId },
+      meta: { postId: input.postId, ...(input.auditActor?.meta ?? {}) },
     });
     const cancelled = await loadPost(tx, input.tenantId, input.postId);
     if (!cancelled) throw new PostDomainError("POST_NOT_FOUND");

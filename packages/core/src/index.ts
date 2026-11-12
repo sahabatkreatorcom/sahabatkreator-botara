@@ -1421,6 +1421,7 @@ export {
   getPostTargetProvider,
   markPostPublished,
   markPostFailed,
+  type PostAuditActor,
   type PostErrorCode,
   type PostGroupRecord,
   type PostTarget,

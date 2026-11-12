@@ -1,5 +1,12 @@
 import { and, eq, inArray, lt, sql, type SQL } from "drizzle-orm";
-import { media, messages, postMedia, type Database } from "@sahabat-kreator/db";
+import {
+  media,
+  messages,
+  postMedia,
+  postQueueItems,
+  postRecurrenceRules,
+  type Database,
+} from "@sahabat-kreator/db";
 import type { MediaObjectStore } from "./media-storage";
 import { withTenantDb } from "./tx";
 
@@ -367,8 +374,16 @@ export async function pruneUnreferencedMedia(
             // dan kegagalannya baru terlihat saat jam tayang. FK
             // `post_media.media_id` yang RESTRICT adalah jaring kedua bila
             // penghitungan di sini suatu saat salah.
+            // Fase Susulan S2: rujukan yang sama kini juga datang dari
+            // SNAPSHOT templat aturan postingan berulang yang belum
+            // terminal (media_ids jsonb) dan item antrean rutin yang
+            // masih `queued` — keduanya belum punya baris post_media
+            // sampai slotnya materialisasi, jadi tanpa dua lengan ini
+            // aset templat/antrean terhapus sebelum jam tayangnya.
             sql`NOT EXISTS (SELECT 1 FROM ${messages} WHERE ${messages.mediaId} = ${media.id})
-                AND NOT EXISTS (SELECT 1 FROM ${postMedia} WHERE ${postMedia.mediaId} = ${media.id})`,
+                AND NOT EXISTS (SELECT 1 FROM ${postMedia} WHERE ${postMedia.mediaId} = ${media.id})
+                AND NOT EXISTS (SELECT 1 FROM ${postRecurrenceRules} WHERE ${postRecurrenceRules.tenantId} = ${media.tenantId} AND ${postRecurrenceRules.status} IN ('active', 'paused') AND ${postRecurrenceRules.mediaIds} @> jsonb_build_array(${media.id}::text))
+                AND NOT EXISTS (SELECT 1 FROM ${postQueueItems} WHERE ${postQueueItems.tenantId} = ${media.tenantId} AND ${postQueueItems.status} = 'queued' AND ${postQueueItems.mediaIds} @> jsonb_build_array(${media.id}::text))`,
           ),
         );
     });

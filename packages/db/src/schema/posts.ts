@@ -1,4 +1,5 @@
 import {
+  boolean,
   index,
   integer,
   jsonb,
@@ -275,3 +276,372 @@ export type NewPost = typeof posts.$inferInsert;
 export type PostMedia = typeof postMedia.$inferSelect;
 export type PostStatus = Post["status"];
 export type PostApprovalStatus = Post["approvalStatus"];
+
+// ---------------------------------------------------------------------------
+// Jadwal postingan berulang + antrean rutin (Fase Susulan S2, migrasi 0047)
+//
+// Dua mekanisme keteraturan PENERBITAN KONTEN, keduanya lapisan
+// penjadwal DI ATAS state machine postingan yang ada — bukan mesin
+// penerbit kedua, dan BUKAN broadcast berulang G9 (itu keteraturan
+// SIARAN ke penerima; di sini tidak ada penerima sama sekali):
+//
+// - `post_recurrence_rules` + `post_recurrence_occurrences`: aturan
+//   menyimpan SNAPSHOT templat postingan (judul, caption, media,
+//   himpunan sasaran — bentuk yang sama seperti pembuatan grup
+//   komposer) + pola pengulangan yang kolomnya meniru aturan G9
+//   karena matematikanya memang dibagi (core/recurrence-pattern).
+//   Penyapu worker mematerialisasi tiap slot menjadi postingan
+//   terjadwal NYATA lewat jalur pembuatan + penjadwalan yang ada
+//   (createPost/createPostGroup → schedulePost → outbox
+//   post.publish_due). Ledger per (aturan, slot) adalah kunci
+//   idempotensi materialisasi.
+// - `post_queue_items` + `post_queue_slots` +
+//   `post_queue_slot_firings`: antrean konten berurutan milik tenant
+//   + slot rutin mingguan (hari aktif + jam dinding per himpunan
+//   sasaran). Saat slot menembak, item antrean TERATAS ditarik
+//   menjadi postingan terjadwal pada slot itu; antrean kosong
+//   tercatat sebagai firing `empty` — tidak ada postingan karangan.
+//   Item yang tertarik keluar dari antrean (status `pulled`) dengan
+//   tautan ke postingan hasilnya, jadi riwayatnya tidak hilang.
+//
+// Postingan hasil kedua mekanisme lahir dengan `approval_status`
+// bawaan `draft`: interaksi dengan persetujuan S1 apa adanya —
+// gerbang penerbitan worker yang memutuskan di jam tayang, tanpa
+// jalur pintas apa pun di lapisan ini.
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu sasaran pada snapshot templat — cermin struktural target
+ * pembuatan grup komposer (`CreatePostGroupRequest.targets`):
+ * caption per sasaran adalah override opsional di atas caption
+ * induk, dan opsi penerbitan memang melekat per sasaran.
+ */
+export interface PostRecurrenceTargetRecord {
+  conversationId: string;
+  caption?: string;
+  publishOptions?: PostPublishOptionsRecord;
+}
+
+export const postRecurrenceFrequencyEnum = pgEnum(
+  "post_recurrence_frequency",
+  ["daily", "weekly", "monthly"],
+);
+
+export const postRecurrenceStatusEnum = pgEnum("post_recurrence_status", [
+  "active",
+  "paused",
+  "completed",
+  "cancelled",
+]);
+
+export const postRecurrenceOccurrenceStatusEnum = pgEnum(
+  "post_recurrence_occurrence_status",
+  ["claimed", "created", "skipped", "missed"],
+);
+
+export const postRecurrenceRules = pgTable(
+  "post_recurrence_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Nama aturan (tampil di daftar); postingan anak dinamai dari `title`. */
+    name: varchar("name", { length: 255 }).notNull(),
+    /**
+     * Postingan asal templat disalin (provenance). SET NULL: aturan
+     * adalah snapshot — menghapus sumber tidak menghapus jadwal.
+     */
+    sourcePostId: uuid("source_post_id").references(() => posts.id, {
+      onDelete: "set null",
+    }),
+    /** Judul internal konten (sama seperti kolom `posts.title`). */
+    title: varchar("title", { length: 255 }).notNull(),
+    /** Caption induk; override per sasaran ada di `targets`. */
+    caption: text("caption").notNull().default(""),
+    /**
+     * Media bersama templat (id baris `media`, urutan = urutan album).
+     * Rujukan jsonb ini WAJIB dihitung media-gc selama aturan belum
+     * terminal — tanpa itu aset templat bisa terhapus sebelum slotnya.
+     */
+    mediaIds: jsonb("media_ids").notNull().default([]).$type<string[]>(),
+    /** Himpunan sasaran templat (bentuk target grup komposer). */
+    targets: jsonb("targets")
+      .notNull()
+      .default([])
+      .$type<PostRecurrenceTargetRecord[]>(),
+    frequency: postRecurrenceFrequencyEnum("frequency").notNull(),
+    /** Setiap N (hari/minggu/bulan sesuai frequency). */
+    interval: integer("interval").notNull().default(1),
+    /**
+     * Hari aktif mingguan (0=Minggu..6=Sabtu); hanya bermakna untuk
+     * frequency 'weekly'. Kosong = hari yang sama dengan starts_at.
+     */
+    daysOfWeek: jsonb("days_of_week").notNull().default([]).$type<number[]>(),
+    /**
+     * Tanggal bulanan (1..31); hanya bermakna untuk 'monthly'.
+     * Tanggal melampaui akhir bulan dijepit ke hari terakhir bulan
+     * itu. NULL (dan last_day_of_month false) = tanggal starts_at.
+     */
+    dayOfMonth: integer("day_of_month"),
+    /** Monthly: slot selalu di hari terakhir bulan. */
+    lastDayOfMonth: boolean("last_day_of_month").notNull().default(false),
+    /** Zona waktu IANA aturan — semua perhitungan slot dalam zona ini. */
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    /** Jangkar: slot pertama; jam dindingnya (di timezone) dipakai semua slot. */
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    /** Slot terakhir yang masih boleh lahir (inklusif); NULL = tanpa batas tanggal. */
+    endsAt: timestamp("ends_at", { withTimezone: true }),
+    /** Batas jumlah kejadian yang dibuat; NULL = tanpa batas jumlah. */
+    maxOccurrences: integer("max_occurrences"),
+    /** Jumlah kejadian yang sudah benar-benar dibuat (ledger 'created'). */
+    occurrencesCreated: integer("occurrences_created").notNull().default(0),
+    status: postRecurrenceStatusEnum("status").notNull().default("active"),
+    /** Slot berikutnya yang belum diproses; NULL bila aturan terminal. */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("post_recurrence_rules_tenant_id_idx").on(t.tenantId),
+    index("post_recurrence_rules_tenant_status_idx").on(t.tenantId, t.status),
+    // Indeks pemindaian penyapu: aturan jatuh tempo lintas tenant.
+    index("post_recurrence_rules_due_idx").on(t.nextRunAt),
+  ],
+);
+
+export const postRecurrenceOccurrences = pgTable(
+  "post_recurrence_occurrences",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    ruleId: uuid("rule_id")
+      .notNull()
+      .references(() => postRecurrenceRules.id, { onDelete: "cascade" }),
+    /** Instan slot (UTC) — bersama rule_id membentuk kunci idempotensi. */
+    slotAt: timestamp("slot_at", { withTimezone: true }).notNull(),
+    status: postRecurrenceOccurrenceStatusEnum("status").notNull(),
+    /**
+     * Alasan untuk skipped/missed: 'rule_paused' | 'slot_expired' |
+     * 'claim_stale' | kode PostDomainError gerbang buat/jadwalkan
+     * (mis. 'POST_TARGET_NOT_CONNECTED'). NULL untuk created/claimed.
+     */
+    reason: varchar("reason", { length: 64 }),
+    /** Grup postingan anak yang lahir dari slot ini (hanya status created). */
+    postGroupId: uuid("post_group_id").references(() => postGroups.id, {
+      onDelete: "set null",
+    }),
+    /** Id semua postingan anak slot ini (satu untuk aturan satu sasaran). */
+    postIds: jsonb("post_ids").notNull().default([]).$type<string[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("post_recurrence_occurrences_rule_slot_unique").on(
+      t.ruleId,
+      t.slotAt,
+    ),
+    index("post_recurrence_occurrences_tenant_id_idx").on(t.tenantId),
+    index("post_recurrence_occurrences_rule_slot_idx").on(t.ruleId, t.slotAt),
+  ],
+);
+
+export const postQueueItemStatusEnum = pgEnum("post_queue_item_status", [
+  "queued",
+  "pulled",
+]);
+
+export const postQueueItems = pgTable(
+  "post_queue_items",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Urutan dalam antrean (kecil = lebih dulu ditarik). */
+    position: integer("position").notNull(),
+    /** Judul internal konten (sama seperti kolom `posts.title`). */
+    title: varchar("title", { length: 255 }).notNull(),
+    caption: text("caption").notNull().default(""),
+    /** Media item (id baris `media`, urutan = urutan album). */
+    mediaIds: jsonb("media_ids").notNull().default([]).$type<string[]>(),
+    status: postQueueItemStatusEnum("status").notNull().default("queued"),
+    /**
+     * Reservasi penarikan: firing slot yang sedang mematerialisasi
+     * item ini. Diisi dalam transaksi klaim yang sama dengan klaim
+     * firing agar dua slot bersamaan tidak menarik item yang sama;
+     * dibersihkan saat firing final (berhasil → status `pulled`,
+     * gagal → item kembali murni `queued`). UUID polos tanpa FK:
+     * baris firing menunjuk balik ke item (`queue_item_id`), jadi
+     * FK dua arah hanya akan menyulitkan urutan migrasi — integritas
+     * dijaga transaksi klaim/finalisasi di core.
+     */
+    reservedFiringId: uuid("reserved_firing_id"),
+    reservedAt: timestamp("reserved_at", { withTimezone: true }),
+    /** Kapan item tertarik keluar dari antrean (status `pulled`). */
+    pulledAt: timestamp("pulled_at", { withTimezone: true }),
+    /** Grup postingan hasil penarikan; SET NULL agar riwayat antrean bertahan. */
+    pulledPostGroupId: uuid("pulled_post_group_id").references(
+      () => postGroups.id,
+      { onDelete: "set null" },
+    ),
+    /** Id semua postingan hasil penarikan item ini. */
+    pulledPostIds: jsonb("pulled_post_ids")
+      .notNull()
+      .default([])
+      .$type<string[]>(),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // Penarikan teratas + daftar antrean: satu pemindaian terurut.
+    index("post_queue_items_tenant_status_position_idx").on(
+      t.tenantId,
+      t.status,
+      t.position,
+    ),
+    index("post_queue_items_tenant_id_idx").on(t.tenantId),
+  ],
+);
+
+export const postQueueSlotStatusEnum = pgEnum("post_queue_slot_status", [
+  "active",
+  "paused",
+  "cancelled",
+]);
+
+export const postQueueSlots = pgTable(
+  "post_queue_slots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Nama slot (mis. "Pagi — kanal utama"). */
+    name: varchar("name", { length: 255 }).notNull(),
+    /** Himpunan sasaran slot (bentuk target yang sama seperti aturan). */
+    targets: jsonb("targets")
+      .notNull()
+      .default([])
+      .$type<PostRecurrenceTargetRecord[]>(),
+    /** Hari aktif mingguan (0=Minggu..6=Sabtu); wajib non-kosong untuk slot. */
+    daysOfWeek: jsonb("days_of_week").notNull().default([]).$type<number[]>(),
+    /** Zona waktu IANA slot. */
+    timezone: varchar("timezone", { length: 64 }).notNull(),
+    /**
+     * Jangkar pola mingguan bersama: instan tembakan pertama —
+     * jam dindingnya (di `timezone`) adalah jam slot untuk semua
+     * tembakan berikutnya. Jam slot diturunkan dari kolom ini,
+     * bukan disimpan dua kali.
+     */
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    status: postQueueSlotStatusEnum("status").notNull().default("active"),
+    /** Tembakan berikutnya yang belum diproses; NULL bila slot terminal (cancelled). */
+    nextRunAt: timestamp("next_run_at", { withTimezone: true }),
+    createdByUserId: uuid("created_by_user_id").references(() => users.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("post_queue_slots_tenant_id_idx").on(t.tenantId),
+    index("post_queue_slots_tenant_status_idx").on(t.tenantId, t.status),
+    index("post_queue_slots_due_idx").on(t.nextRunAt),
+  ],
+);
+
+export const postQueueSlotFiringStatusEnum = pgEnum(
+  "post_queue_slot_firing_status",
+  ["claimed", "pulled", "empty", "skipped", "missed"],
+);
+
+export const postQueueSlotFirings = pgTable(
+  "post_queue_slot_firings",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    slotId: uuid("slot_id")
+      .notNull()
+      .references(() => postQueueSlots.id, { onDelete: "cascade" }),
+    /** Instan tembakan (UTC) — bersama slot_id membentuk kunci idempotensi. */
+    slotAt: timestamp("slot_at", { withTimezone: true }).notNull(),
+    status: postQueueSlotFiringStatusEnum("status").notNull(),
+    /**
+     * Alasan untuk skipped/missed: 'slot_paused' | 'slot_expired' |
+     * 'claim_stale' | kode PostDomainError gerbang buat/jadwalkan.
+     * NULL untuk pulled/empty/claimed.
+     */
+    reason: varchar("reason", { length: 64 }),
+    /** Item antrean yang ditarik tembakan ini (hanya status pulled). */
+    queueItemId: uuid("queue_item_id").references(() => postQueueItems.id, {
+      onDelete: "set null",
+    }),
+    /** Grup postingan hasil penarikan (hanya status pulled). */
+    postGroupId: uuid("post_group_id").references(() => postGroups.id, {
+      onDelete: "set null",
+    }),
+    /** Id semua postingan hasil penarikan tembakan ini. */
+    postIds: jsonb("post_ids").notNull().default([]).$type<string[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("post_queue_slot_firings_slot_slot_unique").on(
+      t.slotId,
+      t.slotAt,
+    ),
+    index("post_queue_slot_firings_tenant_id_idx").on(t.tenantId),
+    index("post_queue_slot_firings_slot_slot_idx").on(t.slotId, t.slotAt),
+  ],
+);
+
+export type PostRecurrenceRule = typeof postRecurrenceRules.$inferSelect;
+export type NewPostRecurrenceRule = typeof postRecurrenceRules.$inferInsert;
+export type PostRecurrenceOccurrence =
+  typeof postRecurrenceOccurrences.$inferSelect;
+export type NewPostRecurrenceOccurrence =
+  typeof postRecurrenceOccurrences.$inferInsert;
+export type PostRecurrenceFrequency = PostRecurrenceRule["frequency"];
+export type PostRecurrenceStatus = PostRecurrenceRule["status"];
+export type PostRecurrenceOccurrenceStatus =
+  PostRecurrenceOccurrence["status"];
+export type PostQueueItem = typeof postQueueItems.$inferSelect;
+export type NewPostQueueItem = typeof postQueueItems.$inferInsert;
+export type PostQueueItemStatus = PostQueueItem["status"];
+export type PostQueueSlot = typeof postQueueSlots.$inferSelect;
+export type NewPostQueueSlot = typeof postQueueSlots.$inferInsert;
+export type PostQueueSlotStatus = PostQueueSlot["status"];
+export type PostQueueSlotFiring = typeof postQueueSlotFirings.$inferSelect;
+export type NewPostQueueSlotFiring = typeof postQueueSlotFirings.$inferInsert;
+export type PostQueueSlotFiringStatus = PostQueueSlotFiring["status"];
