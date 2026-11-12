@@ -1231,6 +1231,54 @@ pemilik platform:
   yang terbit). Untuk grup multi-target, satu pengajuan dan satu
   keputusan berlaku untuk seluruh anggota grup.
 
+## Fase Susulan S2 — Jadwal Berulang Postingan + Antrean Rutin (2026-11-13)
+
+**Tidak ada tindakan pemilik.** Fitur ini internal dan opt-in per
+tenant (tanpa kredensial, izin platform, atau persetujuan eksternal
+baru): dua seksi baru di halaman Postingan — "Jadwal berulang
+postingan" dan "Antrean konten rutin". Catatan perilaku yang perlu
+diketahui pemilik platform:
+
+- Aturan berulang menyimpan SNAPSHOT templat dari postingan sumber
+  (judul, caption, media, sasaran, dan opsi penerbitan per sasaran
+  ikut tersalin). Mengubah/menghapus postingan sumber sesudahnya
+  tidak mengubah aturan. Matematika polanya (harian/mingguan/
+  bulanan, jepit akhir bulan, DST zona aturan) sama dengan jadwal
+  berulang broadcast (G9) — modul bersama, bukan mesin kedua.
+- Penyapu worker (tiap menit) mematerialisasi slot jatuh tempo
+  menjadi postingan terjadwal NYATA lewat jalur pembuatan postingan
+  yang ada — bukan mesin penerbit kedua. Konsekuensinya: semua
+  gerbang platform berlaku apa adanya pada hasil materialisasi
+  (mis. postingan TikTok dari aturan hanya lahir bila opsi privasi
+  pada templat sumber sudah dipilih kreator; bila gerbang menolak,
+  seluruh slot tercatat `skipped` dengan kode gerbangnya di riwayat
+  aturan, tanpa draft separuh).
+- Keterlambatan: slot yang pertama kali terlihat penyapu sudah
+  lewat lebih dari 1 jam dicatat `missed` dan TIDAK ditembakkan
+  (konten basi tidak terbit diam-diam). Aturan yang dijeda tetap
+  memproses slotnya sebagai `skipped` tercatat. Batas jumlah
+  kejadian (`maxOccurrences`) hanya menghitung postingan yang
+  benar-benar dibuat.
+- Interaksi persetujuan (S1): postingan hasil materialisasi dan
+  hasil tarikan antrean lahir sebagai draf persetujuan `draft`.
+  Bila tenant menyalakan "Persetujuan wajib", hasilnya menunggu
+  persetujuan persis seperti postingan manual dan akan terblokir
+  di jam tayang bila belum disetujui (perilaku S1) — lapisan
+  jadwal tidak punya jalur pintas. Catatan ini juga tampil di UI
+  kedua seksi saat sakelar tenant aktif.
+- Antrean rutin: slot mingguan (hari + jam + himpunan sasaran)
+  menarik TEPAT SATU item teratas menjadi postingan terjadwal.
+  Antrean kosong saat slot tiba tercatat sebagai tembakan `empty`
+  (tidak ada postingan karangan). Kegagalan materialisasi TIDAK
+  mengonsumsi item — item tetap paling atas untuk slot berikutnya.
+  Item yang tertarik keluar dari antrean dan riwayatnya tertaut ke
+  postingan hasil.
+- Media yang dirujuk snapshot aturan yang masih hidup dan item
+  antrean yang masih menunggu dihitung sebagai rujukan hidup oleh
+  pembersih media (media-gc): berkasnya tidak dihapus sebelum
+  materialisasi. Media pada aturan/item yang sudah selesai atau
+  terhapus kembali menjadi kandidat pembersihan seperti biasa.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -1246,6 +1294,10 @@ tenant: dataset + token Meta / akun + aksi konversi Google Ads) +
 Gelombang G17 (ekstensi flow — butir 1 pemicu webhook tanpa tindakan
 pemilik; butir 2 Sheets: tindakan platform proyek Cloud Sheets +
 proyek/consent tenant; butir 3 katalog natif + butir 4 gambar dinamis
-tanpa tindakan pemilik baru, hanya catatan perilaku/batas).
+tanpa tindakan pemilik baru, hanya catatan perilaku/batas) +
+Fase Susulan S1 (alur persetujuan postingan — tanpa tindakan
+pemilik, hanya catatan perilaku) + Fase Susulan S2 (jadwal berulang
+postingan + antrean rutin — tanpa tindakan pemilik, hanya catatan
+perilaku).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
