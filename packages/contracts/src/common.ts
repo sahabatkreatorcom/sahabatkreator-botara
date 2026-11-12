@@ -99,6 +99,11 @@ export const ErrorCodeSchema = z.enum([
   // G9: broadcast berulang — transisi status aturan tidak sah (jeda
   // aturan yang tidak aktif, edit aturan terminal, dst.) → 409.
   "BROADCAST_RECURRENCE_INVALID_STATE",
+  // S2: jadwal berulang postingan + antrean rutin — transisi status
+  // aturan/slot/item yang tidak sah (jeda yang tidak aktif, edit
+  // yang terminal, geser item yang sudah tertarik, dst.) → 409.
+  "POST_RECURRENCE_INVALID_STATE",
+  "POST_QUEUE_INVALID_STATE",
   // Fase 13D: uji A/B broadcast menyala (abSplitPercentB terisi)
   // tetapi isi varian B tidak sah untuk provider-nya (teks B kosong
   // untuk provider teks) → 422. Template B WhatsApp yang hilang /

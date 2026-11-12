@@ -58,6 +58,8 @@ import { createLogsRoutes } from "./modules/logs/routes";
 import { createAuditRoutes } from "./modules/audit/routes";
 import { createBroadcastsRoutes } from "./modules/broadcasts/routes";
 import { createBroadcastRecurrenceRoutes } from "./modules/broadcast-recurrences/routes";
+import { createPostRecurrenceRoutes } from "./modules/post-recurrences/routes";
+import { createPostQueueRoutes } from "./modules/post-queue/routes";
 import { createOutboundWebhooksRoutes } from "./modules/outbound-webhooks/routes";
 import { createDealsRoutes } from "./modules/deals/routes";
 import { createDiscountCodesRoutes } from "./modules/discount-codes/routes";
@@ -328,6 +330,12 @@ routes.route("/", createBroadcastsRoutes(authBundle));
 // /tenants/:tenantId/broadcast-recurrences; materialisasi slot oleh
 // penyapu worker menjadi broadcast biasa lewat jalur Fase 7C.
 routes.route("/", createBroadcastRecurrenceRoutes(authBundle));
+// Modul post berulang + antrean rutin (S2) — penjadwal di atas posts:
+// /tenants/:tenantId/post-recurrences dan /post-queue; materialisasi
+// slot oleh penyapu worker menjadi postingan terjadwal biasa lewat
+// jalur posts yang ada (gerbang persetujuan S1 berlaku apa adanya).
+routes.route("/", createPostRecurrenceRoutes(authBundle));
+routes.route("/", createPostQueueRoutes(authBundle));
 // Modul outbound-webhooks (G11) — webhook KELUAR tenant:
 // /tenants/:tenantId/outbound-webhooks; pengiriman peristiwa oleh
 // worker (relay outbox → job fan-out → penyapu percobaan ulang).

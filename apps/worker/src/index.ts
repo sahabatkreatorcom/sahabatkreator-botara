@@ -33,6 +33,8 @@ import {
   pruneIntegrationLogs,
   pruneOutboxEvents,
   processBroadcastRecurrences,
+  processPostRecurrences,
+  processPostQueueSlots,
   dispatchOutboundWebhookEvent,
   processDueOutboundWebhookRetries,
   OUTBOUND_WEBHOOK_EVENT_TYPES,
@@ -1543,6 +1545,47 @@ const broadcastRecurrenceTimer = setInterval(
 void broadcastRecurrenceTick();
 
 // ---------------------------------------------------------------------------
+// Postingan berulang + antrean rutin (S2): dua penyapu di atas posts —
+// `processPostRecurrences` mematerialisasi slot aturan menjadi
+// postingan terjadwal lewat createPost/createPostGroup →
+// schedulePost yang ada; `processPostQueueSlots` menarik item
+// antrean teratas pada slot rutin mingguan. Keduanya berbagi lengan
+// baca system_post_recurrence_scan dan menulis ledger masing-masing
+// (kejadian aturan / tembakan slot). Postingan anak lahir sebagai
+// draf persetujuan — gerbang S1 di poller penerbitan yang menahan
+// bila tenant mewajibkan persetujuan; penyapu tidak punya jalur
+// pintas. Pola poller yang sama: boot + tiap menit, jaga masuk ulang.
+const POST_RECURRENCE_INTERVAL_MS = 60_000;
+let postRecurrenceRunning = false;
+async function postRecurrenceTick(): Promise<void> {
+  if (postRecurrenceRunning) return;
+  postRecurrenceRunning = true;
+  try {
+    const rules = await processPostRecurrences(db);
+    if (rules.created > 0 || rules.skipped > 0 || rules.missed > 0) {
+      console.log(
+        `[worker] postingan berulang: ${rules.rulesScanned} aturan jatuh tempo — created=${rules.created} skipped=${rules.skipped} missed=${rules.missed} completed=${rules.completed}`,
+      );
+    }
+    const queue = await processPostQueueSlots(db);
+    if (queue.pulled > 0 || queue.empty > 0 || queue.skipped > 0 || queue.missed > 0) {
+      console.log(
+        `[worker] antrean rutin: ${queue.slotsScanned} slot jatuh tempo — pulled=${queue.pulled} empty=${queue.empty} skipped=${queue.skipped} missed=${queue.missed}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] postingan berulang/antrean gagal (akan dicoba lagi):", err);
+  } finally {
+    postRecurrenceRunning = false;
+  }
+}
+const postRecurrenceTimer = setInterval(
+  () => void postRecurrenceTick(),
+  POST_RECURRENCE_INTERVAL_MS,
+);
+void postRecurrenceTick();
+
+// ---------------------------------------------------------------------------
 // Webhook keluar (G11): penyapu percobaan ulang pengiriman — memindai
 // baris `outbound_webhook_deliveries` yang jatuh tempo lintas tenant
 // (lengan baca system_outbound_webhook_scan), lalu tiap baris dicoba
@@ -1854,6 +1897,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(authSessionPruneTimer);
   clearInterval(broadcastReconcileTimer);
   clearInterval(broadcastRecurrenceTimer);
+  clearInterval(postRecurrenceTimer);
   clearInterval(outboundWebhookRetryTimer);
   clearInterval(tokenLifecycleTimer);
   clearInterval(threadsTokenLifecycleTimer);

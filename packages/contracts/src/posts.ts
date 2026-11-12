@@ -864,3 +864,449 @@ export const PostApprovalHistoryResponseSchema = z.object({
 export type PostApprovalHistoryResponse = z.infer<
   typeof PostApprovalHistoryResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Jadwal berulang postingan + antrean rutin (Fase Susulan S2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Frekuensi aturan berulang postingan — himpunan yang sama seperti
+ * aturan siaran G9; matematika polanya dibagi di core lewat modul
+ * recurrence-pattern bersama.
+ */
+export const PostRecurrenceFrequencySchema = z.enum([
+  "daily",
+  "weekly",
+  "monthly",
+]);
+export type PostRecurrenceFrequency = z.infer<
+  typeof PostRecurrenceFrequencySchema
+>;
+
+/**
+ * Status aturan berulang postingan. active = penyapu memproses
+ * slot jatuh tempo; paused = slot dicatat skipped `rule_paused`;
+ * completed = kondisi berhenti tercapai (terminal); cancelled =
+ * dihentikan pemilik (terminal).
+ */
+export const PostRecurrenceStatusSchema = z.enum([
+  "active",
+  "paused",
+  "completed",
+  "cancelled",
+]);
+export type PostRecurrenceStatus = z.infer<typeof PostRecurrenceStatusSchema>;
+
+/**
+ * Status satu baris ledger kejadian aturan. claimed = sedang
+ * dimaterialisasi (transien; klaim basi diambil alih menjadi
+ * missed `claim_stale`); created = postingan anak lahir +
+ * terjadwal; skipped = tidak lahir (aturan dijeda atau gerbang
+ * pembuatan/penjadwalan menolak — lihat `reason`); missed = slot
+ * basi tidak ditembakkan.
+ */
+export const PostRecurrenceOccurrenceStatusSchema = z.enum([
+  "claimed",
+  "created",
+  "skipped",
+  "missed",
+]);
+export type PostRecurrenceOccurrenceStatus = z.infer<
+  typeof PostRecurrenceOccurrenceStatusSchema
+>;
+
+/** Satu sasaran templat postingan (bentuk target grup komposer). */
+export const PostRecurrenceTargetInputSchema = z.object({
+  conversationId: z.string().uuid(),
+  /** Override caption untuk sasaran ini; kosong = caption induk. */
+  caption: z.string().max(POST_CAPTION_HARD_MAX).optional(),
+  /** Opsi penerbitan milik sasaran ini; null = kosongkan pilihan. */
+  publishOptions: PostPublishOptionsSchema.nullable().optional(),
+});
+export type PostRecurrenceTargetInput = z.infer<
+  typeof PostRecurrenceTargetInputSchema
+>;
+
+/** Sasaran templat + info tampilnya (respons aturan/slot). */
+export const PostRecurrenceTargetSchema = z.object({
+  conversationId: z.string().uuid(),
+  caption: z.string().optional(),
+  publishOptions: PostPublishOptionsSchema.nullable().optional(),
+  /** Null bila percakapan sasaran sudah terhapus sesudah aturan disimpan. */
+  provider: ChannelProviderSchema.nullable(),
+  conversationTitle: z.string().nullable(),
+  channelDisplayName: z.string().nullable(),
+});
+export type PostRecurrenceTarget = z.infer<typeof PostRecurrenceTargetSchema>;
+
+/**
+ * Templat postingan snapshot aturan/slot. Pada pembuatan aturan
+ * dengan `sourcePostId`, bidang yang tidak dikirim DISALIN dari
+ * postingan sumber; tanpa sumber, `title` + `targets` wajib
+ * lengkap (ditegakkan core sebagai template_incomplete).
+ */
+export const PostRecurrenceTemplateSchema = z.object({
+  title: z.string().trim().min(1).max(255).optional(),
+  caption: z.string().max(POST_CAPTION_HARD_MAX).optional(),
+  mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).optional(),
+  targets: z
+    .array(PostRecurrenceTargetInputSchema)
+    .min(1)
+    .max(20)
+    .optional(),
+});
+export type PostRecurrenceTemplate = z.infer<
+  typeof PostRecurrenceTemplateSchema
+>;
+
+/** Pola pengulangan aturan postingan (dipakai buat/edit/pratinjau). */
+export const PostRecurrencePatternSchema = z.object({
+  frequency: PostRecurrenceFrequencySchema,
+  /** Setiap N hari/minggu/bulan (1..365). */
+  interval: z.number().int().min(1).max(365).optional(),
+  /** Hanya weekly: hari aktif 0=Minggu..6=Sabtu. */
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).max(7).optional(),
+  /** Hanya monthly: tanggal 1..31 (dijepit ke akhir bulan pendek). */
+  dayOfMonth: z.number().int().min(1).max(31).nullable().optional(),
+  /** Hanya monthly: slot di hari terakhir bulan (mengalahkan dayOfMonth). */
+  lastDayOfMonth: z.boolean().optional(),
+  /** Zona waktu IANA; kosong = zona waktu tenant. */
+  timezone: z.string().min(1).max(64).optional(),
+  /** Jangkar: slot pertama + jam dinding semua slot (ISO 8601). */
+  startsAt: z.string().datetime(),
+  /** Slot terakhir yang masih boleh lahir, inklusif (ISO 8601). */
+  endsAt: z.string().datetime().nullable().optional(),
+  /** Batas jumlah postingan anak yang dibuat (1..10000). */
+  maxOccurrences: z.number().int().min(1).max(10000).nullable().optional(),
+});
+export type PostRecurrencePattern = z.infer<typeof PostRecurrencePatternSchema>;
+
+export const CreatePostRecurrenceRuleRequestSchema =
+  PostRecurrenceTemplateSchema.extend({
+    /** Salin templat dari postingan yang ada (snapshot; lihat template). */
+    sourcePostId: z.string().uuid().optional(),
+    /** Nama aturan; kosong = judul templat. */
+    name: z.string().trim().min(1).max(255).optional(),
+  }).merge(PostRecurrencePatternSchema);
+export type CreatePostRecurrenceRuleRequest = z.infer<
+  typeof CreatePostRecurrenceRuleRequestSchema
+>;
+
+/**
+ * Edit aturan (hanya active/paused). Pola bersifat parsial terhadap
+ * pola tersimpan; slot berikutnya dihitung ulang dari pola baru.
+ * Templat bersifat parsial terhadap snapshot tersimpan.
+ */
+export const UpdatePostRecurrenceRuleRequestSchema =
+  PostRecurrenceTemplateSchema.extend({
+    name: z.string().trim().min(1).max(255).optional(),
+  }).merge(PostRecurrencePatternSchema.partial());
+export type UpdatePostRecurrenceRuleRequest = z.infer<
+  typeof UpdatePostRecurrenceRuleRequestSchema
+>;
+
+/** Pratinjau slot berikutnya untuk pola yang BELUM disimpan. */
+export const PostRecurrencePreviewRequestSchema =
+  PostRecurrencePatternSchema.extend({
+    /** Berapa slot ke depan yang dihitung (bawaan server 5). */
+    count: z.number().int().min(1).max(24).optional(),
+    /** Hitung slot sesudah instan ini (ISO 8601); kosong = sesudah sekarang. */
+    from: z.string().datetime().optional(),
+  });
+export type PostRecurrencePreviewRequest = z.infer<
+  typeof PostRecurrencePreviewRequestSchema
+>;
+
+export const PostRecurrencePreviewResponseSchema = z.object({
+  /** Instan slot (ISO 8601, UTC) menaik. */
+  slots: z.array(z.string().datetime()),
+  /** Zona waktu efektif yang dipakai perhitungan. */
+  timezone: z.string(),
+});
+export type PostRecurrencePreviewResponse = z.infer<
+  typeof PostRecurrencePreviewResponseSchema
+>;
+
+export const PostRecurrenceRuleResponseSchema = z.object({
+  id: z.string().uuid(),
+  sourcePostId: z.string().uuid().nullable(),
+  name: z.string(),
+  title: z.string(),
+  caption: z.string(),
+  mediaIds: z.array(z.string().uuid()),
+  targets: z.array(PostRecurrenceTargetSchema),
+  frequency: PostRecurrenceFrequencySchema,
+  interval: z.number().int(),
+  daysOfWeek: z.array(z.number().int()),
+  dayOfMonth: z.number().int().nullable(),
+  lastDayOfMonth: z.boolean(),
+  timezone: z.string(),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime().nullable(),
+  maxOccurrences: z.number().int().nullable(),
+  occurrencesCreated: z.number().int().nonnegative(),
+  status: PostRecurrenceStatusSchema,
+  /** Slot berikutnya yang belum diproses; null pada aturan terminal. */
+  nextRunAt: z.string().datetime().nullable(),
+  createdByUserId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PostRecurrenceRuleResponse = z.infer<
+  typeof PostRecurrenceRuleResponseSchema
+>;
+
+export const PostRecurrenceRuleListResponseSchema = z.object({
+  rules: z.array(PostRecurrenceRuleResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type PostRecurrenceRuleListResponse = z.infer<
+  typeof PostRecurrenceRuleListResponseSchema
+>;
+
+export const PostRecurrenceRuleListQuerySchema = z.object({
+  status: PostRecurrenceStatusSchema.optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type PostRecurrenceRuleListQuery = z.infer<
+  typeof PostRecurrenceRuleListQuerySchema
+>;
+
+export const PostRecurrenceOccurrenceResponseSchema = z.object({
+  id: z.string().uuid(),
+  ruleId: z.string().uuid(),
+  /** Instan slot (ISO 8601, UTC). */
+  slotAt: z.string().datetime(),
+  status: PostRecurrenceOccurrenceStatusSchema,
+  /**
+   * Alasan skipped/missed: kode semantik lapisan ini (rule_paused,
+   * slot_expired, claim_stale) atau kode gerbang postingan core
+   * (mis. POST_TARGET_NOT_CONNECTED, POST_PUBLISH_OPTIONS_REQUIRED).
+   * Null untuk created/claimed.
+   */
+  reason: z.string().nullable(),
+  /** Grup postingan anak (null = sasaran tunggal / tidak lahir). */
+  postGroupId: z.string().uuid().nullable(),
+  /** Postingan anak yang lahir dari slot ini (hanya status created). */
+  postIds: z.array(z.string().uuid()),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PostRecurrenceOccurrenceResponse = z.infer<
+  typeof PostRecurrenceOccurrenceResponseSchema
+>;
+
+export const PostRecurrenceOccurrenceListResponseSchema = z.object({
+  occurrences: z.array(PostRecurrenceOccurrenceResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type PostRecurrenceOccurrenceListResponse = z.infer<
+  typeof PostRecurrenceOccurrenceListResponseSchema
+>;
+
+export const PostRecurrenceOccurrenceListQuerySchema = z.object({
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type PostRecurrenceOccurrenceListQuery = z.infer<
+  typeof PostRecurrenceOccurrenceListQuerySchema
+>;
+
+// --- Antrean konten rutin ---
+
+/** Status item antrean: queued = menunggu ditarik; pulled = sudah menjadi postingan. */
+export const PostQueueItemStatusSchema = z.enum(["queued", "pulled"]);
+export type PostQueueItemStatus = z.infer<typeof PostQueueItemStatusSchema>;
+
+export const CreatePostQueueItemRequestSchema = z.object({
+  title: z.string().trim().min(1).max(255),
+  caption: z.string().max(POST_CAPTION_HARD_MAX).default(""),
+  mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).default([]),
+});
+export type CreatePostQueueItemRequest = z.infer<
+  typeof CreatePostQueueItemRequestSchema
+>;
+
+export const UpdatePostQueueItemRequestSchema = z.object({
+  title: z.string().trim().min(1).max(255).optional(),
+  caption: z.string().max(POST_CAPTION_HARD_MAX).optional(),
+  mediaIds: z.array(z.string().uuid()).max(POST_MEDIA_MAX).optional(),
+});
+export type UpdatePostQueueItemRequest = z.infer<
+  typeof UpdatePostQueueItemRequestSchema
+>;
+
+export const MovePostQueueItemRequestSchema = z.object({
+  direction: z.enum(["up", "down"]),
+});
+export type MovePostQueueItemRequest = z.infer<
+  typeof MovePostQueueItemRequestSchema
+>;
+
+export const PostQueueItemResponseSchema = z.object({
+  id: z.string().uuid(),
+  /** Urutan tarik (menaik; terkecil = teratas). */
+  position: z.number().int(),
+  title: z.string(),
+  caption: z.string(),
+  mediaIds: z.array(z.string().uuid()),
+  status: PostQueueItemStatusSchema,
+  /** Kapan item ditarik slot (hanya status pulled). */
+  pulledAt: z.string().datetime().nullable(),
+  /** Grup postingan hasil tarikan (null = sasaran tunggal). */
+  pulledPostGroupId: z.string().uuid().nullable(),
+  /** Postingan hasil tarikan (hanya status pulled). */
+  pulledPostIds: z.array(z.string().uuid()),
+  createdByUserId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PostQueueItemResponse = z.infer<typeof PostQueueItemResponseSchema>;
+
+export const PostQueueItemListResponseSchema = z.object({
+  items: z.array(PostQueueItemResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type PostQueueItemListResponse = z.infer<
+  typeof PostQueueItemListResponseSchema
+>;
+
+export const PostQueueItemListQuerySchema = z.object({
+  status: PostQueueItemStatusSchema.optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type PostQueueItemListQuery = z.infer<
+  typeof PostQueueItemListQuerySchema
+>;
+
+// --- Slot rutin antrean ---
+
+/** Status slot rutin: active/paused diproses penyapu (paused = tembakan skipped); cancelled terminal. */
+export const PostQueueSlotStatusSchema = z.enum([
+  "active",
+  "paused",
+  "cancelled",
+]);
+export type PostQueueSlotStatus = z.infer<typeof PostQueueSlotStatusSchema>;
+
+/**
+ * Status satu tembakan slot. pulled = item teratas menjadi
+ * postingan terjadwal; empty = antrean kosong saat slot tiba
+ * (reason queue_empty); skipped = slot dijeda atau gerbang menolak
+ * (lihat reason); missed = slot basi (slot_expired/claim_stale).
+ */
+export const PostQueueFiringStatusSchema = z.enum([
+  "claimed",
+  "pulled",
+  "empty",
+  "skipped",
+  "missed",
+]);
+export type PostQueueFiringStatus = z.infer<typeof PostQueueFiringStatusSchema>;
+
+/** Pola slot rutin: mingguan — hari aktif (0=Minggu..6=Sabtu) + jam dinding. */
+export const PostQueueSlotPatternSchema = z.object({
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1).max(7),
+  /** Jam dinding slot "HH:MM" 24 jam dalam `timezone`. */
+  timeOfDay: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
+  /** Zona waktu IANA; kosong = zona waktu tenant. */
+  timezone: z.string().min(1).max(64).optional(),
+  /** Tembakan pertama tidak sebelum instan ini (ISO 8601); kosong = sekarang. */
+  startsAt: z.string().datetime().optional(),
+});
+export type PostQueueSlotPattern = z.infer<typeof PostQueueSlotPatternSchema>;
+
+export const CreatePostQueueSlotRequestSchema =
+  PostQueueSlotPatternSchema.extend({
+    name: z.string().trim().min(1).max(255),
+    targets: z.array(PostRecurrenceTargetInputSchema).min(1).max(20),
+  });
+export type CreatePostQueueSlotRequest = z.infer<
+  typeof CreatePostQueueSlotRequestSchema
+>;
+
+export const UpdatePostQueueSlotRequestSchema =
+  PostQueueSlotPatternSchema.partial().extend({
+    name: z.string().trim().min(1).max(255).optional(),
+    targets: z.array(PostRecurrenceTargetInputSchema).min(1).max(20).optional(),
+  });
+export type UpdatePostQueueSlotRequest = z.infer<
+  typeof UpdatePostQueueSlotRequestSchema
+>;
+
+export const PostQueueSlotResponseSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  targets: z.array(PostRecurrenceTargetSchema),
+  daysOfWeek: z.array(z.number().int()),
+  /** Jam slot "HH:MM" (diturunkan server dari jangkar + zona). */
+  timeOfDay: z.string(),
+  timezone: z.string(),
+  /** Jangkar pola: instan tembakan pertama. */
+  startsAt: z.string().datetime(),
+  status: PostQueueSlotStatusSchema,
+  /** Tembakan berikutnya yang belum diproses; null bila cancelled. */
+  nextRunAt: z.string().datetime().nullable(),
+  createdByUserId: z.string().uuid().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PostQueueSlotResponse = z.infer<typeof PostQueueSlotResponseSchema>;
+
+export const PostQueueSlotListResponseSchema = z.object({
+  slots: z.array(PostQueueSlotResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type PostQueueSlotListResponse = z.infer<
+  typeof PostQueueSlotListResponseSchema
+>;
+
+export const PostQueueSlotListQuerySchema = z.object({
+  status: PostQueueSlotStatusSchema.optional(),
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type PostQueueSlotListQuery = z.infer<
+  typeof PostQueueSlotListQuerySchema
+>;
+
+export const PostQueueFiringResponseSchema = z.object({
+  id: z.string().uuid(),
+  slotId: z.string().uuid(),
+  /** Instan tembakan (ISO 8601, UTC). */
+  slotAt: z.string().datetime(),
+  status: PostQueueFiringStatusSchema,
+  /**
+   * Alasan empty/skipped/missed: queue_empty, slot_paused,
+   * slot_expired, claim_stale, atau kode gerbang postingan core.
+   * Null untuk pulled/claimed.
+   */
+  reason: z.string().nullable(),
+  /** Item yang ditarik/direservasi tembakan ini (null untuk empty). */
+  queueItemId: z.string().uuid().nullable(),
+  postGroupId: z.string().uuid().nullable(),
+  postIds: z.array(z.string().uuid()),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type PostQueueFiringResponse = z.infer<
+  typeof PostQueueFiringResponseSchema
+>;
+
+export const PostQueueFiringListResponseSchema = z.object({
+  firings: z.array(PostQueueFiringResponseSchema),
+  nextCursor: z.string().nullable(),
+});
+export type PostQueueFiringListResponse = z.infer<
+  typeof PostQueueFiringListResponseSchema
+>;
+
+export const PostQueueFiringListQuerySchema = z.object({
+  cursor: z.string().min(1).max(512).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+export type PostQueueFiringListQuery = z.infer<
+  typeof PostQueueFiringListQuerySchema
+>;
