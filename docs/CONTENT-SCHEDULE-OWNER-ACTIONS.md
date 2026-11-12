@@ -389,7 +389,20 @@ masing-masing). Yang tersisa murni tindakan pemilik per platform:
    nama/handle/avatar — akun hanya tampil tanpa nama & foto profil
    bila kedua sumber gagal (Channels menampilkan banner peringatan
    "profil belum lengkap"); hubungkan ulang akun yang sama untuk
-   mencoba mengisi profilnya lagi.
+   mencoba mengisi profilnya lagi; (g) PENYIMPANAN AVATAR TikTok:
+   berbeda dengan channel lain (byte foto di basis data), avatar
+   TikTok disimpan sebagai objek di Cloudflare R2
+   (`avatars/tiktok/<id-akun>`) karena URL avatar CDN TikTok adalah
+   URL bertanda tangan yang kedaluwarsa — salinan berkasnya harus
+   tinggal di penyimpanan objek platform sendiri. Bentuk R2 ini
+   hanya aktif SETELAH Access Key ID & Secret Access Key R2 terisi
+   di Panel Admin (grup Cloudflare R2; Account ID/Endpoint/Bucket
+   mengikuti grup yang sama); selama belum terisi, avatar TikTok
+   otomatis jatuh ke penyimpanan basis data seperti channel lain
+   (tidak ada yang rusak — pengambilan avatar berikutnya sesudah
+   kredensial terisi akan menulis ke R2 dan menimpa bentuknya).
+   Penyajian ke dashboard tidak berubah: byte diambil server dari
+   R2, jadi domain publik media TIDAK perlu aktif untuk ini.
 2. **LinkedIn** — (a) buat aplikasi di LinkedIn Developers dan
    aktifkan produk "Sign In with LinkedIn using OpenID Connect" +
    "Share on LinkedIn" (scope `openid profile w_member_social`);
