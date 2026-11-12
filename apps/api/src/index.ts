@@ -633,7 +633,7 @@ routes.route(
 );
 // Modul LinkedIn OAuth Connect (gelombang Semua OAuth) —
 // "Hubungkan dengan LinkedIn" untuk profil pribadi: start ber-state
-// sekali pakai + callback tunggal publik /linkedin/oauth/callback +
+// sekali pakai + callback tunggal publik /oauth/linkedin/callback +
 // info ketersediaan. Kredensial aplikasi dari Panel Admin
 // (linkedin_client_id/secret; env hanya fallback). TANPA refresh
 // token (program standar LinkedIn tidak menerbitkannya) —

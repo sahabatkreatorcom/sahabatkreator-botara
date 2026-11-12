@@ -232,7 +232,7 @@ async function startAndGetState(
   };
   assert.equal(body.available, false);
   assert.equal(body.clientId, null);
-  assert.equal(body.oauthRedirectUri, "https://app.test/api/linkedin/oauth/callback");
+  assert.equal(body.oauthRedirectUri, "https://app.test/api/oauth/linkedin/callback");
 
   const start = await app.request(`/tenants/${TENANT_A}/linkedin-oauth/start`, {
     method: "POST",
@@ -278,7 +278,7 @@ let happyState = "";
   assert.equal(dialog.searchParams.get("response_type"), "code");
   assert.equal(
     dialog.searchParams.get("redirect_uri"),
-    "https://app.test/api/linkedin/oauth/callback",
+    "https://app.test/api/oauth/linkedin/callback",
   );
   happyState = dialog.searchParams.get("state")!;
   assert.ok(happyState.length > 10);
@@ -288,7 +288,7 @@ let happyState = "";
 // ---------- [3] State rusak ditolak ----------
 {
   const res = await app.request(
-    `/linkedin/oauth/callback?code=apapun&state=${happyState}x`,
+    `/oauth/linkedin/callback?code=apapun&state=${happyState}x`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -300,7 +300,7 @@ let happyState = "";
 // ---------- [4] Callback sukses → akun tersimpan + avatar + sasaran /posts ----------
 {
   const res = await app.request(
-    `/linkedin/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/linkedin/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(res.status, 302);
   assert.equal(
@@ -313,7 +313,7 @@ let happyState = "";
   assert.equal(lastTokenForm?.get("code"), "kode-uji");
   assert.equal(
     lastTokenForm?.get("redirect_uri"),
-    "https://app.test/api/linkedin/oauth/callback",
+    "https://app.test/api/oauth/linkedin/callback",
   );
 
   const rows = await client.query<{
@@ -363,7 +363,7 @@ let happyState = "";
 
   // ---------- [5] Replay state yang sama ditolak ----------
   const replay = await app.request(
-    `/linkedin/oauth/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
+    `/oauth/linkedin/callback?code=kode-uji&state=${encodeURIComponent(happyState)}`,
   );
   assert.equal(replay.status, 302);
   assert.ok(
@@ -377,7 +377,7 @@ let happyState = "";
 // ---------- [6] User membatalkan di dialog ----------
 {
   const res = await app.request(
-    `/linkedin/oauth/callback?error=user_cancelled_login&error_description=dibatalkan`,
+    `/oauth/linkedin/callback?error=user_cancelled_login&error_description=dibatalkan`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -390,7 +390,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/linkedin/oauth/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
+    `/oauth/linkedin/callback?code=kode-buruk&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -409,7 +409,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/linkedin/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/linkedin/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(res.status, 302);
   assert.ok(
@@ -432,7 +432,7 @@ let happyState = "";
   );
   const state = await startAndGetState(app, TENANT_A, USER_A);
   const res = await app.request(
-    `/linkedin/oauth/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
+    `/oauth/linkedin/callback?code=kode-uji&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -456,7 +456,7 @@ let happyState = "";
 {
   const state = await startAndGetState(app, TENANT_B, USER_B);
   const res = await app.request(
-    `/linkedin/oauth/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
+    `/oauth/linkedin/callback?code=kode-kedua&state=${encodeURIComponent(state)}`,
   );
   assert.equal(
     res.headers.get("location"),
@@ -493,6 +493,16 @@ let happyState = "";
   assert.equal(body.available, true);
   assert.equal(body.clientId, "linkedin-id-env");
   console.log("[10] tanpa panel → env fallback membuat connect tersedia: OK");
+}
+
+// ---------- [12] Path callback lama TIDAK terdaftar lagi (pemotongan bersih) ----------
+// Aturan pemilik 2026-11-12: penyeragaman URL TANPA alias — callback
+// kanonis adalah /oauth/linkedin/callback; path lama
+// /linkedin/oauth/callback harus menjawab 404.
+{
+  const res = await app.request(`/linkedin/oauth/callback?code=apapun&state=apapun`);
+  assert.equal(res.status, 404);
+  console.log("[12] path callback lama /linkedin/oauth/callback → 404 (tanpa alias): OK");
 }
 
 fake.closeAllConnections();

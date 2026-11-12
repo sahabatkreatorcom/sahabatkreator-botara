@@ -132,7 +132,7 @@ function check(name: string, ok: boolean): void {
     clientId: "id-uji",
     clientSecret: "secret-uji",
     code: "kode-uji",
-    redirectUri: "https://app.test/api/linkedin/oauth/callback",
+    redirectUri: "https://app.test/api/oauth/linkedin/callback",
   });
   check(
     "exchange code → token + expires_in ±60 hari",
@@ -147,7 +147,7 @@ function check(name: string, ok: boolean): void {
       form.get("client_id") === "id-uji" &&
       form.get("client_secret") === "secret-uji" &&
       form.get("code") === "kode-uji" &&
-      form.get("redirect_uri") === "https://app.test/api/linkedin/oauth/callback",
+      form.get("redirect_uri") === "https://app.test/api/oauth/linkedin/callback",
   );
   const info = await client.getLinkedInUserInfo("akses-linkedin");
   check(
@@ -164,7 +164,7 @@ function check(name: string, ok: boolean): void {
       clientId: "id-uji",
       clientSecret: "secret-uji",
       code: "kode-mati",
-      redirectUri: "https://app.test/api/linkedin/oauth/callback",
+      redirectUri: "https://app.test/api/oauth/linkedin/callback",
     });
   } catch (err) {
     caught = err;

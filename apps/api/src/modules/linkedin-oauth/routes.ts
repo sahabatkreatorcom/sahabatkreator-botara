@@ -35,7 +35,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  * "Hubungkan dengan LinkedIn" untuk PROFIL PRIBADI.
  *
  *   POST /tenants/:tenantId/linkedin-oauth/start             buat state + URL dialog
- *   GET  /linkedin/oauth/callback                            callback TUNGGAL platform (publik)
+ *   GET  /oauth/linkedin/callback                            callback TUNGGAL platform (publik)
  *   GET  /tenants/:tenantId/channels/linkedin-oauth-info     ketersediaan connect (owner/admin)
  *
  * Alur resmi: authorize di
@@ -100,7 +100,7 @@ export function createLinkedInOAuthRoutes(
     app.get("/tenants/:tenantId/channels/linkedin-oauth-info", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
-    app.get("/linkedin/oauth/callback", (c) =>
+    app.get("/oauth/linkedin/callback", (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -112,7 +112,7 @@ export function createLinkedInOAuthRoutes(
   });
 
   const webBase = (opts.publicBaseUrl ?? "").replace(/\/+$/, "");
-  const redirectUri = `${webBase}/api/linkedin/oauth/callback`;
+  const redirectUri = `${webBase}/api/oauth/linkedin/callback`;
 
   /** Konfigurasi OAuth efektif (panel → env). */
   async function resolveLinkedInConfig() {
@@ -241,7 +241,7 @@ export function createLinkedInOAuthRoutes(
   // Callback TUNGGAL (publik; identitas dari state bertanda tangan).
   // Semua kegagalan → redirect error berkode TANPA membuat akun apa pun.
   // -------------------------------------------------------------------------
-  app.get("/linkedin/oauth/callback", async (c) => {
+  app.get("/oauth/linkedin/callback", async (c) => {
     const fail = (code: string) =>
       c.redirect(`${webBase}/channels?linkedin_oauth_error=${code}`, 302);
 
