@@ -4,8 +4,10 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type ReactNode,
 } from "react";
 import type {
+  AgentPlaygroundDraftConfig,
   AgentPlaygroundIntent,
   AgentPlaygroundResponse,
   AgentResponse,
@@ -75,6 +77,14 @@ interface PlaygroundPanelProps {
   locale: Locale;
   /** Berpindah ke tab Agen (dipakai tombol pada keadaan belum ada agent). */
   onOpenAgentsTab: () => void;
+  /**
+   * Draf agent dari formulir buat/edit ("Coba di Playground") — bila
+   * terisi, panel masuk MODE DRAF: uji memakai konfigurasi draf ini
+   * lewat endpoint playground-draft, tanpa agent tersimpan apa pun.
+   */
+  draft?: AgentPlaygroundDraftConfig | null;
+  /** Keluar mode draf → kembali ke mode agent tersimpan. */
+  onExitDraft?: () => void;
 }
 
 /**
@@ -90,7 +100,12 @@ export function PlaygroundPanel({
   t,
   locale,
   onOpenAgentsTab,
+  draft,
+  onExitDraft,
 }: PlaygroundPanelProps) {
+  const draftMode = draft != null;
+  const draftName =
+    draft?.name ?? t("agentsHub.playgroundDraftFallbackName");
   const { status, tenants, active } = useWorkspace();
   const tenantId = active?.id ?? null;
 
@@ -135,12 +150,22 @@ export function PlaygroundPanel({
     setInput("");
   }, [tenantId]);
 
+  // Ganti draf (seed baru dari formulir) atau keluar mode draf = sesi uji
+  // baru: riwayat draf lama tidak boleh terbaca sebagai uji draf yang baru.
+  useEffect(() => {
+    setTurns([]);
+    setError(null);
+    setInput("");
+  }, [draft]);
+
   const selectedAgent = agents.find((a) => a.id === selectedAgentId) ?? null;
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     const message = input.trim();
-    if (!message || !tenantId || !selectedAgent || sending) return;
+    if (!message || !tenantId || sending) return;
+    // Mode tersimpan butuh agent pilihan; mode draf berdiri sendiri.
+    if (!draftMode && !selectedAgent) return;
     const userTurn: PlaygroundTurn = {
       id: nextId.current++,
       role: "user",
@@ -154,17 +179,23 @@ export function PlaygroundPanel({
     setError(null);
     setSending(true);
     try {
-      const result = await api.agents.playground(tenantId, selectedAgent.id, {
-        message,
-        history,
-      });
+      const result = draftMode
+        ? await api.agents.playgroundDraft(tenantId, {
+            draft,
+            message,
+            history,
+          })
+        : await api.agents.playground(tenantId, selectedAgent!.id, {
+            message,
+            history,
+          });
       setTurns((prev) => [
         ...prev,
         {
           id: nextId.current++,
           role: "assistant",
           text: result.replyText,
-          agentName: selectedAgent.name,
+          agentName: draftMode ? draftName : selectedAgent!.name,
           result,
         },
       ]);
@@ -200,7 +231,57 @@ export function PlaygroundPanel({
         </p>
       </div>
 
-      {agentsLoading ? (
+      {/* Spanduk mode draf: yang diuji adalah isi formulir agent yang
+          BELUM disimpan, bukan agent tersimpan mana pun. */}
+      {draftMode ? (
+        <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-line bg-surface p-4">
+          <p className="min-w-0 flex-1 text-sm text-ink">
+            {t("agentsHub.playgroundDraftBanner", { name: draftName })}
+          </p>
+          <span className="shrink-0 rounded-full bg-accent/10 px-2 py-0.5 text-xs font-semibold text-accent">
+            {t("agentsHub.playgroundDraftBadge")}
+          </span>
+          {onExitDraft ? (
+            <button
+              type="button"
+              onClick={onExitDraft}
+              className="shrink-0 rounded-lg bg-elevated px-3 py-1.5 text-xs font-medium text-ink"
+            >
+              {t("agentsHub.playgroundDraftExitButton")}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {draftMode ? (
+        <PlaygroundChat
+          t={t}
+          locale={locale}
+          turns={turns}
+          input={input}
+          sending={sending}
+          error={error}
+          canSend={tenantId !== null}
+          onInputChange={setInput}
+          onSend={handleSend}
+          header={
+            turns.length > 0 ? (
+              <div className="mt-4 flex flex-wrap items-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTurns([]);
+                    setError(null);
+                  }}
+                  className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+                >
+                  {t("agentsHub.playgroundResetButton")}
+                </button>
+              </div>
+            ) : null
+          }
+        />
+      ) : agentsLoading ? (
         <p className="mt-6 text-sm text-muted">{t("common.loading")}</p>
       ) : agents.length === 0 ? (
         <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center">
@@ -216,118 +297,166 @@ export function PlaygroundPanel({
           </button>
         </div>
       ) : (
-        <>
-          <div className="mt-4 flex flex-wrap items-end gap-3">
-            <label className="block min-w-56 flex-1 sm:max-w-xs">
-              <span className="mb-1 block text-xs font-medium text-muted">
-                {t("agentsHub.playgroundAgentLabel")}
-              </span>
-              <select
-                value={selectedAgentId}
-                onChange={(e) => setSelectedAgentId(e.target.value)}
-                className={inputClassName}
-              >
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name}
-                    {" · "}
-                    {t(
-                      agent.mode === "suggest"
-                        ? "agents.modeSuggest"
-                        : "agents.modeAuto",
-                    )}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {turns.length > 0 ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setTurns([]);
-                  setError(null);
-                }}
-                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
-              >
-                {t("agentsHub.playgroundResetButton")}
-              </button>
-            ) : null}
-          </div>
-
-          <FieldError message={error} />
-
-          {turns.length === 0 ? (
-            <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center">
-              <h2 className="text-base font-semibold text-ink">
-                {t("agentsHub.playgroundEmptyTitle")}
-              </h2>
-              <p className="mx-auto mt-1 max-w-md text-sm text-muted">
-                {t("agentsHub.playgroundEmptyBody")}
-              </p>
+        <PlaygroundChat
+          t={t}
+          locale={locale}
+          turns={turns}
+          input={input}
+          sending={sending}
+          error={error}
+          canSend={selectedAgent !== null}
+          onInputChange={setInput}
+          onSend={handleSend}
+          header={
+            <div className="mt-4 flex flex-wrap items-end gap-3">
+              <label className="block min-w-56 flex-1 sm:max-w-xs">
+                <span className="mb-1 block text-xs font-medium text-muted">
+                  {t("agentsHub.playgroundAgentLabel")}
+                </span>
+                <select
+                  value={selectedAgentId}
+                  onChange={(e) => setSelectedAgentId(e.target.value)}
+                  className={inputClassName}
+                >
+                  {agents.map((agent) => (
+                    <option key={agent.id} value={agent.id}>
+                      {agent.name}
+                      {" · "}
+                      {t(
+                        agent.mode === "suggest"
+                          ? "agents.modeSuggest"
+                          : "agents.modeAuto",
+                      )}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {turns.length > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTurns([]);
+                    setError(null);
+                  }}
+                  className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+                >
+                  {t("agentsHub.playgroundResetButton")}
+                </button>
+              ) : null}
             </div>
-          ) : (
-            <ul className="mt-6 space-y-4">
-              {turns.map((turn) => (
-                <li key={turn.id}>
-                  {turn.role === "user" ? (
-                    <div className="ml-auto max-w-xl rounded-2xl rounded-br-md bg-accent/10 p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                        {t("agentsHub.playgroundCustomerLabel")}
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
-                        {turn.text}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="mr-auto max-w-xl rounded-2xl rounded-bl-md border border-line bg-surface p-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                        {turn.agentName ?? t("agentsHub.playgroundAgentLabel")}
-                      </p>
-                      <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
-                        {turn.text}
-                      </p>
-                      {turn.result ? (
-                        <PlaygroundResultDetails
-                          t={t}
-                          locale={locale}
-                          result={turn.result}
-                        />
-                      ) : null}
-                    </div>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <form onSubmit={handleSend} className="mt-6 flex items-end gap-2">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  e.currentTarget.form?.requestSubmit();
-                }
-              }}
-              placeholder={t("agentsHub.playgroundInputPlaceholder")}
-              rows={2}
-              maxLength={4000}
-              className={`${inputClassName} flex-1 resize-none`}
-            />
-            <button
-              type="submit"
-              disabled={sending || !selectedAgent || input.trim() === ""}
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-            >
-              {sending
-                ? t("agentsHub.playgroundSending")
-                : t("agentsHub.playgroundSendButton")}
-            </button>
-          </form>
-        </>
+          }
+        />
       )}
     </div>
+  );
+}
+
+/**
+ * Permukaan chat uji yang dipakai bersama mode agent tersimpan dan
+ * mode draf: header (pemilih agent ATAU tombol reset draf) disediakan
+ * pemanggil; daftar giliran, keadaan kosong, dan formulir kirim sama
+ * persis di kedua mode — hanya sumber balasannya yang berbeda.
+ */
+function PlaygroundChat({
+  t,
+  locale,
+  turns,
+  input,
+  sending,
+  error,
+  canSend,
+  onInputChange,
+  onSend,
+  header,
+}: {
+  t: Translate;
+  locale: Locale;
+  turns: PlaygroundTurn[];
+  input: string;
+  sending: boolean;
+  error: string | null;
+  /** Mode tersimpan: ada agent terpilih. Mode draf: selalu true. */
+  canSend: boolean;
+  onInputChange: (value: string) => void;
+  onSend: (e: FormEvent) => void;
+  header: ReactNode;
+}) {
+  return (
+    <>
+      {header}
+
+      <FieldError message={error} />
+
+      {turns.length === 0 ? (
+        <div className="mt-6 rounded-xl border border-dashed border-line bg-surface p-8 text-center">
+          <h2 className="text-base font-semibold text-ink">
+            {t("agentsHub.playgroundEmptyTitle")}
+          </h2>
+          <p className="mx-auto mt-1 max-w-md text-sm text-muted">
+            {t("agentsHub.playgroundEmptyBody")}
+          </p>
+        </div>
+      ) : (
+        <ul className="mt-6 space-y-4">
+          {turns.map((turn) => (
+            <li key={turn.id}>
+              {turn.role === "user" ? (
+                <div className="ml-auto max-w-xl rounded-2xl rounded-br-md bg-accent/10 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {t("agentsHub.playgroundCustomerLabel")}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                    {turn.text}
+                  </p>
+                </div>
+              ) : (
+                <div className="mr-auto max-w-xl rounded-2xl rounded-bl-md border border-line bg-surface p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted">
+                    {turn.agentName ?? t("agentsHub.playgroundAgentLabel")}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap text-sm text-ink">
+                    {turn.text}
+                  </p>
+                  {turn.result ? (
+                    <PlaygroundResultDetails
+                      t={t}
+                      locale={locale}
+                      result={turn.result}
+                    />
+                  ) : null}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form onSubmit={onSend} className="mt-6 flex items-end gap-2">
+        <textarea
+          value={input}
+          onChange={(e) => onInputChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              e.currentTarget.form?.requestSubmit();
+            }
+          }}
+          placeholder={t("agentsHub.playgroundInputPlaceholder")}
+          rows={2}
+          maxLength={4000}
+          className={`${inputClassName} flex-1 resize-none`}
+        />
+        <button
+          type="submit"
+          disabled={sending || !canSend || input.trim() === ""}
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        >
+          {sending
+            ? t("agentsHub.playgroundSending")
+            : t("agentsHub.playgroundSendButton")}
+        </button>
+      </form>
+    </>
   );
 }
 

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import type { AgentPlaygroundDraftConfig } from "@sahabat-kreator/contracts";
 import type { Locale, TranslationKey } from "@sahabat-kreator/i18n";
 import { AgentsListSection, SuggestionsSection } from "./AgentsPage";
 import { KnowledgePage } from "./KnowledgePage";
@@ -48,6 +49,10 @@ interface AgentsHubPageProps {
 export function AgentsHubPage({ t, locale }: AgentsHubPageProps) {
   const [tab, setTab] = useState<AgentsHubTab>(() => readTabFromUrl());
   const { pendingCount } = usePendingApprovals();
+  // Draf agent dari formulir buat/edit ("Coba di Playground") — diuji di
+  // PlaygroundPanel TANPA disimpan; null = mode agent tersimpan biasa.
+  const [playgroundDraft, setPlaygroundDraft] =
+    useState<AgentPlaygroundDraftConfig | null>(null);
 
   useEffect(() => {
     const onPopState = () => setTab(readTabFromUrl());
@@ -107,7 +112,14 @@ export function AgentsHubPage({ t, locale }: AgentsHubPageProps) {
 
       <div className="mt-5">
         {tab === "agents" ? (
-          <AgentsListSection t={t} locale={locale} />
+          <AgentsListSection
+            t={t}
+            locale={locale}
+            onTryInPlayground={(draft) => {
+              setPlaygroundDraft(draft);
+              selectTab("playground");
+            }}
+          />
         ) : tab === "suggestions" ? (
           <SuggestionsSection t={t} locale={locale} />
         ) : tab === "knowledge" ? (
@@ -117,6 +129,8 @@ export function AgentsHubPage({ t, locale }: AgentsHubPageProps) {
             t={t}
             locale={locale}
             onOpenAgentsTab={() => selectTab("agents")}
+            draft={playgroundDraft}
+            onExitDraft={() => setPlaygroundDraft(null)}
           />
         )}
       </div>
