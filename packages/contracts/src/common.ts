@@ -196,6 +196,16 @@ export const ErrorCodeSchema = z.enum([
   // Fase 16B: instantiate galeri template automation dengan slug tak
   // dikenal → 404 (padanan FLOW_TEMPLATE_NOT_FOUND untuk /automations).
   "AUTOMATION_TEMPLATE_NOT_FOUND",
+  // G2b: pendaftaran sequence MANUAL (per kontak / per tag) ditolak
+  // dengan sebab yang bisa ditindaklanjuti pengguna, bukan 400 generik:
+  // sequence nonaktif/bukan sequence, sequence tanpa langkah, kontak
+  // tanpa percakapan pesan sebagai jangkar, percakapan pilihan bukan
+  // percakapan pesan kontak itu, atau kontak sudah opt-out.
+  "SEQUENCE_UNAVAILABLE",
+  "SEQUENCE_NO_STEPS",
+  "ENROLL_NO_CONVERSATION",
+  "ENROLL_CONVERSATION_INVALID",
+  "ENROLL_CONTACT_OPTED_OUT",
   // Fase 23: content schedule. Kode domain PostDomainError dipetakan 1:1
   // ke sini supaya UI menerjemahkan sebabnya, bukan menebak dari status.
   "POST_NOT_FOUND",

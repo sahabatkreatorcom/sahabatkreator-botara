@@ -242,3 +242,88 @@ export const SequenceEnrollmentListResponseSchema = z.object({
 export type SequenceEnrollmentListResponse = z.infer<
   typeof SequenceEnrollmentListResponseSchema
 >;
+
+// ---------------------------------------------------------------------------
+// Pendaftaran sequence MANUAL (G2b) — daftarkan kontak / semua kontak
+// bertag ke sequence aktif dari dashboard, tanpa menunggu kata kunci.
+// Enrollment manual berjangkar ke PERCAKAPAN PESAN (kind 'private' /
+// 'group') milik kontak: `conversationId` boleh dipilih eksplisit;
+// kosong = percakapan pesan terbaru kontak. Kontak tanpa percakapan
+// pesan tidak bisa didaftarkan (ENROLL_NO_CONVERSATION) — TIDAK ada
+// enrollment yang lahir mengambang tanpa percakapan.
+// ---------------------------------------------------------------------------
+
+export const EnrollSequenceContactRequestSchema = z.object({
+  contactId: z.string().uuid(),
+  /** Jangkar eksplisit; harus percakapan pesan milik kontak ini. */
+  conversationId: z.string().uuid().optional(),
+});
+export type EnrollSequenceContactRequest = z.infer<
+  typeof EnrollSequenceContactRequestSchema
+>;
+
+export const EnrollSequenceByTagRequestSchema = z.object({
+  tag: z.string().trim().min(1).max(128),
+});
+export type EnrollSequenceByTagRequest = z.infer<
+  typeof EnrollSequenceByTagRequestSchema
+>;
+
+/**
+ * Hasil pendaftaran satu kontak. Penolakan BUKAN di sini: sebab
+ * penolakan (tanpa percakapan, opt-out, sequence tak tersedia, …)
+ * berjalan sebagai error berkode (lihat ErrorCodeSchema) supaya UI
+ * menerjemahkan sebabnya, bukan menebak dari status.
+ */
+export const EnrollSequenceContactResponseSchema = z.object({
+  outcome: z.enum(["enrolled", "already_enrolled"]),
+  enrollment: SequenceEnrollmentResponseSchema,
+});
+export type EnrollSequenceContactResponse = z.infer<
+  typeof EnrollSequenceContactResponseSchema
+>;
+
+/**
+ * Laporan pendaftaran per tag: berapa kontak cocok, berapa benar-benar
+ * terdaftar baru, berapa sudah terdaftar sebelumnya, dan berapa
+ * dilewati — diagregat per alasan (kontak yang dilewati tidak disebut
+ * satu per satu; daftar enrollment adalah sumber kebenaran per kontak).
+ */
+export const EnrollSequenceByTagResponseSchema = z.object({
+  tag: z.string(),
+  /** Total kontak tenant yang memuat tag ini. */
+  matched: z.number().int().nonnegative(),
+  enrolled: z.number().int().nonnegative(),
+  alreadyEnrolled: z.number().int().nonnegative(),
+  skippedTotal: z.number().int().nonnegative(),
+  skippedByReason: z.object({
+    noConversation: z.number().int().nonnegative(),
+    contactOptedOut: z.number().int().nonnegative(),
+  }),
+  /** true bila `matched` melebihi batas pemrosesan per panggilan. */
+  capped: z.boolean(),
+});
+export type EnrollSequenceByTagResponse = z.infer<
+  typeof EnrollSequenceByTagResponseSchema
+>;
+
+/** Satu percakapan pesan kandidat jangkar enrollment manual. */
+export const EnrollConversationResponseSchema = z.object({
+  id: z.string().uuid(),
+  kind: z.enum(["private", "group"]),
+  provider: z.string(),
+  /** Judul grup di provider; null untuk percakapan privat. */
+  title: z.string().nullable(),
+  lastMessageAt: z.string().datetime().nullable(),
+  createdAt: z.string().datetime(),
+});
+export type EnrollConversationResponse = z.infer<
+  typeof EnrollConversationResponseSchema
+>;
+
+export const EnrollConversationListResponseSchema = z.object({
+  conversations: z.array(EnrollConversationResponseSchema),
+});
+export type EnrollConversationListResponse = z.infer<
+  typeof EnrollConversationListResponseSchema
+>;

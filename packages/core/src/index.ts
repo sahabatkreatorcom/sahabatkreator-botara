@@ -197,6 +197,19 @@ export {
   type InstantiateSequenceTemplateResult,
 } from "./sequence-templates";
 export {
+  enrollContactInSequence,
+  listContactMessagingConversations,
+  enrollContactInSequenceManually,
+  enrollContactsInSequenceByTag,
+  MESSAGING_CONVERSATION_KINDS,
+  ENROLL_BY_TAG_MAX_CONTACTS,
+  type EnrollContactInSequenceInput,
+  type EnrollContactInSequenceResult,
+  type EnrollContactManuallyResult,
+  type EnrollContactsByTagReport,
+  type EnrollContactsByTagResult,
+} from "./sequence-enroll";
+export {
   JOB_FAILED_ACTION,
   recordPermanentJobFailure,
   type RecordPermanentJobFailureInput,

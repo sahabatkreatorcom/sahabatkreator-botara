@@ -27,6 +27,7 @@ import { startFlowRunsForInboundMessage } from "./flows";
 import type { GoogleDeps } from "./google-calendar";
 import { setContactConsent } from "./contacts";
 import { getOptInSettings, matchConsentKeyword } from "./optin";
+import { enrollContactInSequence } from "./sequence-enroll";
 
 /**
  * Service domain automation (Fase 2A, RANCANGAN §5 & §6; Fase 2C sequence).
@@ -47,6 +48,10 @@ import { getOptInSettings, matchConsentKeyword } from "./optin";
  *        relay worker diterjemahkan menjadi job BullMQ tertunda
  *        `sequence.step`. Pendaftaran ulang saat enrollment masih aktif
  *        diabaikan: run dicatat `skipped` (alasan already_enrolled).
+ *        Sejak G2b pendaftaran berjalan lewat service bersama
+ *        `enrollContactInSequence` (sequence-enroll.ts) — implementasi
+ *        yang sama dengan node flow `enroll_sequence` dan pendaftaran
+ *        manual dari dashboard.
  *    Sebelum pencocokan, evaluasi juga MEMBATALKAN enrollment aktif di
  *    percakapan pesan ini (aturan berhenti 2C-a: kontak membalas pesan
  *    apa pun setelah terdaftar → rangkaian berhenti; audit
@@ -639,20 +644,6 @@ export async function evaluateInboundMessageForAutomations(
           eq(automations.isActive, true),
         ),
       );
-    const steps =
-      active.some((a) => a.kind === "sequence")
-        ? await tx
-            .select()
-            .from(automationSteps)
-            .where(eq(automationSteps.tenantId, tenantId))
-            .orderBy(asc(automationSteps.position))
-        : [];
-    const stepsByAutomation = new Map<string, AutomationStep[]>();
-    for (const step of steps) {
-      const list = stepsByAutomation.get(step.automationId) ?? [];
-      list.push(step);
-      stepsByAutomation.set(step.automationId, list);
-    }
 
     // --- Aturan berhenti 2C-a: pesan masuk membatalkan enrollment aktif ---
     const activeEnrollments = await tx
@@ -696,7 +687,7 @@ export async function evaluateInboundMessageForAutomations(
       cancelledEnrollments += 1;
     }
 
-    return { message, conversation, contact, active, stepsByAutomation, cancelledEnrollments };
+    return { message, conversation, contact, active, cancelledEnrollments };
   });
 
   if (!context)
@@ -841,125 +832,38 @@ export async function evaluateInboundMessageForAutomations(
 
       // ---- kind 'sequence': daftarkan kontak ke rangkaian (Fase 2C) ----
       if (automation.kind === "sequence") {
-        const steps = context.stepsByAutomation.get(automation.id) ?? [];
-        const firstStep = steps[0];
-        if (!firstStep) {
-          // Sequence tanpa langkah tidak bisa dibuat lewat API; catat
-          // skipped secara defensif dan anggap pesan tertangani.
-          const [run] = await tx
-            .insert(automationRuns)
-            .values({
-              tenantId,
-              automationId: automation.id,
-              contactId: context.conversation.contactId,
-              conversationId,
-              triggerMessageId: messageId,
-              status: "skipped",
-              detail: { matchedKeyword, reason: "no_steps" },
-            })
-            .returning();
-          return { kind: "skipped" as const, runId: run.id };
-        }
-        const [activeEnrollment] = await tx
-          .select({ id: sequenceEnrollments.id })
-          .from(sequenceEnrollments)
-          .where(
-            and(
-              eq(sequenceEnrollments.automationId, automation.id),
-              eq(sequenceEnrollments.contactId, context.conversation.contactId),
-              eq(sequenceEnrollments.status, "active"),
-            ),
-          )
-          .limit(1);
-        if (activeEnrollment) {
-          // Pendaftaran ulang saat rangkaian masih berjalan: diabaikan.
-          const [run] = await tx
-            .insert(automationRuns)
-            .values({
-              tenantId,
-              automationId: automation.id,
-              contactId: context.conversation.contactId,
-              conversationId,
-              triggerMessageId: messageId,
-              status: "skipped",
-              detail: {
-                matchedKeyword,
-                reason: "already_enrolled",
-                enrollmentId: activeEnrollment.id,
-              },
-            })
-            .returning();
-          return { kind: "skipped" as const, runId: run.id };
-        }
-
-        const now = new Date();
-        const nextRunAt = new Date(
-          now.getTime() + firstStep.delayMinutes * 60_000,
-        );
-        const [enrollment] = await tx
-          .insert(sequenceEnrollments)
-          .values({
-            tenantId,
-            automationId: automation.id,
-            contactId: context.conversation.contactId,
-            conversationId,
-            triggerMessageId: messageId,
-            currentStep: 0,
-            status: "active",
-            nextRunAt,
-          })
-          .returning();
-        const [run] = await tx
-          .insert(automationRuns)
-          .values({
-            tenantId,
-            automationId: automation.id,
-            contactId: context.conversation.contactId,
-            conversationId,
-            triggerMessageId: messageId,
-            status: "completed",
-            detail: {
-              matchedKeyword,
-              kind: "sequence",
-              enrollmentId: enrollment.id,
-            },
-          })
-          .returning();
-        await tx.insert(auditLogs).values({
+        // Logika pendaftaran hidup di service bersama (sequence-enroll,
+        // G2b) — jalur ini hanya menyalurkan konteks kata kuncinya dan
+        // memetakan outcome ke bentuk hasil evaluasi. recordNoStepsRun
+        // mempertahankan perilaku 2C: sequence tanpa langkah tetap
+        // tercatat sebagai run `skipped` beralasan no_steps.
+        const result = await enrollContactInSequence(tx, {
           tenantId,
-          actorType: "system",
-          actorId: `automation:${automation.id}`,
-          action: "sequence.enrolled",
-          meta: {
-            automationId: automation.id,
-            runId: run.id,
-            enrollmentId: enrollment.id,
-            triggerMessageId: messageId,
-            conversationId,
+          automationId: automation.id,
+          contactId: context.conversation.contactId,
+          conversationId,
+          triggerMessageId: messageId,
+          runDetailExtra: { matchedKeyword },
+          auditMetaExtra: { matchedKeyword },
+          recordNoStepsRun: true,
+        });
+        if (result.kind === "enrolled") {
+          return {
+            kind: "enrolled" as const,
+            runId: result.runId,
+            enrollmentId: result.enrollmentId,
             matchedKeyword,
-            firstStepPosition: firstStep.position,
-            nextRunAt: nextRunAt.toISOString(),
-          },
-        });
-        // Jadwal langkah pertama: event outbox diterjemahkan relay worker
-        // menjadi job BullMQ tertunda `sequence.step` (jobId deterministik
-        // seq-<enrollmentId>-<position> — lihat @sahabat-kreator/queue).
-        await tx.insert(outboxEvents).values({
-          tenantId,
-          type: "sequence.step_due",
-          payload: {
-            enrollmentId: enrollment.id,
-            automationId: automation.id,
-            stepPosition: firstStep.position,
-            delayMinutes: firstStep.delayMinutes,
-          },
-        });
-        return {
-          kind: "enrolled" as const,
-          runId: run.id,
-          enrollmentId: enrollment.id,
-          matchedKeyword,
-        };
+          };
+        }
+        if (result.kind === "sequence_unavailable") {
+          // Tidak tercapai: daftar `active` hanya memuat automation
+          // aktif dan kind-nya sudah diperiksa tepat di atas. Defensif:
+          // perlakukan seperti duplikat (pesan tertangani, tanpa run).
+          return { kind: "duplicate" as const };
+        }
+        // already_enrolled / no_steps: service sudah mencatat run
+        // `skipped`-nya — pesan tertangani automation.
+        return { kind: "skipped" as const, runId: result.runId! };
       }
 
       // ---- kind 'keyword': balasan langsung (Fase 2A) ----

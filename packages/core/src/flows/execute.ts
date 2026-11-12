@@ -12,16 +12,12 @@
  */
 import {
   and,
-  asc,
   eq,
   or,
 } from "drizzle-orm";
 import { APPOINTMENT_DEFAULT_NO_SLOTS_MESSAGE } from "@sahabat-kreator/contracts";
 import {
   auditLogs,
-  automationRuns,
-  automationSteps,
-  automations,
   contacts,
   conversations,
   flowExperimentAssignments,
@@ -31,7 +27,6 @@ import {
   messages,
   outboxEvents,
   products,
-  sequenceEnrollments,
   type Contact,
   type Conversation,
   type Database,
@@ -52,6 +47,7 @@ import {
   flowExperimentKey,
 } from "../experiments";
 import { renderMessageText } from "../render-text";
+import { enrollContactInSequence } from "../sequence-enroll";
 import { respondToInboundMessage } from "../agent-runtime";
 import {
   buildPaymentUrl,
@@ -655,141 +651,60 @@ async function executeNodeInTx(
       if (!automationId) {
         throw new FlowNodeError("enroll_sequence tanpa config.automationId");
       }
-      const [automation] = await tx
-        .select()
-        .from(automations)
-        .where(
-          and(
-            eq(automations.tenantId, tenantId),
-            eq(automations.id, automationId),
-          ),
-        )
-        .limit(1);
-      if (!automation || automation.kind !== "sequence" || !automation.isActive) {
-        // Sequence hilang/dinonaktifkan SETELAH aktivasi flow: langkah
-        // dilewati beralasan, run lanjut — bukan kegagalan run.
-        return {
-          detail: { outcome: "skipped", reason: "sequence_unavailable", automationId },
-        };
-      }
-      const steps = await tx
-        .select()
-        .from(automationSteps)
-        .where(
-          and(
-            eq(automationSteps.tenantId, tenantId),
-            eq(automationSteps.automationId, automationId),
-          ),
-        )
-        .orderBy(asc(automationSteps.position));
-      const firstStep = steps[0];
-      if (!firstStep) {
-        return {
-          detail: { outcome: "skipped", reason: "no_steps", automationId },
-        };
-      }
-      const [activeEnrollment] = await tx
-        .select({ id: sequenceEnrollments.id })
-        .from(sequenceEnrollments)
-        .where(
-          and(
-            eq(sequenceEnrollments.automationId, automationId),
-            eq(sequenceEnrollments.contactId, run.contactId),
-            eq(sequenceEnrollments.status, "active"),
-          ),
-        )
-        .limit(1);
-      if (activeEnrollment) {
-        await tx.insert(automationRuns).values({
-          tenantId,
-          automationId,
-          contactId: run.contactId,
-          conversationId: run.conversationId,
-          triggerMessageId: run.triggerMessageId,
-          status: "skipped",
-          detail: {
-            reason: "already_enrolled",
-            enrollmentId: activeEnrollment.id,
-            via: "flow",
-            flowId: run.flowId,
-            flowRunId: run.id,
-          },
-        });
-        return {
-          detail: {
-            outcome: "skipped",
-            reason: "already_enrolled",
-            automationId,
-            enrollmentId: activeEnrollment.id,
-          },
-        };
-      }
-      const now = new Date();
-      const nextRunAt = new Date(now.getTime() + firstStep.delayMinutes * 60_000);
-      const [enrollment] = await tx
-        .insert(sequenceEnrollments)
-        .values({
-          tenantId,
-          automationId,
-          contactId: run.contactId,
-          conversationId: run.conversationId,
-          triggerMessageId: run.triggerMessageId,
-          currentStep: 0,
-          status: "active",
-          nextRunAt,
-        })
-        .returning();
-      const [autoRun] = await tx
-        .insert(automationRuns)
-        .values({
-          tenantId,
-          automationId,
-          contactId: run.contactId,
-          conversationId: run.conversationId,
-          triggerMessageId: run.triggerMessageId,
-          status: "completed",
-          detail: {
-            kind: "sequence",
-            enrollmentId: enrollment.id,
-            via: "flow",
-            flowId: run.flowId,
-            flowRunId: run.id,
-          },
-        })
-        .returning();
-      await tx.insert(auditLogs).values({
+      // Pendaftaran berjalan lewat service bersama (sequence-enroll,
+      // G2b) — implementasi yang sama dengan evaluasi kata kunci dan
+      // pendaftaran manual dari dashboard. Konteks flow disalurkan
+      // sebagai field ekstra detail run & meta audit. Nama kunci via*
+      // di meta audit disengaja: target audit sequence.enrolled harus
+      // tetap sequence_enrollment (lihat deriveAuditTarget).
+      const result = await enrollContactInSequence(tx, {
         tenantId,
-        actorType: "system",
-        actorId: `automation:${automationId}`,
-        action: "sequence.enrolled",
-        meta: {
-          automationId,
-          runId: autoRun.id,
-          enrollmentId: enrollment.id,
-          triggerMessageId: run.triggerMessageId,
-          conversationId: run.conversationId,
+        automationId,
+        contactId: run.contactId,
+        conversationId: run.conversationId,
+        triggerMessageId: run.triggerMessageId,
+        runDetailExtra: { via: "flow", flowId: run.flowId, flowRunId: run.id },
+        auditMetaExtra: {
           via: "flow",
-          // Nama kunci via* disengaja: target audit sequence.enrolled
-          // harus tetap sequence_enrollment (lihat deriveAuditTarget).
           viaFlowId: run.flowId,
           viaFlowRunId: run.id,
-          firstStepPosition: firstStep.position,
-          nextRunAt: nextRunAt.toISOString(),
         },
       });
-      await tx.insert(outboxEvents).values({
-        tenantId,
-        type: "sequence.step_due",
-        payload: {
-          enrollmentId: enrollment.id,
-          automationId,
-          stepPosition: firstStep.position,
-          delayMinutes: firstStep.delayMinutes,
-        },
-      });
-      return {
-        detail: { outcome: "enrolled", automationId, enrollmentId: enrollment.id },
-      };
+      switch (result.kind) {
+        case "enrolled":
+          return {
+            detail: {
+              outcome: "enrolled",
+              automationId,
+              enrollmentId: result.enrollmentId,
+            },
+          };
+        case "already_enrolled":
+          return {
+            detail: {
+              outcome: "skipped",
+              reason: "already_enrolled",
+              automationId,
+              enrollmentId: result.enrollmentId,
+            },
+          };
+        case "no_steps":
+          return {
+            detail: { outcome: "skipped", reason: "no_steps", automationId },
+          };
+        case "sequence_unavailable":
+          // Sequence hilang/dinonaktifkan SETELAH aktivasi flow:
+          // langkah dilewati beralasan, run lanjut — bukan kegagalan run.
+          return {
+            detail: {
+              outcome: "skipped",
+              reason: "sequence_unavailable",
+              automationId,
+            },
+          };
+      }
+      // Tidak tercapai: union hasil service tertutup oleh switch di atas.
+      throw new FlowNodeError("enroll_sequence: hasil pendaftaran tidak dikenal");
     }
 
     case "set_field": {
