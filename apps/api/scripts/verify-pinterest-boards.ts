@@ -19,7 +19,17 @@
  *   [6] penjaga: peran member → 403; akun provider lain → 404;
  *       akun Pinterest terputus → 422; akun tenant lain → 404;
  *   [7] provider menolak daftar board → 502
- *       PINTEREST_BOARDS_UNAVAILABLE.
+ *       PINTEREST_BOARDS_UNAVAILABLE;
+ *   [8] board pada OPSI POSTINGAN (gelombang Pilihan Privasi & AI):
+ *       route posts memvalidasi board opsi dengan pola yang sama —
+ *       board asing pada create/group/update → 422 yang sama; board
+ *       milik akun → tersimpan sebagai publishOptions postingan;
+ *       buat board dari formulir post memakai endpoint POST boards
+ *       Channels di [5] (tidak ada jalur API kedua). Resolusi
+ *       penerbit berlapis (postingan → akun → board pertama)
+ *       dibuktikan di lapisnya masing-masing: opsi tersimpan di
+ *       core (posts.test), jembatan bawaan akun di [2], dan
+ *       `resolvePinBoard` di verify:pinterest-post.
  *
  * Token tiruan di skrip ini BUKAN kredensial sungguhan.
  *
@@ -46,6 +56,7 @@ import {
 import type { AuthBundle } from "../src/auth";
 import type { AppVariables } from "../src/http";
 import { createChannelsRoutes } from "../src/modules/channels/routes";
+import { createPostsRoutes } from "../src/modules/posts/routes";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(here, "../../../packages/db/migrations");
@@ -201,6 +212,16 @@ app.use("*", async (c, next) => {
 app.route(
   "/",
   createChannelsRoutes({ db } as unknown as AuthBundle, {
+    channelTokenSecret: CHANNEL_SECRET,
+    pinterestApiBase: fakeBase,
+  }),
+);
+// Modul posts dipasang sejak awal (Hono menolak route yang ditambah
+// sesudah aplikasi melayani request) — dipakai bagian [8] untuk
+// validasi board pada opsi postingan, dengan opsi produksi yang sama.
+app.route(
+  "/",
+  createPostsRoutes({ db } as unknown as AuthBundle, {
     channelTokenSecret: CHANNEL_SECRET,
     pinterestApiBase: fakeBase,
   }),
@@ -394,6 +415,100 @@ async function storedChoice(channelId: string) {
   assert.equal(body.error?.code, "PINTEREST_BOARDS_UNAVAILABLE");
   boardsDown = false;
   console.log("[7] GET /v5/boards 500 → 502 PINTEREST_BOARDS_UNAVAILABLE: OK");
+}
+
+// ---------- [8] Board pada opsi postingan (route posts) ----------
+interface PostBody {
+  id: string;
+  publishOptions: { pinterestBoardId?: string } | null;
+  error?: { code: string };
+}
+async function callPosts(
+  method: string,
+  url: string,
+  body?: unknown,
+): Promise<{ status: number; body: PostBody }> {
+  const res = await app.request(url, {
+    method,
+    headers: {
+      "x-test-user": USER_A,
+      ...(body !== undefined ? { "content-type": "application/json" } : {}),
+    },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+  });
+  return { status: res.status, body: (await res.json()) as PostBody };
+}
+{
+  // Sasaran Pinterest dimaterialisasi dari akun terhubung.
+  const targetsRes = await app.request(`/tenants/${TENANT_A}/posts/targets`, {
+    headers: { "x-test-user": USER_A },
+  });
+  assert.equal(targetsRes.status, 200);
+  const targetsBody = (await targetsRes.json()) as {
+    items: Array<{
+      conversationId: string;
+      provider: string;
+      channelAccountId: string;
+    }>;
+  };
+  const pinTarget = targetsBody.items.find(
+    (item) =>
+      item.provider === "pinterest" && item.channelAccountId === account.id,
+  );
+  assert.ok(pinTarget, "sasaran pinterest harus ada");
+
+  const createUrl = `/tenants/${TENANT_A}/posts`;
+  const foreign = await callPosts("POST", createUrl, {
+    conversationId: pinTarget.conversationId,
+    title: "Pin board asing",
+    caption: "Board milik akun lain tidak boleh lolos",
+    mediaIds: [],
+    publishOptions: { pinterestBoardId: "board-milik-orang" },
+  });
+  assert.equal(foreign.status, 422);
+  assert.equal(foreign.body.error?.code, "PINTEREST_BOARD_NOT_FOUND");
+
+  const own = await callPosts("POST", createUrl, {
+    conversationId: pinTarget.conversationId,
+    title: "Pin board sendiri",
+    caption: "Board milik akun ini sah sebagai opsi postingan",
+    mediaIds: [],
+    publishOptions: { pinterestBoardId: "board-2" },
+  });
+  assert.equal(own.status, 201);
+  assert.equal(own.body.publishOptions?.pinterestBoardId, "board-2");
+
+  const groupForeign = await callPosts("POST", `${createUrl}/group`, {
+    title: "Grup board asing",
+    caption: "Satu sasaran asing menggagalkan seluruh pembuatan",
+    mediaIds: [],
+    targets: [
+      {
+        conversationId: pinTarget.conversationId,
+        publishOptions: { pinterestBoardId: "board-milik-orang" },
+      },
+    ],
+  });
+  assert.equal(groupForeign.status, 422);
+  assert.equal(groupForeign.body.error?.code, "PINTEREST_BOARD_NOT_FOUND");
+
+  const patchForeign = await callPosts(
+    "PATCH",
+    `${createUrl}/${own.body.id}`,
+    { publishOptions: { pinterestBoardId: "board-milik-orang" } },
+  );
+  assert.equal(patchForeign.status, 422);
+  assert.equal(patchForeign.body.error?.code, "PINTEREST_BOARD_NOT_FOUND");
+
+  const patchOwn = await callPosts("PATCH", `${createUrl}/${own.body.id}`, {
+    publishOptions: { pinterestBoardId: "board-3" },
+  });
+  assert.equal(patchOwn.status, 200);
+  assert.equal(patchOwn.body.publishOptions?.pinterestBoardId, "board-3");
+
+  console.log(
+    "[8] board opsi postingan: asing → 422 pada create/group/update; milik akun → tersimpan (board-2, lalu board-3 lewat update): OK",
+  );
 }
 
 fake.closeAllConnections();

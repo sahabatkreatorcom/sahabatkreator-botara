@@ -8,9 +8,17 @@ atau DM, dan paket ini tidak mengimplementasikan `ChannelAdapter`.
 pengembangan lanjutan — HIDUP juga untuk direct post **foto /
 carousel** dengan auto music. Gerbang audit TikTok berlaku untuk
 kedua bentuk: sebelum aplikasi pemilik lolos audit Content Posting
-API, API hanya mengizinkan privasi `SELF_ONLY`; mode privasi
-adapter terkonfigurasi (Panel Admin, fallback env, bawaan
-`SELF_ONLY`) dan divalidasi terhadap `privacy_level_options` akun.
+API, API hanya mengizinkan privasi `SELF_ONLY`. Level privasi
+adalah PILIHAN KREATOR per postingan (gelombang Pilihan Privasi &
+AI — Content Sharing Guidelines mewajibkannya dipilih dari
+dropdown tanpa nilai terpilih duluan; bawaan Panel Admin → env
+hanya menjangkau postingan tanpa pilihan) dan selalu divalidasi
+terhadap `privacy_level_options` akun sebelum init, tanpa
+penurunan diam-diam. post_info juga membawa pilihan kreator lain:
+toggle interaksi (mati secara bawaan; yang dimatikan kreator di
+pengaturan TikTok selalu menang), pengungkapan komersial
+(`brand_content_toggle`/`brand_organic_toggle`), dan label AI
+(`is_aigc`).
 
 Dua jalur publikasi:
 

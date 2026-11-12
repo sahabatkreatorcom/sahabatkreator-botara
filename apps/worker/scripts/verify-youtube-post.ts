@@ -8,9 +8,12 @@
  * paket channel-youtube menjalankan `videos.insert` resumable.
  * Harness ini membuktikan bagian yang menjadi tanggung jawab klien:
  * urutan inisiasi sesi → PUT biner → resource video; bentuk metadata
- * (judul dari `title` post, deskripsi dari caption, privasi bawaan);
- * dan pemetaan error — terutama kuota proyek (1600 unit per insert)
- * ke `youtube_quota_exceeded` — tanpa jaringan atau kredensial nyata.
+ * (judul dari `title` post, deskripsi dari caption, dan field status
+ * dari PILIHAN PENGGUNA per postingan — privasi hasil resolusi
+ * adapter, `containsSyntheticMedia` dari pernyataan AI pengguna,
+ * `selfDeclaredMadeForKids` tri-state); dan pemetaan error —
+ * terutama kuota proyek (1600 unit per insert) ke
+ * `youtube_quota_exceeded` — tanpa jaringan atau kredensial nyata.
  *
  * Jalankan: pnpm --filter @sahabat-kreator/worker verify:youtube-post
  */
@@ -92,6 +95,7 @@ async function main(): Promise<void> {
     title: "Review Produk Baru",
     caption: "Deskripsi lengkap video minggu ini.\nTautan ada di bawah.",
     privacyStatus: "private",
+    containsSyntheticMedia: true,
   });
 
   // --- Pemetaan metadata (murni) --------------------------------------
@@ -101,12 +105,37 @@ async function main(): Promise<void> {
       metadata.snippet.description.startsWith("Deskripsi lengkap") &&
       metadata.snippet.categoryId === "22" &&
       metadata.status.privacyStatus === "private" &&
-      metadata.status.selfDeclaredMadeForKids === false,
+      metadata.status.containsSyntheticMedia === true,
+  );
+  check(
+    "metadata: madeForKids tidak ditetapkan pengguna → field TIDAK dikirim (penetapan level kanal berlaku, tri-state)",
+    !("selfDeclaredMadeForKids" in metadata.status),
+  );
+  const withKids = buildYouTubeVideoMetadata({
+    title: "Lagu anak",
+    caption: "Video untuk anak",
+    privacyStatus: "public",
+    containsSyntheticMedia: false,
+    madeForKids: true,
+  });
+  const notKids = buildYouTubeVideoMetadata({
+    title: "Podcast dewasa",
+    caption: "Bukan untuk anak",
+    privacyStatus: "unlisted",
+    containsSyntheticMedia: false,
+    madeForKids: false,
+  });
+  check(
+    "metadata: madeForKids eksplisit diteruskan apa adanya (true dan false sama-sama pernyataan pengguna)",
+    withKids.status.selfDeclaredMadeForKids === true &&
+      notKids.status.selfDeclaredMadeForKids === false &&
+      withKids.status.containsSyntheticMedia === false,
   );
   const fallback = buildYouTubeVideoMetadata({
     title: "   ",
     caption: "\nBaris pertama caption\nBaris kedua",
     privacyStatus: "unlisted",
+    containsSyntheticMedia: false,
   });
   check(
     "metadata: judul kosong jatuh ke baris pertama caption",
@@ -117,6 +146,7 @@ async function main(): Promise<void> {
     title: "j".repeat(150),
     caption: "x",
     privacyStatus: "private",
+    containsSyntheticMedia: false,
   });
   check(
     "metadata: judul dipotong ke batas 100 (pertahanan terakhir)",
@@ -162,6 +192,12 @@ async function main(): Promise<void> {
           "Review Produk Baru" &&
         (captured[0]!.json?.status as { privacyStatus?: string })
           ?.privacyStatus === "private",
+    );
+    check(
+      "resumable: pernyataan AI pengguna sampai ke payload inisiasi (containsSyntheticMedia true); madeForKids yang tidak ditetapkan tidak ada di payload",
+      (captured[0]!.json?.status as { containsSyntheticMedia?: boolean })
+        ?.containsSyntheticMedia === true &&
+        !("selfDeclaredMadeForKids" in (captured[0]!.json?.status ?? {})),
     );
     check(
       "resumable: PUT mengirim biner video apa adanya",

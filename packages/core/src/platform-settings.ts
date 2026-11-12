@@ -171,6 +171,12 @@ export const PLATFORM_SETTING_KEYS = [
   //   verifikasi aplikasi Google, tanpa edit env + restart.
   // - level privasi direct post TikTok; dulu env-only
   //   (TIKTOK_PRIVACY_LEVEL) — gerbang audit TikTok, pola yang sama.
+  //   Sejak gelombang Pilihan Privasi & AI per Postingan, dua kunci
+  //   privasi ini adalah NILAI BAWAAN platform (keputusan pemilik:
+  //   panel dipertahankan sebagai default): pilihan pengguna pada
+  //   postingan menimpanya per postingan — resolver di bawah tetap
+  //   menjadi lapis bawaan yang dibaca worker untuk postingan
+  //   tanpa pilihan.
   "post_media_public_base_url",
   "youtube_privacy_status",
   "tiktok_privacy_level",

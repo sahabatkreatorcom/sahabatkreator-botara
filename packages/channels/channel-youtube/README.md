@@ -30,7 +30,12 @@ Catatan desain yang mengikat:
 - **Kuota dijaga.** `videos.insert` = 1600 dari 10.000 unit/hari per
   proyek Google. Klien ini tidak melakukan panggilan pendamping
   (tanpa polling, tanpa list) dari jalur publikasi.
-- **Privasi bawaan `private`** (diatur adapter lewat env
-  `YOUTUBE_PRIVACY_STATUS`): aplikasi Google yang belum terverifikasi
-  memang dikunci Google ke private; bawaan aman ini membuat perilaku
-  sama di semua keadaan sampai pemilik menaikkan statusnya.
+- **Privasi dari pilihan pengguna per video** (gelombang Pilihan
+  Privasi & AI): adapter menyelesaikan `privacyStatus` dari opsi
+  postingan, atau bawaan platform (Panel Admin → env
+  `YOUTUBE_PRIVACY_STATUS`, bawaan `private`) bila postingan tidak
+  memilih. Metadata juga membawa `containsSyntheticMedia` dari
+  pernyataan AI pengguna dan `selfDeclaredMadeForKids` hanya bila
+  pengguna menetapkannya (tri-state — tidak dikirim = penetapan
+  kanal berlaku). Aplikasi Google yang belum terverifikasi memang
+  dikunci Google ke private apa pun pilihan yang dikirim.

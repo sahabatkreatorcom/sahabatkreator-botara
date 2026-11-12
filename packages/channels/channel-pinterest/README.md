@@ -11,11 +11,16 @@ paket:
   `api.pinterest.com`: daftar board (`GET /v5/boards`) dan pembuatan
   Pin (`POST /v5/pins`). Base URL dari konstruktor (default
   `https://api.pinterest.com`; override dipakai uji mock).
-- **Board tujuan = board pertama akun** (`resolveDefaultBoardId`).
-  Model post tidak punya konsep board dan gelombang ini tidak
-  menambah pemilih board; pemilihan board per postingan adalah
-  pengembangan lanjutan. Akun tanpa board gagal aman
-  (`pinterest_board_missing`).
+- **Board tujuan — resolusi berlapis** (`resolvePinBoard`):
+  pemanggil (adapter worker) menyerahkan board pilihan teratas —
+  board pada opsi postingan, atau bawaan akun dari pemilih board
+  Channels bila postingan tidak memilih; resolver memvalidasinya
+  ke daftar board hidup akun (pilihan yang sudah hilang ditandai
+  `preferredMissing` agar pemanggil mencatat jatuhnya) dan jatuh
+  ke board PERTAMA akun; akun tanpa board gagal aman
+  (`pinterest_board_missing`). Pembuatan board (`POST /v5/boards`)
+  juga dilayani klien ini untuk pemilih board Channels dan
+  formulir postingan (satu jalur API yang sama).
 - `buildPinterestPinPayload` — pembangun payload Pin murni: `title`
   post → judul Pin (maks 100), caption → deskripsi (maks 800),
   tautan tujuan = URL pertama di caption (opsional). Media:

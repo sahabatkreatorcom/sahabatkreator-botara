@@ -398,6 +398,9 @@ const EnvSchema = z.object({
    * OWNER-ACTIONS roadmap content schedule) — lewat Panel Admin (kunci
    * `youtube_privacy_status`); env ini hanya FALLBACK (instruksi
    * pemilik 2026-11-12), resolusi panel → env lewat resolver core.
+   * Sejak gelombang Pilihan Privasi & AI per Postingan nilai ini
+   * (panel → env) adalah lapis BAWAAN: pilihan privasi pengguna
+   * pada postingan menimpanya untuk postingan itu.
    */
   YOUTUBE_PRIVACY_STATUS: z
     .enum(["private", "unlisted", "public"])
@@ -413,7 +416,11 @@ const EnvSchema = z.object({
    * setelah audit lolos (lihat OWNER-ACTIONS roadmap content
    * schedule) — lewat Panel Admin (kunci `tiktok_privacy_level`);
    * env ini hanya FALLBACK (instruksi pemilik 2026-11-12), resolusi
-   * panel → env lewat resolver core.
+   * panel → env lewat resolver core. Sejak gelombang Pilihan
+   * Privasi & AI per Postingan nilai ini (panel → env) adalah lapis
+   * BAWAAN untuk postingan tanpa pilihan pengguna; postingan dari
+   * formulir selalu membawa pilihan kreatornya sendiri (guidelines
+   * TikTok melarang privasi yang terpilih duluan).
    */
   TIKTOK_PRIVACY_LEVEL: z
     .enum([

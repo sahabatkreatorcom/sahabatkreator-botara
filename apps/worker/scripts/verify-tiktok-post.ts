@@ -141,12 +141,35 @@ async function main(): Promise<void> {
     creatorInfo: CREATOR_INFO,
   });
   check(
-    "post_info: judul dipotong 2200 dan disable_* meniru pengaturan kreator",
+    "post_info: judul dipotong 2200; tanpa izin pengguna SEMUA disable_* aktif (guidelines: toggle interaksi tidak tercentang secara bawaan) + brand/is_aigc false eksplisit",
     postInfo.title.length === 2200 &&
       postInfo.privacy_level === "SELF_ONLY" &&
       postInfo.disable_duet === true &&
-      postInfo.disable_comment === false &&
-      postInfo.disable_stitch === false,
+      postInfo.disable_comment === true &&
+      postInfo.disable_stitch === true &&
+      postInfo.brand_content_toggle === false &&
+      postInfo.brand_organic_toggle === false &&
+      postInfo.is_aigc === false,
+  );
+  const chosenInfo = buildTikTokVideoPostInfo({
+    title: "Pilihan pengguna",
+    privacyLevel: "SELF_ONLY",
+    creatorInfo: CREATOR_INFO,
+    allowComment: true,
+    allowDuet: true,
+    allowStitch: true,
+    brandOrganic: true,
+    brandContent: true,
+    isAigc: true,
+  });
+  check(
+    "post_info pilihan: izin pengguna menyalakan komentar/stitch, tetapi duet tetap mati karena kreator mematikannya di pengaturan; brand + is_aigc diteruskan apa adanya",
+    chosenInfo.disable_comment === false &&
+      chosenInfo.disable_stitch === false &&
+      chosenInfo.disable_duet === true &&
+      chosenInfo.brand_organic_toggle === true &&
+      chosenInfo.brand_content_toggle === true &&
+      chosenInfo.is_aigc === true,
   );
   check(
     "privasi: level yang diizinkan akun lolos, yang tidak diizinkan ditolak",
@@ -202,6 +225,14 @@ async function main(): Promise<void> {
     privacyLevel: "SELF_ONLY",
     data: videoData,
     contentType: "video/mp4",
+    // Pilihan pengguna pada postingan (gelombang Pilihan Privasi &
+    // AI): komentar+stitch diizinkan, duet diminta tetapi kreator
+    // mematikannya, brand organik dinyatakan, konten AI dinyatakan.
+    allowComment: true,
+    allowDuet: true,
+    allowStitch: true,
+    brandOrganic: true,
+    isAigc: true,
     chunkSize: 5 * MB,
     pollIntervalMs: 1,
     maxPolls: 5,
@@ -233,6 +264,14 @@ async function main(): Promise<void> {
       initSource.video_size === 12 * MB &&
       initSource.chunk_size === 5 * MB &&
       initSource.total_chunk_count === 2,
+  );
+  check(
+    "init: pilihan pengguna diteruskan persis — komentar/stitch menyala, duet tetap mati (pengaturan kreator menang), brand organik true, brand bermerek false eksplisit, is_aigc true",
+    initPostInfo.disable_comment === false &&
+      initPostInfo.disable_stitch === false &&
+      initPostInfo.brand_organic_toggle === true &&
+      initPostInfo.brand_content_toggle === false &&
+      initPostInfo.is_aigc === true,
   );
   const puts = captured.filter((call) => call.url.includes("upload.fake"));
   check(
@@ -458,12 +497,31 @@ async function main(): Promise<void> {
     autoAddMusic: true,
   });
   check(
-    "foto post_info: judul dipotong 90, deskripsi dipotong 4000, auto_add_music true, disable_comment meniru kreator",
+    "foto post_info: judul dipotong 90, deskripsi dipotong 4000, auto_add_music true; tanpa izin pengguna disable_comment aktif walau kreator mengizinkan + brand/is_aigc false eksplisit",
     photoInfo.title.length === 90 &&
       photoInfo.description.length === 4000 &&
       photoInfo.privacy_level === "SELF_ONLY" &&
       photoInfo.auto_add_music === true &&
-      photoInfo.disable_comment === CREATOR_INFO.commentDisabled,
+      photoInfo.disable_comment === true &&
+      photoInfo.brand_content_toggle === false &&
+      photoInfo.brand_organic_toggle === false &&
+      photoInfo.is_aigc === false,
+  );
+  const photoChosen = buildTikTokPhotoPostInfo({
+    caption: "Foto dengan pilihan",
+    privacyLevel: "SELF_ONLY",
+    creatorInfo: CREATOR_INFO,
+    autoAddMusic: false,
+    allowComment: true,
+    brandContent: true,
+    isAigc: true,
+  });
+  check(
+    "foto post_info pilihan: komentar menyala atas izin pengguna (kreator juga mengizinkan), brand bermerek + is_aigc diteruskan",
+    photoChosen.disable_comment === false &&
+      photoChosen.brand_content_toggle === true &&
+      photoChosen.brand_organic_toggle === false &&
+      photoChosen.is_aigc === true,
   );
 
   // --- Resolver URL publik worker (gerbang gagal aman adapter) -----------
@@ -559,6 +617,13 @@ async function main(): Promise<void> {
       photoPostInfo.privacy_level === "SELF_ONLY" &&
       photoPostInfo.title === "Carousel promo minggu ini #fyp" &&
       photoPostInfo.description === "Carousel promo minggu ini #fyp",
+  );
+  check(
+    "foto init: tanpa pilihan pengguna disable_comment aktif + brand/is_aigc false eksplisit di payload",
+    photoPostInfo.disable_comment === true &&
+      photoPostInfo.brand_content_toggle === false &&
+      photoPostInfo.brand_organic_toggle === false &&
+      photoPostInfo.is_aigc === false,
   );
   check(
     "foto init: source PULL_FROM_URL dengan photo_images persis URL resolver + photo_cover_index 0",

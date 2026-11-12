@@ -24,6 +24,19 @@ menyebut kredensial/env dibaca sebagai: **isi/ubah di Panel Admin**.
 Yang tetap tindakan pemilik dan TIDAK berubah: kepemilikan akun,
 pengajuan App Review/audit/verifikasi ke masing-masing platform.
 
+**Kejelasan soal dua level privasi itu (gelombang Pilihan Privasi &
+AI per Postingan, 2026-11-12):** status privasi YouTube dan level
+privasi TikTok di Panel Admin kini berperan sebagai **NILAI BAWAAN
+platform** — bukan lagi satu-satunya keputusan. Syarat kedua
+platform adalah pengunggah yang memilih per postingan, jadi
+formulir postingan (/posts) kini menampilkan pemilih privasi +
+pernyataan konten AI per sasaran, dan pilihan pengguna di sana
+MENIMPA bawaan panel untuk postingan itu. Bawaan panel hanya
+berlaku untuk postingan yang tidak memilih (dan, khusus TikTok,
+jalur lama/non-formulir — formulir TikTok memang mewajibkan
+pilihan karena pedoman TikTok melarang privasi yang terpilih
+duluan). Detail modelnya di bagian terakhir dokumen ini.
+
 ---
 
 ## Gelombang 0 — Fondasi (administrasi paralel)
@@ -178,9 +191,16 @@ hanya bisa diajukan dari akun pemilik:
    tenant bersama) — ajukan penambahan kuota ke Google atau
    putuskan tenant besar membawa proyeknya sendiri (keputusan
    terbuka roadmap no. 2); (e) setelah verifikasi selesai, naikkan
-   status privasi YouTube di Panel Admin (grup Content schedule) dari
-   bawaan `private` ke `unlisted`/`public` bila video terjadwal harus
-   langsung publik (env `YOUTUBE_PRIVACY_STATUS` hanya fallback).
+   NILAI BAWAAN status privasi YouTube di Panel Admin (grup Content
+   schedule) dari `private` ke `unlisted`/`public` agar postingan
+   baru mulai dari level itu (env `YOUTUBE_PRIVACY_STATUS` hanya
+   fallback di bawah panel). Per gelombang Pilihan Privasi & AI,
+   privasi adalah pilihan PENGGUNA per video di formulir postingan
+   (terisi awal dari bawaan ini, dapat ditimpa); yang TIDAK berasal
+   dari panel sama sekali: pernyataan konten AI
+   (`containsSyntheticMedia` — kewajiban pengungkapan GenAI
+   YouTube, dipilih pengguna per video dan wajib diisi untuk bisa
+   terjadwal) dan penetapan made-for-kids per video.
    Untuk apa:
    adapter menukar refresh token koneksi YOUTUBE tenant menjadi access
    token (scope diperiksa; koneksi youtube tanpa scope menjawab
@@ -240,15 +260,17 @@ hanya bisa diajukan dari akun pemilik:
    `boards:read` + `pins:read,pins:write` agar user ID + access
    token terekam sebagai akun channel `pinterest`; (c) akun
    Pinterest contoh yang SUDAH punya minimal satu board publik —
-   board PERTAMA akun adalah tujuan bawaan Pin (akun tanpa board
-   gagal aman `pinterest_board_missing`); (d) untuk gambar berformat
+   tujuan Pin kini BERLAPIS: board yang dipilih pengguna pada
+   postingan itu di formulir /posts → pilihan board per akun di
+   Channels → board PERTAMA akun (akun tanpa board gagal aman
+   `pinterest_board_missing`); (d) untuk gambar berformat
    selain JPEG/PNG (mis. GIF), infrastruktur URL media publik yang
    sama seperti Instagram (base URL-nya diisi di Panel Admin grup
    Content schedule; env `POST_MEDIA_PUBLIC_BASE_URL` hanya fallback)
    karena format itu hanya bisa dikirim sebagai `image_url`. Untuk apa:
    adapter membuat Pin API v5 (judul dari `title` post maks 100,
    deskripsi dari caption maks 800, tautan tujuan dari URL pertama
-   caption) ke board pertama akun. Sudah dimock: provider
+   caption) ke board tujuan hasil resolusi berlapis di atas. Sudah dimock: provider
    `pinterest` ditambahkan end-to-end sebatas akun/sasaran linimasa
    + capability + adapter (migrasi 0018), dan pembuatan Pin kedua
    jalur media diverifikasi melawan fake API v5
@@ -257,8 +279,10 @@ hanya bisa diajukan dari akun pemilik:
    dari biner privat). Catatan batas: Pin video DITUNDA (butuh
    subsistem pendaftaran media asinkron API v5 — unggah multipart +
    polling status media; alasan yang sama seperti video Bluesky);
-   pemilihan board per postingan belum dibangun (satu keputusan
-   bawaan: board pertama); provisioning Pinterest belum dibuka di
+   pemilihan board per postingan SUDAH dibangun (gelombang Pilihan
+   Privasi & AI — pemilih per akun di Channels menjadi lapis bawaan
+   akunnya, dan board asing pada opsi postingan ditolak 422 seperti
+   di endpoint Channels); provisioning Pinterest belum dibuka di
    endpoint connect generik (`CHANNEL_NOT_AVAILABLE_YET`).
 
 3. **Google Business Profile** — dibutuhkan: (a) pengajuan akses
@@ -319,13 +343,20 @@ hanya bisa diajukan dari akun pemilik:
    (Hubungkan → TikTok → "Hubungkan dengan TikTok") — alur connect
    OAuth-nya SUDAH dibangun (gelombang Semua OAuth, lihat bagian
    terakhir dokumen ini) dengan scope `user.info.basic` +
-   `video.publish`; (d) SETELAH audit lolos, naikkan level
-   privasi TikTok di Panel Admin (grup Content schedule) dari
+   `video.publish`; (d) SETELAH audit lolos, naikkan NILAI BAWAAN
+   level privasi TikTok di Panel Admin (grup Content schedule) dari
    `SELF_ONLY` ke level yang dikehendaki (`PUBLIC_TO_EVERYONE` dsb.;
-   env `TIKTOK_PRIVACY_LEVEL` hanya fallback) — adapter memvalidasi
-   level itu terhadap `privacy_level_options` akun dan menolak
+   env `TIKTOK_PRIVACY_LEVEL` hanya fallback di bawah panel).
+   Per gelombang Pilihan Privasi & AI, privasi TikTok adalah
+   pilihan PENGGUNA per postingan di formulir (Content Sharing
+   Guidelines mewajibkan kreator memilih sendiri dari
+   `privacy_level_options`, tanpa nilai yang terpilih duluan —
+   postingan TikTok dari formulir TIDAK bisa dijadwalkan tanpa
+   pilihan itu, dan bawaan panel hanya menjangkau postingan
+   lama/non-formulir). Apa pun sumber nilainya, adapter memvalidasi
+   level terpilih terhadap `privacy_level_options` akun dan menolak
    dengan `tiktok_privacy_option_mismatch` bila akun belum
-   mengizinkannya; (e) khusus FOTO/CAROUSEL: **verifikasi
+   mengizinkannya — tidak pernah diturunkan diam-diam; (e) khusus FOTO/CAROUSEL: **verifikasi
    kepemilikan domain (atau prefix URL) dari base URL media
    publik** di portal TikTok for Developers, dan isi base URL itu
    di Panel Admin (grup Cloudflare R2; env
@@ -433,7 +464,9 @@ masing-masing). Yang tersisa murni tindakan pemilik per platform:
    (d) ajukan akses penuh (Standard) bila masih Trial — Pin dari
    aplikasi Trial hanya terlihat oleh pemiliknya; (e) hubungkan
    akun contoh dari Channels. Token ±30 hari disegarkan otomatis
-   memakai refresh token; Pin diterbitkan ke board PERTAMA akun.
+   memakai refresh token; tujuan Pin berlapis (postingan → bawaan
+   akun Channels → board pertama) — lihat entri Pinterest
+   Gelombang 3.
 4. **Bluesky** — tidak ada aplikasi/platform yang perlu dibuat:
    pemilik akun cukup membuat App Password di Bluesky (Pengaturan
    → Privasi dan Keamanan → Kata Sandi Aplikasi) lalu mengisi
@@ -549,7 +582,68 @@ terpengaruh.
 
 ---
 
+## Gelombang Pilihan Privasi & AI per Postingan (+ board Pinterest per postingan)
+
+Perintah pemilik 2026-11-12: pilihan privasi YouTube dan TikTok
+WAJIB tampil di formulir postingan (dipilih pengguna per
+postingan) karena itu syarat kedua platform — Panel Admin
+dipertahankan sebagai NILAI BAWAAN, bukan dicabut. Sekalian:
+pilihan konten AI-generated per postingan, dan board tujuan Pin
+dipindah juga ke postingan. Yang berubah untuk pemilik:
+
+- **Model resolusi privasi (kedua platform)**: pilihan pengguna
+  pada postingan → nilai bawaan Panel Admin (→ env) → validasi
+  platform. Pilihan postingan selalu menang; bawaan hanya mengisi
+  postingan yang tidak memilih.
+- **TikTok — keputusan preseleksi dari dokumen resmi**: Content
+  Sharing Guidelines TikTok mewajibkan kreator memilih sendiri
+  status privasi dari `privacy_level_options` lewat dropdown
+  TANPA nilai yang terpilih duluan, toggle interaksi tidak
+  tercentang secara bawaan, dan pengungkapan konten komersial
+  sebagai toggle kreator. Karena itu pemilih privasi TikTok di
+  formulir mulai KOSONG dan postingan TikTok tidak bisa
+  dijadwalkan tanpa pilihan pengguna — bawaan panel TIDAK
+  menggantikannya di jalur formulir (ia tetap berlaku untuk
+  postingan lama/non-formulir, dan pemakaiannya dicatat di log
+  integrasi). Pilihan tetap divalidasi terhadap creator_info saat
+  publish: level di luar `privacy_level_options` (mis. publik
+  sebelum audit lolos) ditolak `tiktok_privacy_option_mismatch`,
+  tidak diturunkan diam-diam. Konten bermerek tidak boleh privat
+  (SELF_ONLY + bermerek ditolak sejak penjadwalan).
+- **YouTube**: dokumentasi YouTube tidak melarang preseleksi —
+  pemilih privasi di formulir terisi awal dari bawaan panel dan
+  boleh dibiarkan (bawaan berlaku). Pernyataan konten AI
+  (`containsSyntheticMedia`, kewajiban kebijakan GenAI) dan
+  penetapan made-for-kids adalah pilihan per video di formulir;
+  pernyataan AI wajib diisi untuk bisa terjadwal (tidak ada
+  bawaan yang boleh mengarang pernyataan isi). Postingan lama
+  yang terjadwal sebelum gelombang ini dan tidak membawa
+  pernyataan AI akan GAGAL AMAN saat jam tayang
+  (`youtube_publish_options_missing`) — jadwalkan ulang sebagai
+  postingan baru dengan pernyataan terisi; ini disengaja, bukan
+  kerusakan.
+- **Pinterest — model board berlapis**: board pada postingan →
+  pilihan board per akun di Channels (tetap ada sebagai bawaan
+  akun) → board pertama akun. Formulir postingan menampilkan
+  dropdown board akun itu + buat board baru sebaris (endpoint
+  Channels yang sama; board baru juga menjadi bawaan akun).
+  Board pada opsi yang bukan milik akun ditolak 422
+  `PINTEREST_BOARD_NOT_FOUND` seperti di endpoint Channels;
+  pilihan yang kemudian dihapus di Pinterest turun ke lapis
+  berikutnya dengan catatan log penerbit.
+- **Tindakan pemilik**: tidak ada kredensial/pendaftaran baru.
+  Yang perlu diketahui saja: (1) menaikkan bawaan privasi di
+  Panel Admin sesudah audit TikTok/verifikasi Google kini berarti
+  "mengubah titik mulai formulir + jalur lama", BUKAN memaksa
+  semua postingan — pengguna tetap memilih per postingan;
+  (2) pengguna workspace perlu diberi tahu bahwa postingan
+  YouTube/TikTok kini meminta dua keputusan tambahan (privasi +
+  pernyataan AI) sebelum bisa dijadwalkan.
+
+---
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
-penyeragaman URL kanonis. Entri baru hanya ditambahkan bila ada
-pengembangan lanjutan di luar roadmap._
+penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan.
+Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
+luar roadmap._
