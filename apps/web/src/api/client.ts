@@ -8,6 +8,9 @@ import type {
   CreatedApiKeyResponse,
   CreateApiKeyRequest,
   AgentResponse,
+  AgentInstructionTemplateListResponse,
+  AgentInstructionTemplateResponse,
+  AgentPlaygroundDraftRequest,
   AgentPlaygroundRequest,
   AgentPlaygroundResponse,
   AgentSuggestionListResponse,
@@ -57,6 +60,7 @@ import type {
   TeamMemberResponse,
   InvitableRole,
   CreateAgentRequest,
+  CreateAgentInstructionTemplateRequest,
   CreateAutomationRequest,
   InstantiateAutomationTemplateRequest,
   CreateContactRequest,
@@ -1174,6 +1178,53 @@ export const api = {
       return request<AgentPlaygroundResponse>(
         `/api/tenants/${tenantId}/agents/${agentId}/playground`,
         { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /**
+     * POST /api/tenants/:tenantId/agents/playground-draft → uji KERING
+     * konfigurasi DRAF formulir agent (belum tersimpan): balasan calon
+     * + potongan KB + niat tool, dari instruction/model/mode/bahasa
+     * yang sedang diedit. Bentuk respons sama persis dengan playground.
+     */
+    playgroundDraft(
+      tenantId: string,
+      input: AgentPlaygroundDraftRequest,
+    ): Promise<AgentPlaygroundResponse> {
+      return request<AgentPlaygroundResponse>(
+        `/api/tenants/${tenantId}/agents/playground-draft`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+  },
+  agentTemplates: {
+    /** GET /api/tenants/:tenantId/agent-templates → templat instruction pribadi tenant. */
+    async list(
+      tenantId: string,
+    ): Promise<AgentInstructionTemplateResponse[]> {
+      const body = await request<AgentInstructionTemplateListResponse>(
+        `/api/tenants/${tenantId}/agent-templates`,
+        { method: "GET" },
+      );
+      return body.templates;
+    },
+    /** POST /api/tenants/:tenantId/agent-templates → 201 templat instruction baru. */
+    create(
+      tenantId: string,
+      input: CreateAgentInstructionTemplateRequest,
+    ): Promise<AgentInstructionTemplateResponse> {
+      return request<AgentInstructionTemplateResponse>(
+        `/api/tenants/${tenantId}/agent-templates`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE /api/tenants/:tenantId/agent-templates/:id → templat terhapus. */
+    remove(
+      tenantId: string,
+      templateId: string,
+    ): Promise<AgentInstructionTemplateResponse> {
+      return request<AgentInstructionTemplateResponse>(
+        `/api/tenants/${tenantId}/agent-templates/${templateId}`,
+        { method: "DELETE" },
       );
     },
   },
