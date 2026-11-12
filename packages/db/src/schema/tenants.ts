@@ -1,5 +1,7 @@
 import {
   index,
+  integer,
+  jsonb,
   pgEnum,
   pgTable,
   text,
@@ -9,6 +11,7 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 import { plans, users } from "./identity";
+import type { WorkSchedule } from "./sla";
 
 /**
  * Tabel tenant & keanggotaan. Semua tabel di file ini (kecuali `tenants`
@@ -54,6 +57,21 @@ export const tenants = pgTable("tenants", {
   defaultCurrency: varchar("default_currency", { length: 3 })
     .notNull()
     .default("IDR"),
+  /**
+   * Target waktu tanggap manusia dalam MENIT JAM KERJA (G15).
+   * NULL = SLA belum diatur tenant ini → tidak ada lencana/anggaran
+   * SLA dihitung (bukan diam-diam memakai angka karangan). Batas
+   * sah 1..10080 (satu minggu jam kerja) ditegakkan CHECK di 0038.
+   */
+  slaTargetMinutes: integer("sla_target_minutes"),
+  /**
+   * Jadwal kerja bawaan tenant (G15): dipakai untuk jendela SLA yang
+   * penanggung jawabnya tidak punya jadwal pribadi (atau percakapan
+   * belum ditugaskan). NULL = tidak ada jadwal bawaan → jam SLA
+   * jendela seperti itu tidak berjalan dan dilaporkan "tidak terukur",
+   * bukan dianggap patuh. Zona waktunya = `timezone` tenant.
+   */
+  defaultWorkSchedule: jsonb("default_work_schedule").$type<WorkSchedule>(),
   status: tenantStatusEnum("status").notNull().default("active"),
   /** Alasan penangguhan yang diketik admin — dibaca pemilik saat mengajukan banding. */
   statusReason: text("status_reason"),

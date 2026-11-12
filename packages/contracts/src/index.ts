@@ -36,6 +36,7 @@ export * from "./admin-console";
 export * from "./integration-logs";
 export * from "./audit";
 export * from "./analytics";
+export * from "./sla";
 export * from "./dashboard";
 export * from "./message-errors";
 export * from "./broadcasts";

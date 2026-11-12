@@ -267,6 +267,13 @@
       "when": 1794477824049,
       "tag": "0037_discount_codes",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "7",
+      "when": 1794477824050,
+      "tag": "0038_sla_working_hours",
+      "breakpoints": true
     }
   ]
 }

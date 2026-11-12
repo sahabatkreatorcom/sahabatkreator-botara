@@ -277,6 +277,8 @@ export const ErrorCodeSchema = z.enum([
   // teks kode yang sama sudah dipakai kode lain di tenant yang sama.
   "DISCOUNT_CODE_NOT_FOUND",
   "DISCOUNT_CODE_DUPLICATE",
+  // Gelombang G15: jadwal kerja — user sasaran bukan anggota tenant ini.
+  "MEMBER_NOT_FOUND",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { ConversationSlaSchema } from "./sla";
 import { MemberRoleSchema } from "./tenants";
 
 // ---------------------------------------------------------------------------
@@ -209,6 +210,14 @@ export const ConversationResponseSchema = z.object({
    * pengguna mengetik lalu ditolak server/provider.
    */
   messagingWindow: MessagingWindowSchema,
+  /**
+   * Keadaan SLA manusia (G15) untuk jendela menunggu yang SEDANG
+   * terbuka; null bila tidak ada jendela SLA terbuka (percakapan
+   * bukan tanggung jawab manusia, tidak ada pesan tak terjawab, atau
+   * SLA tenant belum diatur). Dihitung server saat baca — lihat
+   * definisi di contracts/sla.ts.
+   */
+  sla: ConversationSlaSchema.nullable().optional(),
   unreadCount: z.number().int().nonnegative(),
   lastMessageAt: z.string().datetime().nullable(),
   /** Cuplikan teks pesan terakhir (null bila belum ada pesan). */

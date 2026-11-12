@@ -27,3 +27,4 @@ export * from "./posts";
 export * from "./outbound-webhooks";
 export * from "./deals";
 export * from "./discount-codes";
+export * from "./sla";
