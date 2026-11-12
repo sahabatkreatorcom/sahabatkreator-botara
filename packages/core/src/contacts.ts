@@ -1,4 +1,4 @@
-import { and, asc, eq, ilike, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, inArray, ne, notInArray, or, sql } from "drizzle-orm";
 import {
   agentSuggestions,
   auditLogs,
@@ -6,6 +6,7 @@ import {
   broadcastRecipients,
   cartItems,
   carts,
+  channelAccounts,
   channelIdentities,
   contacts,
   conversations,
@@ -15,10 +16,11 @@ import {
   profilePhotos,
   sequenceEnrollments,
   type Contact,
+  type Conversation,
   type Database,
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
-import { withTenantDb } from "./tx";
+import { withTenantDb, type DbTx } from "./tx";
 
 /**
  * Service domain kontak/audiens (Fase 1D, RANCANGAN §6).
@@ -52,6 +54,13 @@ export interface UpdateContactInput {
    * dengan node flow `set_field` yang menulis satu kunci).
    */
   customFields?: Record<string, string>;
+  /**
+   * Kunci field kustom yang DIHAPUS dari peta tersimpan (kanal
+   * penghapusan untuk editor dashboard yang mengelola himpunan
+   * lengkap; gabung saja tidak bisa menghapus kunci). Diterapkan
+   * SESUDAH gabung, jadi kunci yang disebut di kedua tempat terhapus.
+   */
+  customFieldsDelete?: string[];
 }
 
 export interface ListContactsInput {
@@ -64,6 +73,68 @@ export interface ListContactsInput {
    * meneruskan id-nya ke sini). Array kosong = hasil kosong.
    */
   onlyIds?: string[];
+  /** Saring ke satu tahap pipeline persis (filter daftar utama). */
+  stage?: string;
+  /**
+   * Keluarkan KONTAK AKUN-SENDIRI dari hasil: kontak jangkar akun
+   * channel terhubung (identitasnya adalah akun itu sendiri — uji
+   * `channel_identities.external_user_id = channel_accounts.external_id`
+   * yang sama seperti resolusi avatar) yang SATU-SATUNYA relasi
+   * percakapannya adalah percakapan `kind='channel'`. Kontak jangkar
+   * yang juga punya percakapan private/group TIDAK dikeluarkan
+   * (semantik "satu-satunya relasi adalah channel").
+   *
+   * HANYA dipakai permukaan daftar utama /contacts (sejajar saringan
+   * `kinds` pada listConversations untuk Inbox kemarin): permukaan
+   * sasaran — segmen, broadcast, sasaran postingan, deteksi duplikat,
+   * API publik v1 — TIDAK meneruskan opsi ini dan tetap melihat
+   * kontak akun-sendiri persis seperti sebelumnya. Data tidak
+   * dihapus; ini murni saringan tampilan daftar.
+   */
+  excludeSelfChannelContacts?: boolean;
+}
+
+/**
+ * Id kontak akun-sendiri yang seluruh relasi percakapannya adalah
+ * `kind='channel'` (lihat `excludeSelfChannelContacts`). Dua langkah
+ * di dalam transaksi pemanggil: (1) kandidat jangkar lewat uji
+ * identitas akun-dirinya; (2) kandidat yang punya percakapan
+ * non-channel dikeluarkan dari himpunan (mereka kontak campuran).
+ */
+async function listSelfOnlyChannelContactIds(
+  tx: DbTx,
+  tenantId: string,
+): Promise<string[]> {
+  const selfRows = await tx
+    .select({ contactId: channelIdentities.contactId })
+    .from(channelIdentities)
+    .innerJoin(
+      channelAccounts,
+      eq(channelIdentities.channelAccountId, channelAccounts.id),
+    )
+    .where(
+      and(
+        eq(channelIdentities.tenantId, tenantId),
+        eq(channelAccounts.tenantId, tenantId),
+        // Inti uji "kontak = akun itu sendiri" (sama seperti
+        // mapContactsToSelfChannelAccounts di avatars.ts).
+        eq(channelIdentities.externalUserId, channelAccounts.externalId),
+      ),
+    );
+  const candidateIds = [...new Set(selfRows.map((r) => r.contactId))];
+  if (candidateIds.length === 0) return [];
+  const nonChannelRows = await tx
+    .select({ contactId: conversations.contactId })
+    .from(conversations)
+    .where(
+      and(
+        eq(conversations.tenantId, tenantId),
+        inArray(conversations.contactId, candidateIds),
+        ne(conversations.kind, "channel"),
+      ),
+    );
+  const mixed = new Set(nonChannelRows.map((r) => r.contactId));
+  return candidateIds.filter((id) => !mixed.has(id));
 }
 
 /** Status opt-in EFEKTIF (Fase 13C) — lihat EffectiveOptInStatusSchema. */
@@ -221,6 +292,18 @@ export async function listContacts(
       if (input.onlyIds.length === 0) return { contacts: [], total: 0 };
       conditions.push(inArray(contacts.id, input.onlyIds));
     }
+    if (input.stage) {
+      conditions.push(eq(contacts.pipelineStage, input.stage));
+    }
+    if (input.excludeSelfChannelContacts) {
+      const selfOnlyIds = await listSelfOnlyChannelContactIds(
+        tx,
+        ctx.tenantId,
+      );
+      if (selfOnlyIds.length > 0) {
+        conditions.push(notInArray(contacts.id, selfOnlyIds));
+      }
+    }
     const search = input.search?.trim();
     if (search) {
       const pattern = `%${search}%`;
@@ -277,10 +360,15 @@ export async function updateContact(
     if (input.name !== undefined) patch.name = input.name;
     if (input.tags !== undefined) patch.tags = input.tags;
     if (input.pipelineStage !== undefined) patch.pipelineStage = input.pipelineStage;
-    if (input.customFields !== undefined) {
+    if (
+      input.customFields !== undefined ||
+      (input.customFieldsDelete !== undefined &&
+        input.customFieldsDelete.length > 0)
+    ) {
       // Gabung per kunci di atas nilai tersimpan — baca dulu dalam
       // transaksi yang sama; kontak tak ada → null (API menjawab 404),
-      // sama seperti hasil update kosong di bawah.
+      // sama seperti hasil update kosong di bawah. Penghapusan kunci
+      // diterapkan sesudah gabung (lihat customFieldsDelete).
       const [existing] = await tx
         .select({ customFields: contacts.customFields })
         .from(contacts)
@@ -289,10 +377,14 @@ export async function updateContact(
         )
         .limit(1);
       if (!existing) return null;
-      patch.customFields = {
+      const merged: Record<string, unknown> = {
         ...(existing.customFields as Record<string, unknown>),
-        ...input.customFields,
+        ...(input.customFields ?? {}),
       };
+      for (const key of input.customFieldsDelete ?? []) {
+        delete merged[key];
+      }
+      patch.customFields = merged;
     }
     // Fase 13C: perubahan optInStatus lewat PATCH adalah TOGGLE MANUAL
     // persetujuan — semantiknya sama dengan setContactConsent
@@ -999,5 +1091,214 @@ export async function listContactPlatforms(
     }
 
     return byContact;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Percakapan milik kontak (panel detail) & ekspor
+// ---------------------------------------------------------------------------
+
+/**
+ * Semua percakapan milik satu kontak, terbaru dulu (last_message_at
+ * menurun, lalu created_at menurun sebagai penentu seri) — bahan
+ * panel detail kontak. Mengembalikan baris percakapan utuh; lapisan
+ * route yang memilih field kontraknya. Kontak yang tidak ada
+ * menghasilkan array kosong (route memeriksa keberadaan kontak lebih
+ * dulu untuk semantik 404-nya).
+ */
+export async function listContactConversations(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  contactId: string,
+): Promise<Conversation[]> {
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    return tx
+      .select()
+      .from(conversations)
+      .where(
+        and(
+          eq(conversations.tenantId, ctx.tenantId),
+          eq(conversations.contactId, contactId),
+        ),
+      )
+      .orderBy(desc(conversations.lastMessageAt), desc(conversations.createdAt));
+  });
+}
+
+/**
+ * Seluruh kontak yang cocok dengan filter daftar (tanpa pagination)
+ * untuk ekspor CSV — filter yang sama persis dengan daftar utama
+ * (`listContacts`), termasuk saringan kontak akun-sendiri bila
+ * pemanggil meneruskannya. Batas keras 100 ribu baris menjaga satu
+ * ekspor tetap wajar; di atas itu hasil terpotong pada batas
+ * (terdokumentasi, bukan diam-diam dianggap lengkap oleh UI — total
+ * daftar adalah pembandingnya).
+ */
+export async function listContactsForExport(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId">,
+  input: Omit<ListContactsInput, "limit" | "offset">,
+): Promise<Contact[]> {
+  const result = await listContacts(db, ctx, {
+    ...input,
+    limit: 100_000,
+    offset: 0,
+  });
+  return result.contacts;
+}
+
+// ---------------------------------------------------------------------------
+// Aksi massal kontak (daftar utama)
+// ---------------------------------------------------------------------------
+
+export type BulkContactsAction =
+  | { action: "add_tag"; tag: string }
+  | { action: "remove_tag"; tag: string }
+  | { action: "set_stage"; stage: string }
+  | { action: "opt_out" }
+  | { action: "delete" };
+
+export interface BulkContactsResult {
+  /** Id yang berhasil dikenai aksi (milik tenant & ditemukan). */
+  succeeded: string[];
+  /** Id yang gagal beserta alasan ringkas ("not_found"). */
+  failed: Array<{ id: string; reason: string }>;
+}
+
+/**
+ * Satu aksi untuk banyak kontak dalam SATU transaksi tenant. Id
+ * dideduplikasi lebih dulu; id yang bukan milik tenant ini (atau
+ * tidak ada) TIDAK menggagalkan panggilan — mereka dilaporkan di
+ * `failed` dengan alasan "not_found" dan tidak disentuh sama sekali.
+ *
+ * Semantik per aksi:
+ * - add_tag/remove_tag: per kontak (himpunan tag berbeda-beda).
+ * - set_stage: satu UPDATE himpunan.
+ * - opt_out: semantik yang sama seperti `setContactConsent`
+ *   source="manual" (consent_at dicabut, riwayat opt-in
+ *   dipertahankan) + audit `contact.opt_in_changed` per kontak yang
+ *   status EFEKTIF-nya berubah, dengan actor user pemanggil.
+ * - delete: baris foto profil kontak (polimorfik, tanpa FK) dibersihkan
+ *   eksplisit meniru merge; sisa turunan kontak terhapus oleh cascade
+ *   FK skema (percakapan + pesan ikut — inilah yang UI konfirmasikan
+ *   secara eksplisit). Audit `contact.deleted` per kontak.
+ */
+export async function bulkApplyContactsAction(
+  db: Database,
+  ctx: Pick<TenantContext, "tenantId" | "userId">,
+  input: { ids: string[] } & BulkContactsAction,
+): Promise<BulkContactsResult> {
+  const ids = [...new Set(input.ids)];
+  if (ids.length === 0) return { succeeded: [], failed: [] };
+  return withTenantDb(db, ctx.tenantId, async (tx) => {
+    const rows = await tx
+      .select()
+      .from(contacts)
+      .where(
+        and(eq(contacts.tenantId, ctx.tenantId), inArray(contacts.id, ids)),
+      );
+    const found = new Map(rows.map((row) => [row.id, row]));
+    const failed = ids
+      .filter((id) => !found.has(id))
+      .map((id) => ({ id, reason: "not_found" }));
+    const targets = ids.filter((id) => found.has(id));
+    if (targets.length === 0) return { succeeded: [], failed };
+    const now = new Date();
+
+    switch (input.action) {
+      case "add_tag": {
+        for (const id of targets) {
+          const contact = found.get(id)!;
+          if (contact.tags.includes(input.tag)) continue;
+          await tx
+            .update(contacts)
+            .set({ tags: [...contact.tags, input.tag], updatedAt: now })
+            .where(
+              and(eq(contacts.tenantId, ctx.tenantId), eq(contacts.id, id)),
+            );
+        }
+        break;
+      }
+      case "remove_tag": {
+        for (const id of targets) {
+          const contact = found.get(id)!;
+          if (!contact.tags.includes(input.tag)) continue;
+          await tx
+            .update(contacts)
+            .set({
+              tags: contact.tags.filter((tag) => tag !== input.tag),
+              updatedAt: now,
+            })
+            .where(
+              and(eq(contacts.tenantId, ctx.tenantId), eq(contacts.id, id)),
+            );
+        }
+        break;
+      }
+      case "set_stage": {
+        await tx
+          .update(contacts)
+          .set({ pipelineStage: input.stage, updatedAt: now })
+          .where(
+            and(
+              eq(contacts.tenantId, ctx.tenantId),
+              inArray(contacts.id, targets),
+            ),
+          );
+        break;
+      }
+      case "opt_out": {
+        for (const id of targets) {
+          const contact = found.get(id)!;
+          const from = effectiveOptInStatus(contact);
+          await tx
+            .update(contacts)
+            .set({ optInStatus: "opted_out", consentAt: null, updatedAt: now })
+            .where(
+              and(eq(contacts.tenantId, ctx.tenantId), eq(contacts.id, id)),
+            );
+          if (from !== "opted_out") {
+            await tx.insert(auditLogs).values({
+              tenantId: ctx.tenantId,
+              actorType: "user",
+              actorId: ctx.userId,
+              action: "contact.opt_in_changed",
+              meta: { contactId: id, from, to: "opted_out", source: "manual" },
+            });
+          }
+        }
+        break;
+      }
+      case "delete": {
+        await tx
+          .delete(profilePhotos)
+          .where(
+            and(
+              eq(profilePhotos.tenantId, ctx.tenantId),
+              eq(profilePhotos.ownerType, "contact"),
+              inArray(profilePhotos.ownerId, targets),
+            ),
+          );
+        await tx
+          .delete(contacts)
+          .where(
+            and(
+              eq(contacts.tenantId, ctx.tenantId),
+              inArray(contacts.id, targets),
+            ),
+          );
+        for (const id of targets) {
+          await tx.insert(auditLogs).values({
+            tenantId: ctx.tenantId,
+            actorType: "user",
+            actorId: ctx.userId,
+            action: "contact.deleted",
+            meta: { contactId: id, name: found.get(id)?.name ?? null, bulk: true },
+          });
+        }
+        break;
+      }
+    }
+    return { succeeded: targets, failed };
   });
 }

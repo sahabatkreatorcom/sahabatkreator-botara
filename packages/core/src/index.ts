@@ -76,6 +76,9 @@ export {
   findDuplicateContacts,
   mergeContacts,
   listContactPlatforms,
+  listContactConversations,
+  listContactsForExport,
+  bulkApplyContactsAction,
   effectiveOptInStatus,
   setContactConsent,
   type CreateContactInput,
@@ -87,7 +90,19 @@ export {
   type EffectiveOptInStatus,
   type ContactConsentSource,
   type SetContactConsentResult,
+  type BulkContactsAction,
+  type BulkContactsResult,
 } from "./contacts";
+export {
+  parseCsv,
+  escapeCsvValue,
+  buildContactsCsv,
+  importContactsFromCsv,
+  MAX_IMPORT_ROWS,
+  type ContactExportRow,
+  type ContactImportIssue,
+  type ImportContactsResult,
+} from "./contacts-csv";
 export {
   DEFAULT_OPT_IN_KEYWORDS,
   DEFAULT_OPT_OUT_KEYWORDS,
