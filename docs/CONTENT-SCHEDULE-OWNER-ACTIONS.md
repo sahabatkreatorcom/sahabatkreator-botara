@@ -757,10 +757,68 @@ Yang berada di sisi pemilik:
 
 ---
 
+## Gelombang G7 — Comment-to-DM Threads (2026-11-12)
+
+Fitur kode selesai & terverifikasi (verify:threads-comment-dm):
+balasan atas postingan akun Threads kini masuk tabel komentar yang
+sama dengan Instagram/Messenger dan dievaluasi aturan comment-to-DM
+yang sama (filter kata kunci exact/contains/startsWith, ledger dedup
+per postingan, log misses, panel Komentar di halaman Otomasi).
+Matriks aksi Threads — sesuai kemampuan NYATA API Threads:
+
+- **Balasan publik: DIDUKUNG** (container `reply_to_id` +
+  `threads_publish`, cakupan `threads_content_publish` — sudah
+  dimiliki akun yang terhubung). Kuota platform ±1.000 balasan/24
+  jam per profil.
+- **Sembunyikan balasan: DIDUKUNG** (`POST /{reply-id}/manage_reply`,
+  cakupan `threads_manage_replies` — BELUM dimiliki, lihat tindakan
+  pemilik di bawah). Menyembunyikan balasan turut menyembunyikan
+  seluruh sub-pohon balasannya (perilaku platform).
+- **DM follow-up: TIDAK DIDUKUNG PLATFORM, dan ini bukan kekurangan
+  konfigurasi.** API Threads resmi tidak menyediakan endpoint pesan
+  privat/DM dalam konteks apa pun. Aturan pada akun Threads karena
+  itu berhenti di balasan publik dan/atau sembunyikan: opsi DM
+  dinonaktifkan di formulir aturan untuk akun Threads, dan bila
+  aturan membawa sendDm (mis. dibuat lewat API), evaluator mencatat
+  aksi itu `skipped` dengan alasan `threads_dm_not_supported` —
+  tidak ada jalur DM yang dipalsukan.
+
+Yang berada di sisi pemilik (aplikasi Threads di
+developers.facebook.com → aplikasi Threads Botara):
+
+- **Tambahkan dua izin ke aplikasi Threads: `threads_read_replies`
+  dan `threads_manage_replies`.** Koneksi yang ada hanya meminta
+  `threads_basic` + `threads_content_publish`. Tanpa
+  `threads_read_replies`, payload webhook balasan TIDAK memuat
+  `root_post` (pemilik postingan), jadi balasan tidak bisa dipetakan
+  ke akun mana pun — platform kami mencatatnya jujur di Log Integrasi
+  sebagai `unresolved_account`/`threads_reply_owner_missing`.
+  Tanpa `threads_manage_replies`, aksi sembunyikan (aturan maupun
+  tombol moderasi manual) ditolak Graph.
+- **Ajukan App Review / Advanced Access untuk kedua izin itu.**
+  Selama aplikasi belum Advanced Access, webhook hanya terkirim
+  untuk akun yang punya peran di aplikasi (admin/developer/tester);
+  balasan dari akun Threads biasa tidak akan sampai.
+- **Subscribe field webhook `replies`.** Di pengaturan Webhooks
+  aplikasi Threads, URL callback SUDAH terdaftar dari gelombang
+  sebelumnya (`https://botara.my.id/api/webhooks/threads`, verify
+  token Panel Admin `threads_webhook_verify_token`): cukup aktifkan
+  field langganan **`replies`** (field lain seperti `mentions`
+  boleh tetap — event-nya dicatat saja, tidak diproses sebagai
+  komentar).
+- **Hubungkan ulang akun Threads di halaman Channels** setelah izin
+  disetujui. Token tersimpan akun yang terhubung SEBELUM izin baru
+  ada tidak memuat cakupan baru — balasan publik tetap jalan, tetapi
+  aksi sembunyikan akan gagal tercatat `threads_graph_*` di jejak
+  komentar sampai akun dihubungkan ulang agar tokennya membawa
+  `threads_manage_replies`.
+
+---
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
 Gelombang G5 (pemicu postback/quick reply/welcome) + Gelombang G6
-(pengaman AI pelengkap).
+(pengaman AI pelengkap) + Gelombang G7 (comment-to-DM Threads).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
