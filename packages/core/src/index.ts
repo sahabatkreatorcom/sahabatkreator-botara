@@ -449,11 +449,13 @@ export {
 export {
   createThreadsChannelAccount,
   updateThreadsChannelAccountCredentials,
+  resolveThreadsAccountByExternalId,
   threadsTokenLifecycleDecision,
   listExpiringThreadsTokens,
   type ThreadsChannelTokenType,
   type CreateThreadsChannelInput,
   type UpdateThreadsCredentialsInput,
+  type ThreadsAccountRef,
   type ThreadsTokenLifecycleRef,
 } from "./threads";
 export {
@@ -821,12 +823,15 @@ export {
 export { renderMessageText } from "./render-text";
 export {
   recordMetaComment,
+  recordThreadsComment,
   evaluateCommentForAutomations,
   listComments,
   getComment,
   setCommentModerationStatus,
   type RecordMetaCommentInput,
   type RecordMetaCommentResult,
+  type RecordThreadsCommentInput,
+  type CommentProvider,
   type CommentGraphActions,
   type EvaluateCommentResult,
   type CommentListItem,

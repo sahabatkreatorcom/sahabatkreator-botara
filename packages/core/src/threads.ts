@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNotNull, lte, sql } from "drizzle-orm";
 import {
   auditLogs,
   channelAccounts,
@@ -23,12 +23,72 @@ import { withTenantDb } from "./tx";
  * - token_type = `threads_user_token` (migrasi 0021) +
  *   token_expires_at dari `expires_in` grant — dasar lifecycle.
  *
- * Threads BUKAN channel inbox: tidak ada webhook/pesan di sini. Baris
- * akun yang terhubung otomatis menjadi sasaran /posts lewat
- * materialisasi `ensureTimelineTargets` (posts.ts) — bentuknya persis
- * akun hasil materialisasi Gelombang 1, jadi tidak ada perubahan di
- * posts untuk connect nyata ini.
+ * Threads BUKAN channel inbox: API-nya tidak menyediakan pesan
+ * privat/DM, jadi tidak ada jalur pesan di sini. Yang ada (G7):
+ * webhook balasan Threads di-ingest route API ke tabel `comments`
+ * dan dievaluasi evaluator comment-to-DM bersama (comments.ts) —
+ * resolver akun untuk jalur webhook itu tinggal di file ini
+ * (`resolveThreadsAccountByExternalId`). Baris akun yang terhubung
+ * otomatis menjadi sasaran /posts lewat materialisasi
+ * `ensureTimelineTargets` (posts.ts) — bentuknya persis akun hasil
+ * materialisasi Gelombang 1, jadi tidak ada perubahan di posts untuk
+ * connect nyata ini.
  */
+
+/** Potongan akun Threads untuk jalur webhook (tanpa konteks tenant). */
+export interface ThreadsAccountRef {
+  id: string;
+  tenantId: string;
+  provider: "threads";
+  externalId: string;
+  status: string;
+  publicHandle: string | null;
+}
+
+/**
+ * Resolusi akun Threads dari Threads user ID pemilik postingan
+ * (`root_post.owner_id` pada webhook balasan) — pola yang sama dengan
+ * `resolveMetaAccountByExternalId`: transaksi mengatur konteks lookup
+ * RLS `provider_external_lookup` (migrasi 0020) lalu memilih baris
+ * provider 'threads' dengan external_id itu. External_id yang sama
+ * boleh hidup di beberapa tenant sebagai baris disconnected — baris
+ * `connected` didahulukan; bila tidak ada, yang terbaru.
+ */
+export async function resolveThreadsAccountByExternalId(
+  db: Database,
+  externalId: string,
+): Promise<ThreadsAccountRef | null> {
+  return db.transaction(async (tx) => {
+    await tx.execute(
+      sql`SELECT set_config('app.channel_provider', ${"threads"}, true)`,
+    );
+    await tx.execute(
+      sql`SELECT set_config('app.channel_external_id', ${externalId}, true)`,
+    );
+    const [row] = await tx
+      .select({
+        id: channelAccounts.id,
+        tenantId: channelAccounts.tenantId,
+        provider: channelAccounts.provider,
+        externalId: channelAccounts.externalId,
+        status: channelAccounts.status,
+        publicHandle: channelAccounts.publicHandle,
+      })
+      .from(channelAccounts)
+      .where(
+        and(
+          eq(channelAccounts.provider, "threads"),
+          eq(channelAccounts.externalId, externalId),
+        ),
+      )
+      .orderBy(
+        sql`case when ${channelAccounts.status} = 'connected' then 0 else 1 end`,
+        desc(channelAccounts.createdAt),
+      )
+      .limit(1);
+    return row ? { ...row, provider: "threads" as const } : null;
+  });
+}
 
 /** Varian token Threads (lihat channelTokenTypeEnum di skema db). */
 export type ThreadsChannelTokenType = "threads_user_token";

@@ -23,12 +23,13 @@ import { renderMessageText } from "./render-text";
 import { decryptChannelSecret } from "./channel-secrets";
 
 /**
- * Service domain Komentar Meta (Fase 10B) — comment-to-DM Instagram &
- * Messenger + moderasi komentar dasar.
+ * Service domain Komentar (Fase 10B; diperluas G7) — comment-to-DM
+ * Instagram & Messenger + balasan Threads, dan moderasi komentar dasar.
  *
  * Alur:
  * 1. Webhook (route live + replay memakai proses yang sama)
- *    menormalkan event komentar lalu memanggil `recordMetaComment`:
+ *    menormalkan event komentar lalu memanggil `recordMetaComment`
+ *    (balasan Threads lewat pembungkus `recordThreadsComment`):
  *    komentar disimpan ke tabel `comments` dengan dedup index unik
  *    (channel_account_id, provider_comment_id). Hanya baris yang
  *    BENAR-BENAR baru yang menulis event outbox `comment.received` —
@@ -58,7 +59,24 @@ import { decryptChannelSecret } from "./channel-secrets";
  * 4. Komentar dari akun itu sendiri (penulis = external_id akun)
  *    dicatat tetapi tidak pernah dievaluasi aksinya (anti-loop:
  *    balasan publik kita sendiri memicu webhook komentar baru).
+ *
+ * G7 — Threads memakai evaluator + tabel yang SAMA. Perbedaan platform
+ * yang jujur, ditangani di titik yang benar (bukan evaluator kedua):
+ * - Payload webhook Threads tidak membawa id pengguna penulis; username
+ *   penulis menjadi identitas eksternal penulis (lihat
+ *   `recordThreadsComment`), dan deteksi komentar-sendiri membandingkan
+ *   username itu dengan handle publik akun.
+ * - API Threads TIDAK menyediakan pesan privat/DM dalam konteks apa
+ *   pun: aksi DM pada aturan akun Threads selalu dicatat
+ *   `skipped` dengan alasan `threads_dm_not_supported` — tidak ada
+ *   pesan yang diantrekan ke jalur yang tidak ada. Balasan publik
+ *   (container `reply_to_id` + publish) dan sembunyikan
+ *   (`manage_reply`) DIDUKUNG API dan berjalan lewat
+ *   `CommentGraphActions` yang sama.
  */
+
+/** Provider yang komentarnya mengalir lewat service ini. */
+export type CommentProvider = "instagram" | "messenger" | "threads";
 
 export interface RecordMetaCommentInput {
   providerCommentId: string;
@@ -165,17 +183,60 @@ export async function recordMetaComment(
   });
 }
 
+export interface RecordThreadsCommentInput {
+  providerCommentId: string;
+  mediaId?: string | null;
+  parentId?: string | null;
+  /** Username penulis balasan (satu-satunya identitas penulis di payload). */
+  authorUsername: string;
+  text: string;
+  providerCreatedAt?: Date | null;
+}
+
+/**
+ * Menyimpan satu balasan Threads (G7) ke tabel `comments` yang sama
+ * lewat jalur dedup/outbox yang sama persis dengan komentar Meta.
+ * Payload webhook Threads tidak membawa id pengguna penulis, jadi
+ * username penulis dipakai sebagai `authorExternalId` — konsekuensinya
+ * jujur: balasan Threads tidak tertaut otomatis ke kontak/percakapan
+ * yang sudah ada (tidak ada identitas stabil untuk menautkannya), dan
+ * ledger dedup per-postingan berlaku pada username ini. `postId`
+ * selalu null untuk Threads (yang dikenal adalah media akar).
+ */
+export async function recordThreadsComment(
+  db: Database,
+  account: Pick<ChannelAccount, "id" | "tenantId" | "provider" | "externalId">,
+  input: RecordThreadsCommentInput,
+): Promise<RecordMetaCommentResult> {
+  return recordMetaComment(db, account, {
+    providerCommentId: input.providerCommentId,
+    mediaId: input.mediaId ?? null,
+    postId: null,
+    parentId: input.parentId ?? null,
+    authorExternalId: input.authorUsername,
+    authorUsername: input.authorUsername,
+    text: input.text,
+    providerCreatedAt: input.providerCreatedAt ?? null,
+  });
+}
+
 /** Aksi Graph langsung untuk evaluasi aturan (disuntikkan pemanggil). */
 export interface CommentGraphActions {
   replyToComment(input: {
-    provider: "instagram" | "messenger";
+    provider: CommentProvider;
     commentId: string;
     text: string;
+    /**
+     * External id akun pemilik komentar. Threads membutuhkannya
+     * (balasan dibuat sebagai container pada node pengguna); Meta
+     * mengabaikannya (balasan menempel pada node komentar).
+     */
+    accountExternalId: string;
     /** Token akun pemilik komentar (sudah didekripsi core). */
     accessToken: string;
   }): Promise<{ replyId: string | null }>;
   setCommentHidden(input: {
-    provider: "instagram" | "messenger";
+    provider: CommentProvider;
     commentId: string;
     hidden: boolean;
     /** Token akun pemilik komentar (sudah didekripsi core). */
@@ -194,16 +255,24 @@ export interface EvaluateCommentResult {
 }
 
 /** Kode aman dari error Graph (angka saja; pesan mentah tidak disimpan). */
-function graphErrorCode(err: unknown): string {
+function graphErrorCode(err: unknown, provider: CommentProvider): string {
+  const prefix = provider === "threads" ? "threads" : "meta";
   if (
     typeof err === "object" &&
     err !== null &&
     "graphCode" in err &&
     typeof (err as { graphCode: unknown }).graphCode === "number"
   ) {
-    return `meta_graph_${(err as { graphCode: number }).graphCode}`;
+    return `${prefix}_graph_${(err as { graphCode: number }).graphCode}`;
   }
-  return "meta_graph_error";
+  return `${prefix}_graph_error`;
+}
+
+/** Kode kegagalan "token akun tidak tersedia" per provider. */
+function tokenUnavailableCode(provider: CommentProvider): string {
+  return provider === "threads"
+    ? "threads_token_unavailable"
+    : "meta_token_unavailable";
 }
 
 /**
@@ -354,7 +423,7 @@ export async function evaluateCommentForAutomations(
       .where(eq(channelAccounts.id, comment.channelAccountId))
       .limit(1);
     if (!account) return null;
-    const provider = comment.provider as "instagram" | "messenger";
+    const provider = comment.provider as CommentProvider;
 
     const writeFinal = async (
       actions: CommentActions,
@@ -382,7 +451,17 @@ export async function evaluateCommentForAutomations(
 
     // Anti-loop: komentar dari akun itu sendiri (mis. balasan publik
     // kita yang terpantul sebagai webhook) tidak pernah dievaluasi.
-    if (comment.authorExternalId === account.externalId) {
+    // Untuk Threads identitas penulis adalah username (payload tidak
+    // membawa id pengguna), jadi perbandingannya melawan handle publik
+    // akun, tidak peka huruf besar/kecil.
+    const isOwnComment =
+      comment.authorExternalId === account.externalId ||
+      (provider === "threads" &&
+        comment.authorUsername !== null &&
+        account.publicHandle !== null &&
+        comment.authorUsername.toLowerCase() ===
+          account.publicHandle.toLowerCase());
+    if (isOwnComment) {
       const finalActions = await writeFinal({ skipped: "own_comment" }, null);
       const out: Phase1 = {
         comment,
@@ -447,6 +526,22 @@ export async function evaluateCommentForAutomations(
         actions.dm = comment.actions.dm;
         dmContactId = comment.contactId ?? undefined;
         dmConversationId = comment.conversationId ?? undefined;
+      } else if (provider === "threads") {
+        // G7: API Threads tidak menyediakan pesan privat/DM sama
+        // sekali — DM tidak diantrekan ke jalur yang tidak ada.
+        // Aturan tetap tercatat jujur sebagai dilewati; balasan
+        // publik + sembunyikan (fase 2) tetap berjalan.
+        actions.dm = {
+          status: "skipped",
+          reason: "threads_dm_not_supported",
+        };
+        await tx
+          .update(comments)
+          .set({
+            actions: { dm: actions.dm },
+            updatedAt: new Date(),
+          })
+          .where(eq(comments.id, comment.id));
       } else {
         const target = await findOrCreateCommentConversation(tx, {
           tenantId,
@@ -534,7 +629,7 @@ export async function evaluateCommentForAutomations(
 
   const { comment, account, matched } = phase1;
   if (!matched) return { evaluated: false };
-  const provider = comment.provider as "instagram" | "messenger";
+  const provider = comment.provider as CommentProvider;
   const cfg = matched.actionConfig;
   const actions: CommentActions = { ...phase1.actions };
 
@@ -553,7 +648,7 @@ export async function evaluateCommentForAutomations(
     if (!accessToken) {
       actions.publicReply = {
         status: "failed",
-        errorCode: "meta_token_unavailable",
+        errorCode: tokenUnavailableCode(provider),
       };
     } else {
       try {
@@ -564,13 +659,14 @@ export async function evaluateCommentForAutomations(
           provider,
           commentId: comment.providerCommentId,
           text: replyText,
+          accountExternalId: account.externalId,
           accessToken,
         });
         actions.publicReply = { status: "sent", replyId };
       } catch (err) {
         actions.publicReply = {
           status: "failed",
-          errorCode: graphErrorCode(err),
+          errorCode: graphErrorCode(err, provider),
         };
       }
     }
@@ -578,7 +674,10 @@ export async function evaluateCommentForAutomations(
   let hidden = false;
   if (cfg.hideComment) {
     if (!accessToken) {
-      actions.hide = { status: "failed", errorCode: "meta_token_unavailable" };
+      actions.hide = {
+        status: "failed",
+        errorCode: tokenUnavailableCode(provider),
+      };
     } else {
       try {
         await deps.graph.setCommentHidden({
@@ -592,7 +691,7 @@ export async function evaluateCommentForAutomations(
       } catch (err) {
         actions.hide = {
           status: "failed",
-          errorCode: graphErrorCode(err),
+          errorCode: graphErrorCode(err, provider),
         };
       }
     }
