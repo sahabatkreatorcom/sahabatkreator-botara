@@ -1140,6 +1140,67 @@ Node "Kirim gambar dinamis" merender kartu PNG 1200×630
   atau satu Mini App Telegram khusus tenant yang meminta. Keputusan
   ada di pemilik; tidak ada yang terblokir oleh penundaan ini.
 
+### Butir 5 — Penilaian Kanal TikTok DM & WhatsApp Calling (PENUTUP TIER 3)
+
+Penilaian per 2026-11-13 dari dokumentasi resmi platform. Keduanya
+TIDAK dibangun pada gelombang ini (pembangunan kanal baru memang
+di luar cakupan); isinya adalah apa yang ada, gerbangnya, dan apa
+yang harus dilakukan pemilik bila ingin melanjutkan.
+
+**A. TikTok Direct Messages**
+
+- API pengembang umum TikTok (Login Kit / Display / Content
+  Posting — keluarga yang dipakai integrasi Botara saat ini) TIDAK
+  punya cakupan DM sama sekali: tidak ada endpoint membaca atau
+  mengirim pesan pribadi.
+- Jalur resmi yang benar-benar ada adalah produk TERPISAH:
+  TikTok API for Business → Business Messaging API, khusus akun
+  TikTok BUSINESS (akun personal/kreator ditolak). Sifatnya:
+  hanya MEMBALAS DM yang dimulai pelanggan (tidak bisa memulai),
+  jendela balas 48 jam, balasan teks (maks ±6.000 karakter) atau
+  satu gambar.
+- Gerbangnya berat dan berlapis: pendaftaran perusahaan dengan
+  email domain perusahaan terverifikasi (TikTok menyatakan tidak
+  menerima akun personal/developer individu), peninjauan aplikasi
+  developer, peninjauan keamanan data & privasi tambahan (untuk
+  akun AS: peninjauan keamanan data AS), formulir akses Accounts
+  API (wajib sejak 20 Maret 2026), dan PEMBATASAN WILAYAH — tidak
+  tersedia untuk akun yang terdaftar di EEA/Swiss/Inggris.
+- Yang harus dilakukan pemilik bila ingin melanjutkan: (1) ajukan
+  pendaftaran TikTok API for Business atas nama perusahaan dan
+  lewati peninjauan keamanan datanya (ini aplikasi tingkat
+  PLATFORM, sekali, bukan per tenant); (2) sadari tiap tenant
+  tetap harus memakai akun TikTok Business di wilayah yang
+  didukung agar DM-nya bisa terhubung. Sesudah gerbang platform
+  lolos, pembangunan kanalnya adalah program tersendiri
+  (kredensial & OAuth-nya berbeda dari Login Kit yang ada).
+
+**B. WhatsApp Calling (panggilan suara)**
+
+- Jalur resminya ADA dan sudah tersedia umum: WhatsApp Business
+  Calling API di Cloud API (diumumkan tersedia 15 Juli 2025).
+  Dua arah: pelanggan menelepon bisnis = gratis, di mana pun
+  Cloud API tersedia; bisnis menelepon pelanggan = berbayar per
+  denyut 6 detik menurut negara tujuan dan WAJIB izin panggilan
+  dari pelanggan lebih dulu (izin sementara 7 hari atau permanen;
+  permintaan izin dibatasi 1×/24 jam dan 2×/7 hari per pasangan
+  nomor-pelanggan; izin gugur sesudah 4 panggilan tak terjawab).
+- Syarat nomor: terdaftar di Cloud API (bukan aplikasi WhatsApp
+  Business), batas pesan harian minimal 2.000 penerima unik
+  (portofolio baru mulai dari 250 — harus ditumbuhkan/diverifikasi
+  dulu), fitur calling diaktifkan pada nomor, aplikasi berlangganan
+  webhook `calls`. Panggilan keluar dari bisnis TIDAK tersedia
+  untuk nomor berkode negara AS, Kanada, Mesir, Vietnam, Nigeria
+  (nomor Indonesia memenuhi syarat).
+- Alasan tidak dibangun sekarang: panggilan tersambung lewat
+  WebRTC (SDP) atau SIP — artinya Botara harus mengoperasikan
+  infrastruktur suara real-time (media server, klien WebRTC di
+  Inbox, perekaman & kepatuhan izin rekam), sebuah produk suara
+  tersendiri, bukan fitur pesan. Yang bisa disiapkan pemilik dari
+  sekarang bila berminat: naikkan batas pesan nomor WhatsApp ke
+  ≥2.000 (verifikasi bisnis) agar nomor memenuhi syarat saat
+  program suara diputuskan.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
