@@ -145,6 +145,35 @@ export type AgentPlaygroundUsage = z.infer<
   typeof AgentPlaygroundUsageSchema
 >;
 
+/**
+ * Konfigurasi DRAF agent untuk uji kering tanpa menyimpan (gelombang
+ * Templat Instruction): isi formulir buat/edit agent saat ini —
+ * instruction + model + mode + bahasa — persis seperti yang sedang
+ * diedit pemilik, sebelum agent-nya ada di database.
+ */
+export const AgentPlaygroundDraftConfigSchema = z.object({
+  /** Nama tampilan draf di panel playground (bukan data tersimpan). */
+  name: z.string().trim().max(255).optional(),
+  systemPrompt: z.string().max(20_000),
+  model: z.string().trim().max(128).optional(),
+  mode: AgentModeSchema.optional(),
+  /** Bahasa balasan draf; null/kosong = mengikuti lawan bicara. */
+  language: z.string().trim().min(2).max(16).nullable().optional(),
+});
+export type AgentPlaygroundDraftConfig = z.infer<
+  typeof AgentPlaygroundDraftConfigSchema
+>;
+
+export const AgentPlaygroundDraftRequestSchema = z.object({
+  draft: AgentPlaygroundDraftConfigSchema,
+  message: z.string().trim().min(1).max(4_000),
+  /** Riwayat uji sebelumnya (hanya hidup di klien; maks 20 giliran). */
+  history: z.array(AgentPlaygroundHistoryMessageSchema).max(20).optional(),
+});
+export type AgentPlaygroundDraftRequest = z.infer<
+  typeof AgentPlaygroundDraftRequestSchema
+>;
+
 export const AgentPlaygroundResponseSchema = z.object({
   /** Teks balasan yang AKAN dikirim agent (mode auto) / diusulkan (suggest). */
   replyText: z.string(),
@@ -157,6 +186,50 @@ export const AgentPlaygroundResponseSchema = z.object({
 });
 export type AgentPlaygroundResponse = z.infer<
   typeof AgentPlaygroundResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Templat instruksi PRIBADI tenant (gelombang Templat Instruction
+// /agents) — salinan instruction + mode + bahasa yang disimpan pemilik
+// dari formulir agent untuk dipakai ulang dari galeri templat yang sama
+// dengan katalog bawaan statis (agent-templates.ts). CRUD sengaja ramping:
+// buat/daftar/hapus; mengubah templat tersimpan = hapus + simpan ulang.
+//
+// PENANDA BELUM DIGANTI BUKAN VALIDASI: systemPrompt di sini sengaja
+// hanya dibatasi panjang (pola CreateAgentRequest) — instruction yang
+// masih memuat penanda "[...]" adalah keadaan sah yang peringatannya
+// hidup di UI; API tidak pernah menolaknya.
+// ---------------------------------------------------------------------------
+
+export const CreateAgentInstructionTemplateRequestSchema = z.object({
+  name: z.string().trim().min(1).max(255),
+  systemPrompt: z.string().max(20_000),
+  mode: AgentModeSchema.optional(),
+  /** Bahasa saran templat; null/kosong = tanpa saran bahasa. */
+  language: z.string().trim().min(2).max(16).nullable().optional(),
+});
+export type CreateAgentInstructionTemplateRequest = z.infer<
+  typeof CreateAgentInstructionTemplateRequestSchema
+>;
+
+export const AgentInstructionTemplateResponseSchema = z.object({
+  id: z.string().uuid(),
+  name: z.string(),
+  systemPrompt: z.string(),
+  mode: AgentModeSchema,
+  language: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type AgentInstructionTemplateResponse = z.infer<
+  typeof AgentInstructionTemplateResponseSchema
+>;
+
+export const AgentInstructionTemplateListResponseSchema = z.object({
+  templates: z.array(AgentInstructionTemplateResponseSchema),
+});
+export type AgentInstructionTemplateListResponse = z.infer<
+  typeof AgentInstructionTemplateListResponseSchema
 >;
 
 // ---------------------------------------------------------------------------

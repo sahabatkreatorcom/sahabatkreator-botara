@@ -26,6 +26,7 @@ export * from "./automations";
 export * from "./automation-templates";
 export * from "./comments";
 export * from "./agents";
+export * from "./agent-templates";
 export * from "./commerce";
 export * from "./api-keys";
 export * from "./realtime";
