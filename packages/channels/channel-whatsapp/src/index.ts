@@ -728,6 +728,13 @@ export interface WhatsAppInboundMessageEvent {
   /** Teks pesan; untuk media = caption bila ada, selain itu null. */
   text: string | null;
   /**
+   * Balasan tombol/daftar interaktif (G5): terisi bila pesan mentah
+   * adalah `type: "interactive"` dengan button_reply / list_reply —
+   * diperlakukan sebagai pesan TEKS berpayload quick reply (type
+   * ternormalisasi 'text', text = judul yang diketuk). Null selain itu.
+   */
+  interactiveReply: { id: string; title: string } | null;
+  /**
    * Referensi media (Fase 18) untuk tipe image/audio/video/document/
    * sticker; null untuk pesan teks atau bila payload tidak membawa id.
    * Tanpa field ini, foto pelanggan hilang permanen: caption saja tidak
@@ -847,6 +854,17 @@ interface WhatsAppWebhookPayload {
           type?: string;
           context?: { id?: string; from?: string };
           text?: { body?: string };
+          /**
+           * Balasan interaktif (G5): ketukan tombol balasan / baris
+           * daftar pada pesan interaktif Cloud API. `id` adalah id
+           * tombol yang dikonfigurasi pengirim (= payload quick
+           * reply), `title` label yang terlihat pengguna.
+           */
+          interactive?: {
+            type?: string;
+            button_reply?: { id?: string; title?: string };
+            list_reply?: { id?: string; title?: string };
+          };
           image?: WhatsAppMediaHolder;
           video?: WhatsAppMediaHolder;
           audio?: WhatsAppMediaHolder;
@@ -1160,10 +1178,31 @@ export function parseWhatsAppWebhookEvents(
         if (typeof from !== "string" || !from) continue;
         if (typeof wamid !== "string" || !wamid) continue;
         const rawType = typeof message.type === "string" ? message.type : "";
-        const type = WHATSAPP_TYPE_MAP[rawType] ?? "other";
+        // G5: balasan tombol/daftar interaktif membawa id tombol
+        // (payload) + judulnya — dinormalkan menjadi pesan teks
+        // berpayload quick reply, BUKAN 'other' tanpa teks seperti
+        // sebelumnya (yang membuatnya tak pernah bisa memicu apa pun).
+        // Interaktif tanpa id/judul (bentuk lain, mis. balasan produk)
+        // tetap 'other' seperti dulu.
+        const interactiveReply =
+          rawType === "interactive"
+            ? (message.interactive?.button_reply ??
+              message.interactive?.list_reply)
+            : undefined;
+        const hasInteractiveReply =
+          interactiveReply !== undefined &&
+          typeof interactiveReply?.id === "string" &&
+          !!interactiveReply.id &&
+          typeof interactiveReply?.title === "string" &&
+          !!interactiveReply.title;
+        const type = hasInteractiveReply
+          ? "text"
+          : (WHATSAPP_TYPE_MAP[rawType] ?? "other");
         // Diekstrak ke helper bersama jalur echo (whatsAppContentText)
         // supaya kedua jalur tidak menyimpang soal caption.
-        const text = whatsAppContentText(type, message);
+        const text = hasInteractiveReply
+          ? (interactiveReply!.title as string)
+          : whatsAppContentText(type, message);
         result.messages.push({
           wabaId,
           phoneNumberId,
@@ -1176,6 +1215,12 @@ export function parseWhatsAppWebhookEvents(
               : null,
           type,
           text,
+          interactiveReply: hasInteractiveReply
+            ? {
+                id: interactiveReply!.id as string,
+                title: interactiveReply!.title as string,
+              }
+            : null,
           // Fase 18: referensi media — bahan ingest di worker.
           media: whatsAppMediaRef(type, message),
           timestamp:

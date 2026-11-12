@@ -100,6 +100,17 @@ export interface TelegramMessage {
   };
 }
 
+/** Ketukan tombol inline (Bot API `callback_query`) — subset yang dipakai. */
+export interface TelegramCallbackQuery {
+  /** Id unik ketukan ini — id dedup event-nya. */
+  id: string;
+  from: TelegramUser;
+  /** Pesan tempat tombol menempel; absen untuk mode inline. */
+  message?: TelegramMessage;
+  /** Data tombol yang dikonfigurasi pengirim (maks 64 byte di Telegram). */
+  data?: string;
+}
+
 export interface TelegramUpdate {
   update_id: number;
   message?: TelegramMessage;
@@ -107,6 +118,8 @@ export interface TelegramUpdate {
   channel_post?: TelegramMessage;
   /** Bot dimasukkan/dikeluarkan dari grup — BUKAN pesan; ditangani route. */
   my_chat_member?: TelegramChatMemberUpdated;
+  /** Ketukan tombol inline (G5) — jalur khusus parseTelegramCallbackQuery. */
+  callback_query?: TelegramCallbackQuery;
   [key: string]: unknown;
 }
 
@@ -222,7 +235,17 @@ export class TelegramBotApiClient {
       // (Fase 6A.1) — update itu bukan pesan dan hanya dicatat audit.
       // `channel_post` (Fase 6A.2): postingan channel tempat bot menjadi
       // ADMIN — termasuk pantulan postingan yang bot kirim sendiri.
-      allowed_updates: ["message", "my_chat_member", "channel_post"],
+      // `callback_query` (G5): ketukan tombol inline = pemicu postback.
+      // PERHATIAN: allowed_updates hanya berlaku sejak setWebhook
+      // terakhir — bot yang terhubung SEBELUM G5 tidak menerima
+      // callback_query sampai webhook-nya didaftarkan ulang (lihat
+      // catatan pemilik di docs/CONTENT-SCHEDULE-OWNER-ACTIONS.md).
+      allowed_updates: [
+        "message",
+        "my_chat_member",
+        "channel_post",
+        "callback_query",
+      ],
     });
   }
 
@@ -523,11 +546,80 @@ export function parseTelegramChannelPost(
 }
 
 /**
+ * Satu ketukan tombol inline yang dinormalisasi (G5): padanan
+ * postback Meta di Telegram. `data` adalah string yang dikonfigurasi
+ * saat tombol dibuat — dicocokkan PERSIS oleh pemicu postback.
+ * Telegram tidak memisahkan "judul tombol" dari data (tombol inline
+ * tidak mengembalikan labelnya), jadi payload sekaligus teks tampil.
+ */
+export interface TelegramCallbackQueryEvent {
+  /** callback_query.id — id dedup ketukan (unik per ketukan). */
+  callbackQueryId: string;
+  /** Id user pengetuk (`from.id`) — identitas kontak (atribusi). */
+  senderExternalId: string;
+  /** Nama pengetuk untuk pembuatan kontak (pola pesan biasa). */
+  senderName: string;
+  senderUsername: string | null;
+  /** Id chat tempat tombol menempel (`message.chat.id`). */
+  chatExternalId: string;
+  isGroup: boolean;
+  chatTitle: string | null;
+  /** Data tombol — payload pemicu postback. */
+  data: string;
+}
+
+/**
+ * Menormalkan update `callback_query` menjadi TelegramCallbackQueryEvent.
+ * Null untuk update lain / bentuk tak dikenal / callback tanpa pesan
+ * chat (mode inline — tidak ada percakapan untuk menampungnya) / data
+ * kosong (tombol tanpa data tidak membawa payload yang bisa dicocokkan).
+ * Sengaja TIDAK lewat parseTelegramUpdate: callback bukan pesan teks
+ * dan `message`-nya adalah pesan LAMA tempat tombol menempel, bukan
+ * pesan baru dari pengguna.
+ *
+ * CATATAN PENGIRIMAN: Telegram hanya mengirim update ini bila
+ * `callback_query` termasuk allowed_updates saat setWebhook — lihat
+ * TelegramBotApiClient.setWebhook (G5) dan catatan pemilik di
+ * docs/CONTENT-SCHEDULE-OWNER-ACTIONS.md (bot lama perlu daftar ulang).
+ */
+export function parseTelegramCallbackQuery(
+  payload: unknown,
+): TelegramCallbackQueryEvent | null {
+  if (typeof payload !== "object" || payload === null) return null;
+  const cq = (payload as TelegramUpdate).callback_query;
+  if (!cq || typeof cq.id !== "string" || !cq.id) return null;
+  if (!cq.from || typeof cq.from.id !== "number") return null;
+  if (typeof cq.data !== "string" || !cq.data) return null;
+  const message = cq.message;
+  if (!message || !message.chat || typeof message.chat.id !== "number") {
+    return null;
+  }
+  const isGroup =
+    message.chat.type === "group" || message.chat.type === "supergroup";
+  const senderName =
+    [cq.from.first_name, cq.from.last_name]
+      .filter((part): part is string => Boolean(part?.trim()))
+      .join(" ")
+      .trim() || "Telegram user";
+  return {
+    callbackQueryId: cq.id,
+    senderExternalId: String(cq.from.id),
+    senderName,
+    senderUsername: cq.from.username ?? null,
+    chatExternalId: String(message.chat.id),
+    isGroup,
+    chatTitle: isGroup ? (message.chat.title ?? null) : null,
+    data: cq.data,
+  };
+}
+
+/**
  * Menormalkan satu update Telegram menjadi StandardEvent. Hanya pesan
  * teks (`message.text`) yang menjadi `message.received`; update lain
  * (edited, channel post — jalur khusus parseTelegramChannelPost,
- * my_chat_member, callback, non-teks) menghasilkan array kosong agar
- * pemanggil menjawab 200 dan mengabaikannya dengan aman.
+ * my_chat_member, callback — jalur khusus parseTelegramCallbackQuery,
+ * non-teks) menghasilkan array kosong agar pemanggil menjawab 200 dan
+ * mengabaikannya dengan aman.
  *
  * Grup (Fase 6A.1): `chat.type` group/supergroup → conversationKind
  * "group" + conversationTitle dari `chat.title`. Perhatikan pemisahan

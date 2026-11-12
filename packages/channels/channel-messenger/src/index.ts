@@ -1941,6 +1941,14 @@ export interface MetaMessagingEvent {
   replyToProviderMessageId: string | null;
   /** Teks pesan; null untuk event non-teks (lampiran/stiker/like). */
   text: string | null;
+  /**
+   * Payload quick reply (G5): terisi bila pesan ini adalah KETUKAN
+   * tombol quick reply (`message.quick_reply.payload`) — teksnya
+   * adalah JUDUL tombol, payload-nya string mesin yang dikonfigurasi
+   * pengirim tombol. Null untuk pesan ketikan biasa: teks yang
+   * kebetulan sama dengan judul tombol TIDAK naik kelas.
+   */
+  quickReplyPayload: string | null;
   /** Pantulan pesan yang KITA kirim (message.is_echo) — pemanggil melewatinya. */
   isEcho: boolean;
   timestamp: number | null;
@@ -1957,6 +1965,7 @@ interface MetaWebhookPayload {
         text?: string;
         is_echo?: boolean;
         reply_to?: { mid?: string };
+        quick_reply?: { payload?: string };
       };
       timestamp?: number;
     }>;
@@ -1966,10 +1975,11 @@ interface MetaWebhookPayload {
 /**
  * Menormalkan payload webhook Meta menjadi daftar event messaging.
  * Hanya entri `messaging` berisi `message` yang diambil (delivery/read
- * receipts & postback dilewati — v1 tidak memakainya). Event non-teks
- * tetap dikembalikan dengan text null agar pemanggil bisa memutuskan;
- * echo ditandai apa adanya (pemanggil melewatinya agar pantulan kiriman
- * sendiri tidak menjadi pesan masuk ganda).
+ * receipts dilewati; postback punya parsernya sendiri sejak G5 —
+ * `parseMetaPostbackEvents`). Event non-teks tetap dikembalikan
+ * dengan text null agar pemanggil bisa memutuskan; echo ditandai apa
+ * adanya (pemanggil melewatinya agar pantulan kiriman sendiri tidak
+ * menjadi pesan masuk ganda).
  */
 export function parseMetaWebhookEvents(payload: unknown): MetaMessagingEvent[] {
   if (typeof payload !== "object" || payload === null) return [];
@@ -1994,9 +2004,101 @@ export function parseMetaWebhookEvents(payload: unknown): MetaMessagingEvent[] {
             ? message.reply_to.mid
             : null,
         text: typeof message.text === "string" ? message.text : null,
+        quickReplyPayload:
+          typeof message.quick_reply?.payload === "string" &&
+          message.quick_reply.payload
+            ? message.quick_reply.payload
+            : null,
         isEcho: message.is_echo === true,
         timestamp:
           typeof item.timestamp === "number" ? item.timestamp : null,
+      });
+    }
+  }
+  return events;
+}
+
+/**
+ * Satu event POSTBACK yang dinormalisasi (G5): ketukan tombol
+ * postback pada Messenger/Instagram — tombol Get Started, menu
+ * persisten, tombol pada template pesan, ice breaker, dsb.
+ *
+ * Bentuk terdokumentasi Meta: `entry.messaging[].postback =
+ * { mid?, payload, title?, referral? }`. `payload` adalah string
+ * mesin yang dikonfigurasi saat tombol dibuat — itulah yang
+ * dicocokkan PERSIS oleh pemicu postback. `title` adalah label
+ * tombol yang terlihat pengguna (bahan teks tampil pesan).
+ *
+ * Id dedup: `postback.mid` dipakai bila ada; payload lama tidak
+ * selalu membawanya, jadi cadangan deterministik disusun dari
+ * (entry, pengirim, timestamp, payload) — retry webhook yang sama
+ * menghasilkan id yang sama dan ter-dedup di core.
+ */
+export interface MetaPostbackEvent {
+  /** Objek webhook: 'page' → messenger, 'instagram' → instagram. */
+  objectKind: "page" | "instagram";
+  /** entry.id: Page ID (page) / ID akun IG (instagram) — penerima. */
+  entryExternalId: string;
+  /** PSID/IGSID pengguna yang mengetuk tombol. */
+  senderExternalId: string;
+  /** Id dedup (postback.mid atau cadangan deterministik). */
+  providerMessageId: string;
+  /** Payload mesin tombol — kunci pencocokan pemicu postback. */
+  payload: string;
+  /** Label tombol yang terlihat pengguna; null bila Meta tak mengirimnya. */
+  title: string | null;
+  timestamp: number | null;
+}
+
+interface MetaPostbackPayload {
+  object?: string;
+  entry?: Array<{
+    id?: string;
+    messaging?: Array<{
+      sender?: { id?: string };
+      postback?: { mid?: string; payload?: string; title?: string };
+      timestamp?: number;
+    }>;
+  }>;
+}
+
+/**
+ * Menormalkan event postback (`messaging[].postback`) dari payload
+ * webhook Meta. Parser messaging utama sengaja tidak diubah —
+ * postback tidak membawa `message`, jadi tidak pernah lolos parser
+ * pesan; jalur ini terpisah seperti parser referral/komentar.
+ * Postback tanpa payload string non-kosong dibuang: tidak ada yang
+ * bisa dicocokkan dan tidak ada yang bisa ditampilkan dengan jujur.
+ */
+export function parseMetaPostbackEvents(payload: unknown): MetaPostbackEvent[] {
+  if (typeof payload !== "object" || payload === null) return [];
+  const body = payload as MetaPostbackPayload;
+  if (body.object !== "page" && body.object !== "instagram") return [];
+  const objectKind = body.object;
+  const events: MetaPostbackEvent[] = [];
+  for (const entry of body.entry ?? []) {
+    if (typeof entry?.id !== "string" || !entry.id) continue;
+    for (const item of entry.messaging ?? []) {
+      const senderId = item?.sender?.id;
+      const postback = item?.postback;
+      if (typeof senderId !== "string" || !senderId || !postback) continue;
+      if (typeof postback.payload !== "string" || !postback.payload) continue;
+      const timestamp =
+        typeof item.timestamp === "number" ? item.timestamp : null;
+      events.push({
+        objectKind,
+        entryExternalId: entry.id,
+        senderExternalId: senderId,
+        providerMessageId:
+          typeof postback.mid === "string" && postback.mid
+            ? postback.mid
+            : `postback:${entry.id}:${senderId}:${timestamp ?? 0}:${postback.payload}`,
+        payload: postback.payload,
+        title:
+          typeof postback.title === "string" && postback.title
+            ? postback.title
+            : null,
+        timestamp,
       });
     }
   }
