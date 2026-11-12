@@ -21,6 +21,7 @@ import {
 } from "@sahabat-kreator/db";
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
+import { normalizeContactFieldsForWriteTx } from "./contact-fields";
 
 /**
  * Service domain kontak/audiens (Fase 1D, RANCANGAN §6).
@@ -265,6 +266,16 @@ export async function createContact(
   input: CreateContactInput,
 ): Promise<Contact> {
   return withTenantDb(db, ctx.tenantId, async (tx) => {
+    // G18 butir 1: nilai field kustom divalidasi + dinormalisasi
+    // terhadap skema field bertipe tenant (definisi wajib ditegakkan
+    // saat buat). Melempar ContactCustomFieldValidationError; jalur
+    // internal (ingest/flow) tidak lewat fungsi ini.
+    const customFields = await normalizeContactFieldsForWriteTx(
+      tx,
+      ctx.tenantId,
+      input.customFields ?? {},
+      { enforceRequired: true },
+    );
     const [row] = await tx
       .insert(contacts)
       .values({
@@ -273,7 +284,7 @@ export async function createContact(
         phone: input.phone ?? null,
         email: input.email ?? null,
         tags: input.tags ?? [],
-        customFields: input.customFields ?? {},
+        customFields,
       })
       .returning();
     return row;
@@ -377,9 +388,19 @@ export async function updateContact(
         )
         .limit(1);
       if (!existing) return null;
+      // G18 butir 1: hanya nilai yang DIKIRIM yang divalidasi terhadap
+      // skema bertipe (nilai lama yang tersimpan tidak dinilai ulang —
+      // ia bisa mendahului definisinya); `required` tidak ditegakkan
+      // pada gabung parsial. Hasil ternormalisasi yang digabung.
+      const normalizedInput = await normalizeContactFieldsForWriteTx(
+        tx,
+        ctx.tenantId,
+        input.customFields ?? {},
+        { enforceRequired: false },
+      );
       const merged: Record<string, unknown> = {
         ...(existing.customFields as Record<string, unknown>),
-        ...(input.customFields ?? {}),
+        ...normalizedInput,
       };
       for (const key of input.customFieldsDelete ?? []) {
         delete merged[key];

@@ -132,7 +132,9 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 //   google_service 'ads' — bukan tabel baru)
 // + 1 tabel Gelombang G17 / migrasi 0040 (flow_webhook_endpoints —
 //   kredensial pemicu webhook masuk flow, token hash-only)
-assert.equal(Number(tablesRes.rows[0].count), 83);
+// + 1 tabel Gelombang G18 / migrasi 0043 (contact_field_definitions —
+//   skema field kustom bertipe per tenant)
+assert.equal(Number(tablesRes.rows[0].count), 84);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -331,7 +333,10 @@ const policies = await db.query<{ count: string }>(
 // Migrasi 0040 (Gelombang G17 — pemicu webhook flow) menambah
 // `flow_webhook_endpoints` dengan tenant_isolation + lengan publik
 // `flow_webhook_lookup` → 111.
-assert.equal(Number(policies.rows[0].count), 111);
+//
+// Migrasi 0043 (Gelombang G18 — skema field kustom bertipe) menambah
+// `contact_field_definitions` dengan tenant_isolation → 112.
+assert.equal(Number(policies.rows[0].count), 112);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
@@ -2515,8 +2520,11 @@ function oneHotVector(index: number): string {
   // 2026-11-13: migrasi 0040 (Gelombang G17 — pemicu webhook flow)
   // menambah flow_webhook_endpoints (tenant_isolation +
   // flow_webhook_lookup) → tabel 83, policy 111.
-  assert.equal(counts.rows[0].tables, "83");
-  assert.equal(counts.rows[0].policies, "111");
+  // 2026-11-13: migrasi 0043 (Gelombang G18 — skema field kustom
+  // bertipe) menambah contact_field_definitions (tenant_isolation)
+  // → tabel 84, policy 112.
+  assert.equal(counts.rows[0].tables, "84");
+  assert.equal(counts.rows[0].policies, "112");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );

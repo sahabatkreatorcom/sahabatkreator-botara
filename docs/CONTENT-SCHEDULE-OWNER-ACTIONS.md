@@ -1068,6 +1068,25 @@ Node "Kirim gambar dinamis" merender kartu PNG 1200×630
    tipografi penuh (font TTF, emoji, logo), jalurnya adalah menambah
    pustaka render (satori/resvg/sharp) sebagai keputusan terpisah.
 
+## Gelombang G18 — Penutup Tier 3 (butir 18–22)
+
+### Butir 1 — Skema field kustom bertipe (tanpa tindakan pemilik)
+
+- Tenant kini bisa mendefinisikan tipe field kustom kontak
+  (teks/angka/tanggal/pilihan/ya-tidak + wajib/tidak) dari halaman
+  Kontak → "Skema field". Tidak ada kredensial/tindakan pemilik —
+  ini murni konfigurasi tenant.
+- Perilaku yang perlu diketahui: validasi hanya berlaku untuk field
+  yang DIDEFINISIKAN dan hanya pada penulisan lewat formulir/API/
+  impor CSV. Nilai lama yang tersimpan sebelum definisi dibuat
+  TIDAK ditulis ulang dan tidak ditolak saat kontak disunting —
+  nilai itu dinilai lagi hanya bila field-nya sendiri diubah.
+  Field tanpa definisi tetap bebas seperti sebelumnya. Menghapus
+  definisi tidak menghapus nilai kontak mana pun (nilai menjadi
+  bebas kembali). Impor CSV: kolom yang judulnya sama dengan kunci
+  definisi menjadi nilai field itu dan divalidasi; baris yang
+  melanggar ditolak dengan alasan per field di laporan impor.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +

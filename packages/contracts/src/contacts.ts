@@ -123,6 +123,143 @@ export const ContactListResponseSchema = z.object({
 });
 export type ContactListResponse = z.infer<typeof ContactListResponseSchema>;
 
+// ---------------------------------------------------------------------------
+// Skema field kustom bertipe (Gelombang G18 butir 1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tipe field kustom yang bisa didefinisikan tenant. Nilai kontak TETAP
+ * disimpan sebagai string di `custom_fields` (kontrak Fase 13A tidak
+ * berubah); tipe di sini mengatur VALIDASI + NORMALISASI saat nilai
+ * ditulis lewat API/impor CSV, dan input yang dirender editor:
+ * - text    : string apa adanya.
+ * - number  : harus numerik; disimpan kanonis (String(Number(v))).
+ * - date    : tanggal kalender sah format YYYY-MM-DD.
+ * - select  : harus salah satu `options` definisi, persis.
+ * - boolean : true/false/1/0/yes/no/ya/tidak (tak peka huruf);
+ *             disimpan kanonis "true"/"false".
+ */
+export const ContactFieldTypeSchema = z.enum([
+  "text",
+  "number",
+  "date",
+  "select",
+  "boolean",
+]);
+export type ContactFieldType = z.infer<typeof ContactFieldTypeSchema>;
+
+/** Kunci field: aturan yang sama dengan kunci ContactCustomFieldsSchema. */
+const ContactFieldKeySchema = z.string().trim().min(1).max(64);
+
+const ContactFieldOptionsSchema = z
+  .array(z.string().trim().min(1).max(100))
+  .max(50)
+  .refine((opts) => new Set(opts).size === opts.length, {
+    message: "Options must be unique",
+  });
+
+export const ContactFieldDefinitionResponseSchema = z.object({
+  id: z.string().uuid(),
+  key: z.string(),
+  label: z.string(),
+  type: ContactFieldTypeSchema,
+  options: z.array(z.string()),
+  required: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type ContactFieldDefinitionResponse = z.infer<
+  typeof ContactFieldDefinitionResponseSchema
+>;
+
+export const ContactFieldDefinitionListResponseSchema = z.object({
+  definitions: z.array(ContactFieldDefinitionResponseSchema),
+});
+export type ContactFieldDefinitionListResponse = z.infer<
+  typeof ContactFieldDefinitionListResponseSchema
+>;
+
+/**
+ * Buat definisi. `select` WAJIB punya ≥1 pilihan; tipe lain TIDAK
+ * boleh membawa pilihan (ditolak, bukan dibuang diam-diam — definisi
+ * yang ambigu tidak boleh tersimpan).
+ */
+export const CreateContactFieldDefinitionRequestSchema = z
+  .object({
+    key: ContactFieldKeySchema,
+    label: z.string().trim().min(1).max(100),
+    type: ContactFieldTypeSchema,
+    options: ContactFieldOptionsSchema.optional(),
+    required: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    const options = value.options ?? [];
+    if (value.type === "select" && options.length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "Select fields require at least one option",
+      });
+    }
+    if (value.type !== "select" && options.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "Options only apply to select fields",
+      });
+    }
+  });
+export type CreateContactFieldDefinitionRequest = z.infer<
+  typeof CreateContactFieldDefinitionRequestSchema
+>;
+
+/**
+ * Ubah definisi. `key` SENGAJA tidak ada di sini: kunci adalah
+ * identitas field di peta nilai tersimpan — mengubahnya berarti
+ * mengganti nama field di semua kontak, operasi yang berbeda dan
+ * tidak ditawarkan gelombang ini.
+ */
+export const UpdateContactFieldDefinitionRequestSchema = z
+  .object({
+    label: z.string().trim().min(1).max(100).optional(),
+    type: ContactFieldTypeSchema.optional(),
+    options: ContactFieldOptionsSchema.optional(),
+    required: z.boolean().optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.type !== undefined &&
+      value.type !== "select" &&
+      (value.options ?? []).length > 0
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["options"],
+        message: "Options only apply to select fields",
+      });
+    }
+  });
+export type UpdateContactFieldDefinitionRequest = z.infer<
+  typeof UpdateContactFieldDefinitionRequestSchema
+>;
+
+/**
+ * Satu pelanggaran nilai terhadap skema field. Dipakai sebagai
+ * `details.issues` pada error CONTACT_FIELD_INVALID (API) dan sebagai
+ * alasan per baris pada impor CSV (`invalid_custom_field`).
+ */
+export const ContactFieldIssueSchema = z.object({
+  key: z.string(),
+  reason: z.enum([
+    "invalid_number",
+    "invalid_date",
+    "invalid_boolean",
+    "invalid_option",
+    "required_missing",
+  ]),
+});
+export type ContactFieldIssue = z.infer<typeof ContactFieldIssueSchema>;
+
 // --- Dedup & merge kontak (Fase 9B) ---
 
 /** Alasan dua kontak dinilai kandidat duplikat (sinyal yang cocok). */

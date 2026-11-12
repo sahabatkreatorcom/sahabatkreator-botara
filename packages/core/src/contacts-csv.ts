@@ -9,6 +9,10 @@ import {
   setContactConsent,
   type EffectiveOptInStatus,
 } from "./contacts";
+import {
+  loadContactFieldDefinitionsTx,
+  validateContactCustomFields,
+} from "./contact-fields";
 
 /**
  * CSV kontak: parser/serializer kecil milik sendiri + orkestrasi
@@ -207,6 +211,8 @@ interface PreparedRow {
   consent: "opt_in" | "opt_out" | null;
   phoneSignal: string | null;
   emailSignal: string | null;
+  /** Nilai field kustom dari kolom yang judulnya cocok dengan definisi field tenant (G18). */
+  customFields: Record<string, string>;
 }
 
 /**
@@ -227,6 +233,11 @@ interface PreparedRow {
  * - Opt-in hanya diterapkan bila berkas menyatakannya (kolom opt-in
  *   ada DAN selnya bernilai dikenali), lewat jalur persetujuan yang
  *   sama seperti toggle manual (setContactConsent source "manual").
+ * - Field kustom (G18): kolom yang judulnya cocok dengan kunci
+ *   definisi field tenant menjadi nilai field kustom baris itu,
+ *   divalidasi terhadap skema bertipe (semantik buat, termasuk
+ *   kewajiban) — pelanggaran menolak baris dengan alasan
+ *   `invalid_custom_field:<kunci>:<alasan>` per field.
  */
 export async function importContactsFromCsv(
   db: Database,
@@ -238,6 +249,19 @@ export async function importContactsFromCsv(
     return { kind: "ok", imported: 0, duplicates: [], invalid: [] };
   }
 
+  // Definisi field kustom tenant (G18 butir 1): kolom CSV yang
+  // judulnya — sesudah normalisasi yang sama seperti alias kolom —
+  // sama dengan KUNCI definisi menjadi kolom field kustom baris itu.
+  // Alias kolom baku (nama/telepon/email/…) selalu menang atas kunci
+  // definisi agar berkas lama tidak berubah makna.
+  const fieldDefinitions = await withTenantDb(db, ctx.tenantId, async (tx) =>
+    loadContactFieldDefinitionsTx(tx, ctx.tenantId),
+  );
+  const definitionKeyByHeader = new Map<string, string>();
+  for (const def of fieldDefinitions) {
+    definitionKeyByHeader.set(normalizeHeaderCell(def.key), def.key);
+  }
+
   // Petakan kolom dari judul bila baris pertama memuat kolom nama.
   let columnIndex: Partial<Record<ImportColumn, number>> = {
     name: 0,
@@ -247,13 +271,27 @@ export async function importContactsFromCsv(
   };
   let dataStart = 0;
   const headerMap: Partial<Record<ImportColumn, number>> = {};
+  /** Indeks kolom → kunci definisi field kustom. */
+  const customColumnIndex = new Map<number, string>();
   rawRows[0]!.forEach((cell, idx) => {
-    const mapped = HEADER_ALIASES[normalizeHeaderCell(cell)];
-    if (mapped && headerMap[mapped] === undefined) headerMap[mapped] = idx;
+    const normalizedCell = normalizeHeaderCell(cell);
+    const mapped = HEADER_ALIASES[normalizedCell];
+    if (mapped && headerMap[mapped] === undefined) {
+      headerMap[mapped] = idx;
+      return;
+    }
+    const defKey = definitionKeyByHeader.get(normalizedCell);
+    if (defKey && ![...customColumnIndex.values()].includes(defKey)) {
+      customColumnIndex.set(idx, defKey);
+    }
   });
   if (headerMap.name !== undefined) {
     columnIndex = headerMap;
     dataStart = 1;
+  } else {
+    // Tanpa judul yang dikenali tidak ada cara jujur memetakan kolom
+    // field kustom — kolom tambahan diabaikan seperti sebelumnya.
+    customColumnIndex.clear();
   }
   const dataRows = rawRows.slice(dataStart);
   if (dataRows.length > MAX_IMPORT_ROWS) {
@@ -307,6 +345,31 @@ export async function importContactsFromCsv(
       invalid.push({ row: rowNumber, reason: "too_many_tags" });
       return;
     }
+    // Field kustom (G18): nilai dari kolom definisi divalidasi
+    // terhadap skema bertipe dengan semantik BUAT (termasuk field
+    // wajib). Baris yang melanggar DITOLAK beralasan per field —
+    // tidak pernah lolos diam-diam atau terpotong sebagian.
+    const customFields: Record<string, string> = {};
+    for (const [idx, key] of customColumnIndex) {
+      const value = (row[idx] ?? "").trim();
+      if (value) customFields[key] = value;
+    }
+    if (fieldDefinitions.length > 0) {
+      const { issues } = validateContactCustomFields(
+        fieldDefinitions,
+        customFields,
+        { enforceRequired: true },
+      );
+      if (issues.length > 0) {
+        for (const issue of issues) {
+          invalid.push({
+            row: rowNumber,
+            reason: `invalid_custom_field:${issue.key}:${issue.reason}`,
+          });
+        }
+        return;
+      }
+    }
     prepared.push({
       rowNumber,
       name,
@@ -320,6 +383,7 @@ export async function importContactsFromCsv(
           : null,
       phoneSignal: normalizeContactPhone(phone || null),
       emailSignal: normalizeContactEmail(email || null),
+      customFields,
     });
   });
 
@@ -356,6 +420,9 @@ export async function importContactsFromCsv(
       ...(row.phone ? { phone: row.phone } : {}),
       ...(row.email ? { email: row.email } : {}),
       tags: row.tags,
+      ...(Object.keys(row.customFields).length > 0
+        ? { customFields: row.customFields }
+        : {}),
     });
     if (row.phoneSignal) existingSignals.phones.add(row.phoneSignal);
     if (row.emailSignal) existingSignals.emails.add(row.emailSignal);

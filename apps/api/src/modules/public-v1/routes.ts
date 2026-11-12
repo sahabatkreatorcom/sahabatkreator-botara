@@ -34,6 +34,7 @@ import {
   type ApiKeyScope,
 } from "@sahabat-kreator/contracts";
 import {
+  ContactCustomFieldValidationError,
   createContact,
   getAgent,
   getBroadcast,
@@ -313,8 +314,16 @@ export function createPublicV1Routes(
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid contact payload");
     }
     const auth = c.get("apiKeyAuth");
-    const contact = await createContact(bundle.db, { tenantId: auth.tenantId }, parsed.data);
-    return c.json(serializeContact(contact), 201);
+    try {
+      const contact = await createContact(bundle.db, { tenantId: auth.tenantId }, parsed.data);
+      return c.json(serializeContact(contact), 201);
+    } catch (err) {
+      // G18: nilai field kustom melanggar skema bertipe tenant.
+      if (err instanceof ContactCustomFieldValidationError) {
+        return apiError(c, 400, "CONTACT_FIELD_INVALID", "Custom field values violate the field schema", { issues: err.issues });
+      }
+      throw err;
+    }
   });
 
   app.patch("/v1/contacts/:id", async (c) => {
@@ -335,12 +344,21 @@ export function createPublicV1Routes(
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid contact payload");
     }
     const auth = c.get("apiKeyAuth");
-    const contact = await updateContact(
-      bundle.db,
-      { tenantId: auth.tenantId },
-      id,
-      parsed.data,
-    );
+    let contact;
+    try {
+      contact = await updateContact(
+        bundle.db,
+        { tenantId: auth.tenantId },
+        id,
+        parsed.data,
+      );
+    } catch (err) {
+      // G18: nilai field kustom melanggar skema bertipe tenant.
+      if (err instanceof ContactCustomFieldValidationError) {
+        return apiError(c, 400, "CONTACT_FIELD_INVALID", "Custom field values violate the field schema", { issues: err.issues });
+      }
+      throw err;
+    }
     if (!contact) return apiError(c, 404, "NOT_FOUND", "Contact not found");
     return c.json(serializeContact(contact));
   });

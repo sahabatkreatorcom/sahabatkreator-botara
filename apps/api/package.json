@@ -44,7 +44,8 @@
     "verify:wacrm-extras": "tsx scripts/verify-wacrm-extras.ts",
     "verify:deals": "tsx scripts/verify-deals.ts",
     "verify:discount-codes": "tsx scripts/verify-discount-codes.ts",
-    "verify:sla-working-hours": "tsx scripts/verify-sla-working-hours.ts"
+    "verify:sla-working-hours": "tsx scripts/verify-sla-working-hours.ts",
+    "verify:contact-field-schema": "tsx scripts/verify-contact-field-schema.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

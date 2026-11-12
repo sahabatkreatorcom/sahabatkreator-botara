@@ -120,6 +120,44 @@ export const contacts = pgTable(
   ],
 );
 
+/**
+ * Definisi SKEMA field kustom kontak (Gelombang G18 butir 1): tenant
+ * mendeklarasikan field kustom dengan TIPE (text/number/date/select/
+ * boolean) + opsi pilihan + kewajiban. Nilai kontak tetap hidup di
+ * `contacts.custom_fields` sebagai peta string→string (kontrak lama
+ * tidak berubah); tabel ini hanya SKEMA-nya: penulisan lewat API/CSV
+ * divalidasi + dinormalisasi terhadap definisi yang ada di sini.
+ * Kunci TANPA definisi tetap field bebas persis seperti sebelumnya —
+ * skema bersifat opt-in per kunci, bukan gerbang atas seluruh peta.
+ * Unik per (tenant, key). Menghapus definisi TIDAK menghapus nilai
+ * tersimpan: nilai itu menjadi field bebas kembali.
+ */
+export const contactFieldDefinitions = pgTable(
+  "contact_field_definitions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** Kunci field — sama persis dengan kunci di contacts.custom_fields. Immutable sesudah dibuat. */
+    key: varchar("key", { length: 64 }).notNull(),
+    /** Label tampil untuk editor & formulir. */
+    label: varchar("label", { length: 100 }).notNull(),
+    /** 'text' | 'number' | 'date' | 'select' | 'boolean' (divalidasi kontrak). */
+    type: varchar("type", { length: 16 }).notNull(),
+    /** Pilihan sah untuk type='select'; array kosong untuk tipe lain. */
+    options: jsonb("options").$type<string[]>().notNull().default([]),
+    /** Wajib terisi saat kontak DIBUAT lewat API/CSV (PATCH gabung tidak menegakkannya). */
+    required: boolean("required").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("contact_field_definitions_tenant_key_unique").on(t.tenantId, t.key),
+    index("contact_field_definitions_tenant_id_idx").on(t.tenantId),
+  ],
+);
+
 export const media = pgTable(
   "media",
   {
@@ -524,6 +562,8 @@ export const messages = pgTable(
 
 export type Contact = typeof contacts.$inferSelect;
 export type NewContact = typeof contacts.$inferInsert;
+export type ContactFieldDefinition = typeof contactFieldDefinitions.$inferSelect;
+export type NewContactFieldDefinition = typeof contactFieldDefinitions.$inferInsert;
 export type Media = typeof media.$inferSelect;
 export type NewMedia = typeof media.$inferInsert;
 export type Conversation = typeof conversations.$inferSelect;

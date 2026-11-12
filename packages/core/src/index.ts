@@ -159,6 +159,20 @@ export {
   type ImportContactsResult,
 } from "./contacts-csv";
 export {
+  validateContactCustomFields,
+  listContactFieldDefinitions,
+  createContactFieldDefinition,
+  updateContactFieldDefinition,
+  deleteContactFieldDefinition,
+  ContactCustomFieldValidationError,
+  ContactFieldDefinitionDuplicateError,
+  ContactFieldDefinitionInvalidError,
+  type ContactFieldType,
+  type ContactFieldIssue,
+  type CreateContactFieldDefinitionInput,
+  type UpdateContactFieldDefinitionInput,
+} from "./contact-fields";
+export {
   DEFAULT_OPT_IN_KEYWORDS,
   DEFAULT_OPT_OUT_KEYWORDS,
   DEFAULT_OPT_IN_SETTINGS,

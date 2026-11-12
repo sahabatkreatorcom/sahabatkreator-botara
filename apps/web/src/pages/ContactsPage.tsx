@@ -9,6 +9,8 @@ import type {
   ContactBulkRequest,
   ContactConversation,
   ContactDuplicatesResponse,
+  ContactFieldDefinitionResponse,
+  ContactFieldType,
   ContactImportResponse,
   ContactNoteResponse,
   ContactResponse,
@@ -266,6 +268,26 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
   useEffect(() => {
     void loadSegments();
   }, [loadSegments]);
+
+  // Definisi field kustom bertipe (G18 butir 1): dimuat non-blokir
+  // seperti segmen — kegagalan memuatnya hanya berarti editor tampil
+  // sebagai pasangan kunci–nilai bebas seperti sebelumnya.
+  const [fieldDefinitions, setFieldDefinitions] = useState<
+    ContactFieldDefinitionResponse[]
+  >([]);
+  const [showFieldManager, setShowFieldManager] = useState(false);
+  const loadFieldDefinitions = useCallback(async () => {
+    if (!tenantId) return;
+    try {
+      setFieldDefinitions(await api.contacts.listFieldDefinitions(tenantId));
+    } catch {
+      setFieldDefinitions([]);
+    }
+  }, [tenantId]);
+  useEffect(() => {
+    void loadFieldDefinitions();
+  }, [loadFieldDefinitions]);
+
   const [showForm, setShowForm] = useState(false);
   const [selected, setSelected] = useState<ContactResponse | null>(null);
   const requestSeq = useRef(0);
@@ -459,11 +481,17 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
   };
 
   const importReasonLabel = (reason: string): string => {
-    const key = `contacts.importReasons.${reason}` as TranslationKey;
+    // Alasan majemuk G18 (invalid_custom_field:<kunci>:<sebab>) —
+    // label dasar dari segmen pertama + rincian server apa adanya.
+    const base = reason.split(":")[0]!;
+    const key = `contacts.importReasons.${base}` as TranslationKey;
     const label = t(key);
     // Kunci tak dikenal (alasan baru dari server) tampil apa adanya —
     // lebih baik daripada menyembunyikan alasan barisnya.
-    return label === key ? reason : label;
+    if (label === key) return reason;
+    return reason.includes(":")
+      ? `${label} (${reason.split(":").slice(1).join(":")})`
+      : label;
   };
 
   if (status === "loading") {
@@ -537,6 +565,13 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
             className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
           >
             {t("contacts.exportButton")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFieldManager(true)}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("contacts.fields.manageButton")}
           </button>
           <button
             type="button"
@@ -959,11 +994,22 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
         </>
       )}
 
+      {showFieldManager ? (
+        <FieldDefinitionsModal
+          t={t}
+          tenantId={active.id}
+          definitions={fieldDefinitions}
+          onClose={() => setShowFieldManager(false)}
+          onChanged={() => void loadFieldDefinitions()}
+        />
+      ) : null}
+
       {selected ? (
         <ContactDetailModal
           t={t}
           tenantId={active.id}
           contact={selected}
+          fieldDefinitions={fieldDefinitions}
           onClose={() => setSelected(null)}
           onOpenConversation={(conversationId) => {
             const path = `/inbox/${encodeURIComponent(conversationId)}`;
@@ -1176,6 +1222,7 @@ function ContactDetailModal({
   t,
   tenantId,
   contact,
+  fieldDefinitions,
   onClose,
   onUpdated,
   onOpenConversation,
@@ -1183,6 +1230,7 @@ function ContactDetailModal({
   t: Translate;
   tenantId: string;
   contact: ContactResponse;
+  fieldDefinitions: ContactFieldDefinitionResponse[];
   onClose: () => void;
   onUpdated: (contact: ContactResponse) => void;
   onOpenConversation: (conversationId: string) => void;
@@ -1479,47 +1527,117 @@ function ContactDetailModal({
               </p>
             ) : (
               <div className="space-y-2">
-                {cfRows.map((row, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <input
-                      value={row.key}
-                      onChange={(e) =>
-                        setCfRows((prev) =>
-                          prev.map((r, i) =>
-                            i === idx ? { ...r, key: e.target.value } : r,
-                          ),
-                        )
-                      }
-                      placeholder={t("contacts.detail.customFieldKeyPlaceholder")}
-                      aria-label={t("contacts.detail.customFieldKeyPlaceholder")}
-                      className={`${inputClassName} min-w-0 flex-1`}
-                    />
-                    <input
-                      value={row.value}
-                      onChange={(e) =>
-                        setCfRows((prev) =>
-                          prev.map((r, i) =>
-                            i === idx ? { ...r, value: e.target.value } : r,
-                          ),
-                        )
-                      }
-                      placeholder={t("contacts.detail.customFieldValuePlaceholder")}
-                      aria-label={t("contacts.detail.customFieldValuePlaceholder")}
-                      className={`${inputClassName} min-w-0 flex-1`}
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCfRows((prev) => prev.filter((_, i) => i !== idx))
-                      }
-                      className="shrink-0 rounded-lg bg-elevated px-2 py-1.5 text-xs font-medium text-ink"
-                    >
-                      {t("contacts.detail.customFieldRemove")}
-                    </button>
-                  </div>
-                ))}
+                {cfRows.map((row, idx) => {
+                  // G18: baris yang kuncinya punya definisi bertipe
+                  // dirender dengan kontrol sesuai tipenya + label
+                  // definisi; kunci bebas tetap pasangan teks biasa.
+                  const def = fieldDefinitions.find(
+                    (d) => d.key === row.key.trim(),
+                  );
+                  const setValue = (value: string) =>
+                    setCfRows((prev) =>
+                      prev.map((r, i) => (i === idx ? { ...r, value } : r)),
+                    );
+                  return (
+                    <div key={idx} className="flex items-center gap-2">
+                      <input
+                        value={row.key}
+                        onChange={(e) =>
+                          setCfRows((prev) =>
+                            prev.map((r, i) =>
+                              i === idx ? { ...r, key: e.target.value } : r,
+                            ),
+                          )
+                        }
+                        placeholder={t("contacts.detail.customFieldKeyPlaceholder")}
+                        aria-label={t("contacts.detail.customFieldKeyPlaceholder")}
+                        className={`${inputClassName} min-w-0 flex-1`}
+                      />
+                      {def?.type === "select" ? (
+                        <select
+                          value={row.value}
+                          onChange={(e) => setValue(e.target.value)}
+                          aria-label={def.label}
+                          className={`${inputClassName} min-w-0 flex-1`}
+                        >
+                          <option value="">—</option>
+                          {def.options.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                      ) : def?.type === "boolean" ? (
+                        <select
+                          value={row.value}
+                          onChange={(e) => setValue(e.target.value)}
+                          aria-label={def.label}
+                          className={`${inputClassName} min-w-0 flex-1`}
+                        >
+                          <option value="">—</option>
+                          <option value="true">
+                            {t("contacts.fields.booleanTrue")}
+                          </option>
+                          <option value="false">
+                            {t("contacts.fields.booleanFalse")}
+                          </option>
+                        </select>
+                      ) : (
+                        <input
+                          type={
+                            def?.type === "date"
+                              ? "date"
+                              : def?.type === "number"
+                                ? "number"
+                                : "text"
+                          }
+                          value={row.value}
+                          onChange={(e) => setValue(e.target.value)}
+                          placeholder={t("contacts.detail.customFieldValuePlaceholder")}
+                          aria-label={
+                            def?.label ??
+                            t("contacts.detail.customFieldValuePlaceholder")
+                          }
+                          className={`${inputClassName} min-w-0 flex-1`}
+                        />
+                      )}
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCfRows((prev) => prev.filter((_, i) => i !== idx))
+                        }
+                        className="shrink-0 rounded-lg bg-elevated px-2 py-1.5 text-xs font-medium text-ink"
+                      >
+                        {t("contacts.detail.customFieldRemove")}
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             )}
+            {/* Field terdefinisi yang belum ada di kontak ini bisa
+                ditambahkan satu klik (kunci terisi dari definisi). */}
+            {fieldDefinitions.filter(
+              (d) => !cfRows.some((r) => r.key.trim() === d.key),
+            ).length > 0 ? (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {fieldDefinitions
+                  .filter((d) => !cfRows.some((r) => r.key.trim() === d.key))
+                  .map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() =>
+                        setCfRows((prev) => [...prev, { key: d.key, value: "" }])
+                      }
+                      className="rounded-full bg-elevated px-2 py-1 text-[11px] font-medium text-ink"
+                    >
+                      + {d.label}
+                      {d.required ? " *" : ""}
+                    </button>
+                  ))}
+              </div>
+            ) : null}
             <button
               type="button"
               onClick={() =>
@@ -2302,4 +2420,289 @@ function SegmentConditionValueInputs({
         </select>
       );
   }
+}
+
+/**
+ * Pengelola definisi field kustom bertipe (G18 butir 1). Definisi
+ * mengatur validasi penulisan nilai kontak (API + impor CSV) dan
+ * kontrol editor; menghapus definisi TIDAK menghapus nilai yang
+ * sudah tersimpan di kontak — nilai itu menjadi field bebas lagi.
+ * Kunci tidak bisa diubah sesudah dibuat (ia identitas field di
+ * peta nilai semua kontak).
+ */
+function FieldDefinitionsModal({
+  t,
+  tenantId,
+  definitions,
+  onClose,
+  onChanged,
+}: {
+  t: Translate;
+  tenantId: string;
+  definitions: ContactFieldDefinitionResponse[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [key, setKey] = useState("");
+  const [label, setLabel] = useState("");
+  const [type, setType] = useState<ContactFieldType>("text");
+  const [optionsText, setOptionsText] = useState("");
+  const [required, setRequired] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
+  const resetForm = () => {
+    setEditingId(null);
+    setKey("");
+    setLabel("");
+    setType("text");
+    setOptionsText("");
+    setRequired(false);
+    setError(null);
+  };
+
+  const startEdit = (def: ContactFieldDefinitionResponse) => {
+    setEditingId(def.id);
+    setKey(def.key);
+    setLabel(def.label);
+    setType(def.type);
+    setOptionsText(def.options.join("\n"));
+    setRequired(def.required);
+    setError(null);
+  };
+
+  const handleSubmit = async (e: FormEvent) => {
+    e.preventDefault();
+    const options = optionsText
+      .split("\n")
+      .map((o) => o.trim())
+      .filter(Boolean);
+    setBusy(true);
+    setError(null);
+    try {
+      if (editingId) {
+        await api.contacts.updateFieldDefinition(tenantId, editingId, {
+          label: label.trim(),
+          type,
+          ...(type === "select" ? { options } : {}),
+          required,
+        });
+      } else {
+        await api.contacts.createFieldDefinition(tenantId, {
+          key: key.trim(),
+          label: label.trim(),
+          type,
+          ...(type === "select" ? { options } : {}),
+          required,
+        });
+      }
+      resetForm();
+      onChanged();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleDelete = async (definitionId: string) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api.contacts.deleteFieldDefinition(tenantId, definitionId);
+      setConfirmDeleteId(null);
+      if (editingId === definitionId) resetForm();
+      onChanged();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const typeLabel = (value: ContactFieldType): string =>
+    t(`contacts.fields.types.${value}` as TranslationKey);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-ink">
+              {t("contacts.fields.title")}
+            </h2>
+            <p className="mt-0.5 text-sm text-muted">
+              {t("contacts.fields.subtitle")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+
+        {definitions.length === 0 ? (
+          <p className="mt-4 text-sm text-muted">{t("contacts.fields.empty")}</p>
+        ) : (
+          <ul className="mt-4 space-y-2">
+            {definitions.map((def) => (
+              <li
+                key={def.id}
+                className="flex items-center justify-between gap-2 rounded-lg bg-elevated/60 px-3 py-2"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-ink">
+                    {def.label}{" "}
+                    <span className="text-xs text-muted">({def.key})</span>
+                  </p>
+                  <p className="text-xs text-muted">
+                    {typeLabel(def.type)}
+                    {def.type === "select"
+                      ? ` · ${def.options.join(", ")}`
+                      : ""}
+                    {def.required ? ` · ${t("contacts.fields.requiredBadge")}` : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => startEdit(def)}
+                    className="rounded-lg bg-surface px-2 py-1 text-xs font-medium text-ink"
+                  >
+                    {t("common.edit")}
+                  </button>
+                  {confirmDeleteId === def.id ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleDelete(def.id)}
+                      className="rounded-lg bg-danger px-2 py-1 text-xs font-semibold text-white disabled:opacity-60"
+                    >
+                      {t("contacts.fields.confirmDelete")}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteId(def.id)}
+                      className="rounded-lg bg-surface px-2 py-1 text-xs font-medium text-danger"
+                    >
+                      {t("common.delete")}
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <form onSubmit={handleSubmit} className="mt-5 space-y-3 border-t border-line pt-4">
+          <h3 className="text-sm font-semibold text-ink">
+            {editingId
+              ? t("contacts.fields.editTitle")
+              : t("contacts.fields.createTitle")}
+          </h3>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("contacts.fields.keyLabel")}
+            </span>
+            <input
+              value={key}
+              onChange={(e) => setKey(e.target.value)}
+              disabled={editingId !== null}
+              required
+              maxLength={64}
+              className={`${inputClassName} w-full disabled:opacity-60`}
+            />
+            {editingId ? (
+              <span className="mt-1 block text-[11px] text-muted">
+                {t("contacts.fields.keyImmutableHint")}
+              </span>
+            ) : null}
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("contacts.fields.labelLabel")}
+            </span>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              required
+              maxLength={100}
+              className={`${inputClassName} w-full`}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-muted">
+              {t("contacts.fields.typeLabel")}
+            </span>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as ContactFieldType)}
+              className={`${inputClassName} w-full`}
+            >
+              {(["text", "number", "date", "select", "boolean"] as const).map(
+                (value) => (
+                  <option key={value} value={value}>
+                    {typeLabel(value)}
+                  </option>
+                ),
+              )}
+            </select>
+          </label>
+          {type === "select" ? (
+            <label className="block">
+              <span className="mb-1 block text-xs font-medium text-muted">
+                {t("contacts.fields.optionsLabel")}
+              </span>
+              <textarea
+                value={optionsText}
+                onChange={(e) => setOptionsText(e.target.value)}
+                required
+                rows={4}
+                className={`${inputClassName} w-full`}
+              />
+            </label>
+          ) : null}
+          <label className="flex items-center gap-2 text-sm text-ink">
+            <input
+              type="checkbox"
+              checked={required}
+              onChange={(e) => setRequired(e.target.checked)}
+            />
+            {t("contacts.fields.requiredLabel")}
+          </label>
+          <FieldError message={error} />
+          <div className="flex gap-2">
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+            >
+              {editingId
+                ? t("contacts.saveChanges")
+                : t("contacts.fields.createButton")}
+            </button>
+            {editingId ? (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+              >
+                {t("common.cancel")}
+              </button>
+            ) : null}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
 }

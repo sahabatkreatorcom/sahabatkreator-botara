@@ -113,6 +113,10 @@ import type {
   InstantiateAutomationTemplateRequest,
   InstantiateSequenceTemplateRequest,
   CreateContactRequest,
+  ContactFieldDefinitionListResponse,
+  ContactFieldDefinitionResponse,
+  CreateContactFieldDefinitionRequest,
+  UpdateContactFieldDefinitionRequest,
   CreateFlowRequest,
   CreateGrowthLinkRequest,
   GrowthLinkAttributedContactsResponse,
@@ -650,6 +654,47 @@ export const api = {
       return request<ContactResponse>(
         `/api/tenants/${tenantId}/contacts/${contactId}`,
         { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/contacts/field-definitions → definisi skema field kustom bertipe (G18). */
+    async listFieldDefinitions(
+      tenantId: string,
+    ): Promise<ContactFieldDefinitionResponse[]> {
+      const body = await request<ContactFieldDefinitionListResponse>(
+        `/api/tenants/${tenantId}/contacts/field-definitions`,
+        { method: "GET" },
+      );
+      return body.definitions;
+    },
+    /** POST /api/tenants/:tenantId/contacts/field-definitions → definisi baru (409 bila kunci sudah dipakai). */
+    createFieldDefinition(
+      tenantId: string,
+      input: CreateContactFieldDefinitionRequest,
+    ): Promise<ContactFieldDefinitionResponse> {
+      return request<ContactFieldDefinitionResponse>(
+        `/api/tenants/${tenantId}/contacts/field-definitions`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** PATCH /api/tenants/:tenantId/contacts/field-definitions/:id → ubah definisi (kunci tidak bisa diubah). */
+    updateFieldDefinition(
+      tenantId: string,
+      definitionId: string,
+      input: UpdateContactFieldDefinitionRequest,
+    ): Promise<ContactFieldDefinitionResponse> {
+      return request<ContactFieldDefinitionResponse>(
+        `/api/tenants/${tenantId}/contacts/field-definitions/${definitionId}`,
+        { method: "PATCH", body: JSON.stringify(input) },
+      );
+    },
+    /** DELETE /api/tenants/:tenantId/contacts/field-definitions/:id → hapus definisi (nilai kontak tidak ikut terhapus). */
+    deleteFieldDefinition(
+      tenantId: string,
+      definitionId: string,
+    ): Promise<void> {
+      return request<void>(
+        `/api/tenants/${tenantId}/contacts/field-definitions/${definitionId}`,
+        { method: "DELETE" },
       );
     },
     /** GET /api/tenants/:tenantId/contacts/duplicates → kelompok kandidat duplikat (Fase 9B). */

@@ -178,6 +178,7 @@ export const id: Resources = {
       phone_too_long: "telepon terlalu panjang",
       invalid_tag: "tag tidak sah",
       too_many_tags: "tag terlalu banyak",
+      invalid_custom_field: "field kustom tidak sah",
     },
     exportButton: "Ekspor CSV",
     bulk: {
@@ -214,6 +215,34 @@ export const id: Resources = {
       customFieldValuePlaceholder: "Nilai",
       customFieldAdd: "Tambah field",
       customFieldRemove: "Hapus",
+    },
+    fields: {
+      manageButton: "Skema field",
+      title: "Skema field kustom",
+      subtitle:
+        "Definisikan tipe field kustom kontak. Nilai yang ditulis lewat formulir/API/impor CSV divalidasi terhadap skema ini; field tanpa definisi tetap bebas.",
+      empty: "Belum ada definisi field. Semua field kustom saat ini bebas.",
+      keyLabel: "Kunci field",
+      keyImmutableHint:
+        "Kunci tidak bisa diubah — ia adalah identitas field di nilai semua kontak.",
+      labelLabel: "Label tampil",
+      typeLabel: "Tipe",
+      optionsLabel: "Pilihan (satu per baris)",
+      requiredLabel: "Wajib diisi saat kontak dibuat",
+      requiredBadge: "wajib",
+      createTitle: "Definisi baru",
+      editTitle: "Ubah definisi",
+      createButton: "Buat definisi",
+      confirmDelete: "Hapus definisi?",
+      booleanTrue: "Ya / Benar",
+      booleanFalse: "Tidak / Salah",
+      types: {
+        text: "Teks",
+        number: "Angka",
+        date: "Tanggal",
+        select: "Pilihan",
+        boolean: "Ya/Tidak",
+      },
     },
     notes: {
       title: "Catatan kontak",

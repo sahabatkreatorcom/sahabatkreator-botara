@@ -302,6 +302,13 @@
       "when": 1794477826052,
       "tag": "0042_message_interactive_payload",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1794477827052,
+      "tag": "0043_contact_field_definitions",
+      "breakpoints": true
     }
   ]
 }

@@ -5,6 +5,8 @@ import {
   ContactBulkResponseSchema,
   ContactConversationListResponseSchema,
   ContactDuplicatesResponseSchema,
+  ContactFieldDefinitionListResponseSchema,
+  ContactFieldDefinitionResponseSchema,
   ContactImportRequestSchema,
   ContactImportResponseSchema,
   ContactListResponseSchema,
@@ -12,18 +14,26 @@ import {
   ContactNoteResponseSchema,
   ContactResponseSchema,
   ContactTimelineResponseSchema,
+  CreateContactFieldDefinitionRequestSchema,
   CreateContactNoteRequestSchema,
   CreateContactRequestSchema,
   MergeContactRequestSchema,
+  UpdateContactFieldDefinitionRequestSchema,
   UpdateContactRequestSchema,
+  type ContactFieldDefinitionResponse,
   type ContactNoteResponse,
   type ContactResponse,
 } from "@sahabat-kreator/contracts";
 import {
   buildContactsCsv,
   bulkApplyContactsAction,
+  ContactCustomFieldValidationError,
+  ContactFieldDefinitionDuplicateError,
+  ContactFieldDefinitionInvalidError,
   createContact,
+  createContactFieldDefinition,
   createContactNote,
+  deleteContactFieldDefinition,
   deleteContactNote,
   effectiveOptInStatus,
   findDuplicateContacts,
@@ -31,6 +41,7 @@ import {
   getContactTimeline,
   importContactsFromCsv,
   listContactConversations,
+  listContactFieldDefinitions,
   listContactNotes,
   listContactPlatforms,
   listContactPhotoFetchCandidates,
@@ -41,9 +52,10 @@ import {
   mapContactsToSelfChannelAccounts,
   mergeContacts,
   updateContact,
+  updateContactFieldDefinition,
   type ContactNoteWithAuthor,
 } from "@sahabat-kreator/core";
-import type { Contact } from "@sahabat-kreator/db";
+import type { Contact, ContactFieldDefinition } from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 import {
@@ -92,6 +104,22 @@ export function serializeContact(
     consentAt: row.consentAt?.toISOString() ?? null,
     lastContactedAt: row.lastContactedAt?.toISOString() ?? null,
     platforms,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+  });
+}
+
+/** Serialisasi definisi field kustom bertipe (G18 butir 1). */
+export function serializeContactFieldDefinition(
+  row: ContactFieldDefinition,
+): ContactFieldDefinitionResponse {
+  return ContactFieldDefinitionResponseSchema.parse({
+    id: row.id,
+    key: row.key,
+    label: row.label,
+    type: row.type,
+    options: row.options,
+    required: row.required,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   });
@@ -219,6 +247,15 @@ const ExportContactsQuerySchema = z.object({
  *   POST   /tenants/:tenantId/contacts/:id/notes          buat catatan kontak
  *   DELETE /tenants/:tenantId/contacts/:id/notes/:noteId  hapus (penulis / owner / admin)
  *   GET    /tenants/:tenantId/contacts/:id/timeline       linimasa aktivitas (baca-saja)
+ *
+ * Route tambahan Gelombang G18 butir 1 (skema field kustom bertipe):
+ *   GET    /tenants/:tenantId/contacts/field-definitions            daftar definisi
+ *   POST   /tenants/:tenantId/contacts/field-definitions            buat definisi
+ *   PATCH  /tenants/:tenantId/contacts/field-definitions/:defId     ubah (key immutable)
+ *   DELETE /tenants/:tenantId/contacts/field-definitions/:defId     hapus (nilai kontak utuh)
+ * Penulisan kontak (POST/PATCH di atas + impor CSV) divalidasi core
+ * terhadap definisi ini; pelanggaran → 400 CONTACT_FIELD_INVALID
+ * dengan details.issues per field.
  * Catatan kontak adalah keluarga TERPISAH dari catatan percakapan
  * (modul notes, /conversations/:id/notes) — subjeknya kontak, dan
  * kedua daftar tidak pernah dicampur; linimasa merakit peristiwa dari
@@ -240,6 +277,10 @@ export function createContactsRoutes(
     app.get(`${base}/export`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/import`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.post(`${base}/bulk`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/field-definitions`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/field-definitions`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.patch(`${base}/field-definitions/:definitionId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.delete(`${base}/field-definitions/:definitionId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/conversations`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/notes`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
@@ -275,8 +316,16 @@ export function createContactsRoutes(
     if (!parsed.success) {
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid contact payload");
     }
-    const contact = await createContact(bundle.db, { tenantId: tenant.id }, parsed.data);
-    return c.json(serializeContact(contact), 201);
+    try {
+      const contact = await createContact(bundle.db, { tenantId: tenant.id }, parsed.data);
+      return c.json(serializeContact(contact), 201);
+    } catch (err) {
+      // G18: nilai field kustom melanggar skema bertipe tenant.
+      if (err instanceof ContactCustomFieldValidationError) {
+        return apiError(c, 400, "CONTACT_FIELD_INVALID", "Custom field values violate the field schema", { issues: err.issues });
+      }
+      throw err;
+    }
   });
 
   /**
@@ -495,6 +544,104 @@ export function createContactsRoutes(
         failed: result.failed,
       }),
     );
+  });
+
+  // --- Skema field kustom bertipe (G18 butir 1) ---
+  // Didaftarkan SEBELUM "/:id" agar segmen "field-definitions" tidak
+  // tertangkap sebagai id kontak. Baca boleh semua member; tulis
+  // sejajar tulis kontak biasa (semua member) — definisi adalah
+  // konfigurasi CRM harian, bukan kredensial.
+
+  app.get(`${base}/field-definitions`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const rows = await listContactFieldDefinitions(bundle.db, { tenantId: tenant.id });
+    return c.json(
+      ContactFieldDefinitionListResponseSchema.parse({
+        definitions: rows.map(serializeContactFieldDefinition),
+      }),
+    );
+  });
+
+  app.post(`${base}/field-definitions`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = CreateContactFieldDefinitionRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid field definition payload");
+    }
+    try {
+      const row = await createContactFieldDefinition(
+        bundle.db,
+        { tenantId: tenant.id },
+        parsed.data,
+      );
+      return c.json(serializeContactFieldDefinition(row), 201);
+    } catch (err) {
+      if (err instanceof ContactFieldDefinitionDuplicateError) {
+        return apiError(c, 409, "CONTACT_FIELD_DEFINITION_DUPLICATE", "A field with this key is already defined");
+      }
+      if (err instanceof ContactFieldDefinitionInvalidError) {
+        return apiError(c, 400, "VALIDATION_ERROR", err.message);
+      }
+      throw err;
+    }
+  });
+
+  app.patch(`${base}/field-definitions/:definitionId`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const definitionId = c.req.param("definitionId");
+    if (!z.string().uuid().safeParse(definitionId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Field definition not found");
+    }
+    let json: unknown;
+    try {
+      json = await c.req.json();
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = UpdateContactFieldDefinitionRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid field definition payload");
+    }
+    try {
+      const row = await updateContactFieldDefinition(
+        bundle.db,
+        { tenantId: tenant.id },
+        definitionId,
+        parsed.data,
+      );
+      if (!row) return apiError(c, 404, "NOT_FOUND", "Field definition not found");
+      return c.json(serializeContactFieldDefinition(row));
+    } catch (err) {
+      if (err instanceof ContactFieldDefinitionInvalidError) {
+        return apiError(c, 400, "VALIDATION_ERROR", err.message);
+      }
+      throw err;
+    }
+  });
+
+  app.delete(`${base}/field-definitions/:definitionId`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const definitionId = c.req.param("definitionId");
+    if (!z.string().uuid().safeParse(definitionId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Field definition not found");
+    }
+    const deleted = await deleteContactFieldDefinition(
+      bundle.db,
+      { tenantId: tenant.id },
+      definitionId,
+    );
+    if (!deleted) return apiError(c, 404, "NOT_FOUND", "Field definition not found");
+    return c.body(null, 204);
   });
 
   app.get(`${base}/:id`, async (c) => {
@@ -749,14 +896,23 @@ export function createContactsRoutes(
     if (!parsed.success) {
       return apiError(c, 400, "VALIDATION_ERROR", "Invalid contact payload");
     }
-    const contact = await updateContact(
-      bundle.db,
-      { tenantId: tenant.id },
-      id,
-      // Fase 13C: pelaku sesi diteruskan agar audit toggle opt-in
-      // manual menyebut user-nya (source "manual" di core).
-      { ...parsed.data, actorUserId: c.get("appUser").id },
-    );
+    let contact;
+    try {
+      contact = await updateContact(
+        bundle.db,
+        { tenantId: tenant.id },
+        id,
+        // Fase 13C: pelaku sesi diteruskan agar audit toggle opt-in
+        // manual menyebut user-nya (source "manual" di core).
+        { ...parsed.data, actorUserId: c.get("appUser").id },
+      );
+    } catch (err) {
+      // G18: nilai field kustom melanggar skema bertipe tenant.
+      if (err instanceof ContactCustomFieldValidationError) {
+        return apiError(c, 400, "CONTACT_FIELD_INVALID", "Custom field values violate the field schema", { issues: err.issues });
+      }
+      throw err;
+    }
     if (!contact) return apiError(c, 404, "NOT_FOUND", "Contact not found");
     // UI menimpa baris daftar dengan respons PATCH ini, jadi platform
     // harus ikut dihitung — kalau tidak, badge hilang sesudah menyunting.

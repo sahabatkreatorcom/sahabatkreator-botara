@@ -284,6 +284,11 @@ export const ErrorCodeSchema = z.enum([
   "DISCOUNT_CODE_DUPLICATE",
   // Gelombang G15: jadwal kerja — user sasaran bukan anggota tenant ini.
   "MEMBER_NOT_FOUND",
+  // Gelombang G18 butir 1: skema field kustom bertipe — nilai kontak
+  // melanggar definisi field tenant (details memuat isu per field),
+  // atau kunci definisi sudah dipakai definisi lain di tenant ini.
+  "CONTACT_FIELD_INVALID",
+  "CONTACT_FIELD_DEFINITION_DUPLICATE",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",

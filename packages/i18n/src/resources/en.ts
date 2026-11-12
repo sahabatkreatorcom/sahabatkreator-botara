@@ -179,6 +179,7 @@ export const en = {
       phone_too_long: "phone too long",
       invalid_tag: "invalid tag",
       too_many_tags: "too many tags",
+      invalid_custom_field: "invalid custom field",
     },
     exportButton: "Export CSV",
     bulk: {
@@ -215,6 +216,34 @@ export const en = {
       customFieldValuePlaceholder: "Value",
       customFieldAdd: "Add field",
       customFieldRemove: "Remove",
+    },
+    fields: {
+      manageButton: "Field schema",
+      title: "Custom field schema",
+      subtitle:
+        "Define types for contact custom fields. Values written via forms/API/CSV import are validated against this schema; fields without a definition stay free-form.",
+      empty: "No field definitions yet. All custom fields are currently free-form.",
+      keyLabel: "Field key",
+      keyImmutableHint:
+        "The key cannot be changed — it is the field's identity in every contact's values.",
+      labelLabel: "Display label",
+      typeLabel: "Type",
+      optionsLabel: "Options (one per line)",
+      requiredLabel: "Required when a contact is created",
+      requiredBadge: "required",
+      createTitle: "New definition",
+      editTitle: "Edit definition",
+      createButton: "Create definition",
+      confirmDelete: "Delete definition?",
+      booleanTrue: "Yes / True",
+      booleanFalse: "No / False",
+      types: {
+        text: "Text",
+        number: "Number",
+        date: "Date",
+        select: "Choice",
+        boolean: "Yes/No",
+      },
     },
     notes: {
       title: "Contact notes",
