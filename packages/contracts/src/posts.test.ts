@@ -187,6 +187,14 @@ describe("capability post per provider", () => {
       expect(capability.publishOptions.privacyValues).toEqual([]);
       expect(capability.publishOptions.supportsAiDisclosure).toBe(false);
     }
+
+    // Pinterest: satu-satunya provider dengan pilihan board per
+    // postingan (Pin wajib masuk board; resolusi berlapis
+    // postingan → bawaan akun → board pertama).
+    const pinterest = getPostProviderCapability("pinterest")!;
+    expect(pinterest.publishOptions.supportsBoardChoice).toBe(true);
+    expect(youtube.publishOptions.supportsBoardChoice).toBe(false);
+    expect(tiktok.publishOptions.supportsBoardChoice).toBe(false);
   });
 
   it("langit-langit skema permintaan mengikuti capability paling longgar", () => {

@@ -71,6 +71,7 @@ export interface PostPublishOptionsRecord {
   tiktokAllowStitch?: boolean;
   tiktokBrandOrganic?: boolean;
   tiktokBrandContent?: boolean;
+  pinterestBoardId?: string;
 }
 
 /**

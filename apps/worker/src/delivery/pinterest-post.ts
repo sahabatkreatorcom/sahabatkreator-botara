@@ -32,15 +32,19 @@ import {
  * muat payload, dekripsi kredensial akun, kirim, dan tandai hasil.
  * Perbedaan Pinterest ada pada bentuk konten dan media:
  *
- * - Satu post = satu Pin pada board tujuan akun: pilihan pemilik
- *   dari pemilih board Channels bila tersimpan dan masih ada di
- *   Pinterest (keputusan board terdokumentasi di paket
- *   channel-pinterest); pilihan yang sudah hilang di Pinterest
- *   jatuh ke board pertama DENGAN catatan log; tanpa pilihan →
- *   board pertama; akun tanpa board gagal aman
- *   `pinterest_board_missing`. Judul Pin dari `title` post,
- *   deskripsi dari caption, tautan tujuan dari URL pertama di
- *   caption — semua dirangkai pembangun murni di paket channel.
+ * - Satu post = satu Pin pada board tujuan. Resolusi board
+ *   BERLAPIS (gelombang Pilihan Privasi & AI memindahkan pilihan
+ *   board ke postingan): (1) board pada opsi postingan ini —
+ *   dipilih pengguna di formulir /posts; (2) pilihan board per
+ *   akun dari pemilih board Channels (bawaan akun); (3) board
+ *   pertama akun. Resolver klien (`resolvePinBoard`) memvalidasi
+ *   lapis teratas yang terisi terhadap daftar board hidup akun;
+ *   pilihan yang sudah hilang di Pinterest turun ke board pertama
+ *   DENGAN catatan log yang menyebut lapis asalnya; akun tanpa
+ *   board sama sekali gagal aman `pinterest_board_missing`.
+ *   Judul Pin dari `title` post, deskripsi dari caption, tautan
+ *   tujuan dari URL pertama di caption — semua dirangkai
+ *   pembangun murni di paket channel.
  * - Media gambar JPEG/PNG dikirim sebagai `image_base64` dari biner
  *   object store privat (pola biner repo — tanpa URL publik). Format
  *   gambar lain yang diterima Pinterest (GIF) memakai `image_url`
@@ -130,22 +134,25 @@ export async function publishPinterestPost(
   const client = new PinterestClient({ baseUrl: opts.pinterestApiBase });
 
   try {
-    // Board tujuan: pilihan tersimpan akun (pemilih board) dibaca
-    // dari kolom akun; resolver klien memvalidasinya ke daftar
-    // board hidup akun sebelum Pin dibuat.
+    // Board tujuan berlapis: opsi postingan menang atas bawaan
+    // akun (kolom pilihan Channels); resolver klien memvalidasi
+    // lapis teratas yang terisi ke daftar board hidup akun sebelum
+    // Pin dibuat, dan menandai bila pilihan itu sudah hilang.
     const choice = await getPinterestBoardChoice(
       db,
       ctx,
       payload.channelAccountId,
     );
+    const postBoardId = payload.publishOptions?.pinterestBoardId ?? null;
+    const preferredBoardId = postBoardId ?? choice?.boardId ?? null;
     const resolution = await client.resolvePinBoard(
       accessToken,
-      choice?.boardId ?? null,
+      preferredBoardId,
     );
     if (!resolution.boardId) return fail("pinterest_board_missing");
     if (resolution.preferredMissing) {
       console.log(
-        `[post] ${input.postId}: board pilihan ${choice?.boardId} tidak ditemukan lagi di Pinterest — jatuh ke board pertama ${resolution.boardId}`,
+        `[post] ${input.postId}: board pilihan ${postBoardId ? "postingan" : "akun"} ${preferredBoardId} tidak ditemukan lagi di Pinterest — jatuh ke board pertama ${resolution.boardId}`,
       );
     }
     const boardId = resolution.boardId;

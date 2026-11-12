@@ -310,8 +310,15 @@ routes.route(
 routes.route("/", createBroadcastsRoutes(authBundle));
 // Modul posts (Fase 23) — Content Schedule untuk channel Telegram
 // /tenants/:tenantId/posts; penerbitan oleh worker (event outbox
-// post.publish_due → job post.publish).
-routes.route("/", createPostsRoutes(authBundle));
+// post.publish_due → job post.publish). Opsi modul dipakai
+// validasi board Pinterest pada opsi postingan (pola Channels).
+routes.route(
+  "/",
+  createPostsRoutes(authBundle, {
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+    pinterestApiBase: env.PINTEREST_API_BASE,
+  }),
+);
 // Modul whatsapp-templates (Fase 10A) — template pesan resmi WhatsApp
 // /tenants/:tenantId/whatsapp-templates (cermin lokal + Graph Meta).
 routes.route(

@@ -165,6 +165,16 @@ export const PostPublishOptionsSchema = z.object({
    * kombinasi dengan `SELF_ONLY` ditolak core.
    */
   tiktokBrandContent: z.boolean().optional(),
+  /**
+   * Pinterest saja: board tujuan Pin untuk postingan INI
+   * (`board_id` API v5). Resolusi penerbit berlapis: board
+   * postingan ini → pilihan board per akun di Channels → board
+   * pertama akun. Boleh kosong (= pakai lapis bawaan). Bila diisi,
+   * server memvalidasinya ke daftar board akun Pinterest sasaran
+   * (board asing ditolak 422 PINTEREST_BOARD_NOT_FOUND, pola
+   * endpoint Channels yang sama).
+   */
+  pinterestBoardId: z.string().min(1).max(64).optional(),
 });
 export type PostPublishOptions = z.infer<typeof PostPublishOptionsSchema>;
 
@@ -236,6 +246,8 @@ export const PostProviderPublishOptionsSchema = z.object({
   supportsInteractions: z.boolean(),
   /** Pengungkapan konten komersial kreator (TikTok: brand organik/bermerek). */
   supportsCommercialDisclosure: z.boolean(),
+  /** Pilihan board tujuan per postingan (Pinterest saja). */
+  supportsBoardChoice: z.boolean(),
 });
 export type PostProviderPublishOptions = z.infer<
   typeof PostProviderPublishOptionsSchema
@@ -248,6 +260,7 @@ const NO_PUBLISH_OPTIONS: PostProviderPublishOptions = {
   supportsMadeForKids: false,
   supportsInteractions: false,
   supportsCommercialDisclosure: false,
+  supportsBoardChoice: false,
 };
 
 export const PostProviderCapabilitySchema = z.object({
@@ -434,6 +447,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
       supportsMadeForKids: true,
       supportsInteractions: false,
       supportsCommercialDisclosure: false,
+      supportsBoardChoice: false,
     },
   },
   linkedin: {
@@ -464,8 +478,11 @@ export const POST_PROVIDER_CAPABILITIES: Record<
   },
   pinterest: {
     // Pinterest API v5 (Gelombang 3): satu post = satu Pin pada
-    // board pilihan akun (pemilih board Channels; tanpa pilihan —
-    // atau pilihan sudah hilang di Pinterest — board pertama akun).
+    // board tujuan. Resolusi board BERLAPIS (gelombang Pilihan
+    // Privasi & AI memindahkan pilihan ke postingan): board pada
+    // opsi postingan ini → pilihan board per akun di Channels →
+    // board pertama akun; pilihan yang sudah hilang di Pinterest
+    // turun ke lapis berikutnya dengan catatan log penerbit.
     // Pin WAJIB media (mediaRequired) dan hanya
     // membawa SATU media (maxMedia 1 — tidak ada album Pin).
     // Pemetaan field: `title` post menjadi judul Pin (maks 100,
@@ -491,7 +508,14 @@ export const POST_PROVIDER_CAPABILITIES: Record<
     supportsDocuments: false,
     supportsAlbumDocuments: false,
     supportsFirstComment: false,
-    publishOptions: NO_PUBLISH_OPTIONS,
+    publishOptions: {
+      privacyValues: [],
+      supportsAiDisclosure: false,
+      supportsMadeForKids: false,
+      supportsInteractions: false,
+      supportsCommercialDisclosure: false,
+      supportsBoardChoice: true,
+    },
   },
   google_business: {
     // Google Business Profile (Gelombang 3): postingan lokal
@@ -584,6 +608,7 @@ export const POST_PROVIDER_CAPABILITIES: Record<
       supportsMadeForKids: false,
       supportsInteractions: true,
       supportsCommercialDisclosure: true,
+      supportsBoardChoice: false,
     },
   },
   whatsapp: {

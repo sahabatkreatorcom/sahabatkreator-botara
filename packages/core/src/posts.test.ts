@@ -922,6 +922,36 @@ describe("opsi penerbitan per postingan (privasi & AI)", () => {
     expect(scheduled.post.status).toBe("scheduled");
   });
 
+  it("Pinterest: board tujuan tersimpan pada opsi postingan; field platform lain dibuang", async () => {
+    const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
+    const pinterest = targets.find((target) => target.provider === "pinterest")!;
+    const post = await createPost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      conversationId: pinterest.conversationId,
+      title: "Pin ke board pilihan",
+      caption: "Deskripsi Pin pada board yang dipilih untuk postingan ini",
+      mediaIds: [MEDIA_PHOTO],
+      publishOptions: {
+        pinterestBoardId: "9876543210987654321",
+        // Field YouTube pada baris Pinterest harus dibuang.
+        youtubePrivacyStatus: "public",
+        aiGenerated: true,
+      },
+    });
+    expect(post.publishOptions).toEqual({
+      pinterestBoardId: "9876543210987654321",
+    });
+    // Board BUKAN kewajiban penjadwalan (boleh kosong = bawaan
+    // berlapis di penerbit): postingan tanpa board tetap terjadwal.
+    const scheduled = await schedulePost(ctx.db, {
+      tenantId: TEST_TENANT_ID,
+      userId: USER_ID,
+      postId: post.id,
+    });
+    expect(scheduled.post.status).toBe("scheduled");
+  });
+
   it("grup multi-target: opsi melekat per anggota; edit draft mengganti/mengosongkan; duplikat menyalin", async () => {
     const targets = await listPostTargets(ctx.db, { tenantId: TEST_TENANT_ID });
     const youtube = targets.find((target) => target.provider === "youtube")!;

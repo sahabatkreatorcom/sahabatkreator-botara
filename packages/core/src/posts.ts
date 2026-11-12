@@ -184,6 +184,14 @@ function sanitizePublishOptions(
     if (options.tiktokBrandContent !== undefined) {
       clean.tiktokBrandContent = options.tiktokBrandContent;
     }
+  } else if (provider === "pinterest") {
+    // Board tujuan Pin untuk postingan ini (resolusi berlapis di
+    // penerbit: postingan → bawaan akun Channels → board pertama).
+    // Keanggotaan board pada akun divalidasi lapisan API saat opsi
+    // ditulis dan oleh resolver penerbit saat publish.
+    if (options.pinterestBoardId !== undefined) {
+      clean.pinterestBoardId = options.pinterestBoardId;
+    }
   }
   return Object.keys(clean).length > 0 ? clean : null;
 }
