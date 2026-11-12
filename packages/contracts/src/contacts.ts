@@ -270,3 +270,119 @@ export const ContactImportResponseSchema = z.object({
   invalid: z.array(ContactImportIssueSchema),
 });
 export type ContactImportResponse = z.infer<typeof ContactImportResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// Catatan level kontak (Gelombang G8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Catatan internal yang menempel pada KONTAK (bukan percakapan) —
+ * saudara `ConversationNoteResponse` dengan subjek berbeda. Keduanya
+ * SENGAJA kontrak yang terpisah dan tidak pernah dicampur dalam satu
+ * daftar: catatan kontak adalah ingatan tim tentang ORANGNYA (lintas
+ * percakapan & kanal); catatan percakapan hidup di Inbox per utas.
+ * `authorName` adalah label tampil penulis (nama, jatuh ke email);
+ * null bila penulis sudah terhapus (UI memakai label cadangan).
+ */
+export const ContactNoteResponseSchema = z.object({
+  id: z.string().uuid(),
+  contactId: z.string().uuid(),
+  authorUserId: z.string().uuid().nullable(),
+  authorName: z.string().nullable(),
+  body: z.string(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime(),
+});
+export type ContactNoteResponse = z.infer<typeof ContactNoteResponseSchema>;
+
+export const ContactNoteListResponseSchema = z.object({
+  notes: z.array(ContactNoteResponseSchema),
+});
+export type ContactNoteListResponse = z.infer<
+  typeof ContactNoteListResponseSchema
+>;
+
+export const CreateContactNoteRequestSchema = z.object({
+  body: z.string().trim().min(1).max(4000),
+});
+export type CreateContactNoteRequest = z.infer<
+  typeof CreateContactNoteRequestSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Linimasa aktivitas kontak (Gelombang G8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Jenis peristiwa linimasa kontak. Linimasa adalah PERAKITAN BACA-SAJA
+ * dari data yang memang sudah tercatat (baris kontak, pesan, audit
+ * log, enrollment sequence) — jenis yang sumbernya tidak tercatat
+ * TIDAK PERNAH dikarang masuk daftar ini. Cakupan jujur saat ini:
+ * - contact_created      baris kontak dibuat (+ sumber perolehannya).
+ * - first_message        pesan paling awal di percakapan mana pun.
+ * - last_message         pesan paling akhir (hanya bila berbeda dari
+ *                        pesan pertama).
+ * - opt_in_changed       status opt-in efektif berubah (audit
+ *                        contact.opt_in_changed: from/to/source).
+ * - merged_in            kontak lain dilebur KE kontak ini (audit
+ *                        contact.merged; sisi korban tidak tampil —
+ *                        kontak korban terhapus oleh merge).
+ * - sequence_enrolled    kontak didaftarkan ke sebuah sequence.
+ * - sequence_completed   enrollment selesai (audit sequence.completed).
+ * - sequence_cancelled   enrollment dibatalkan (balasan kontak /
+ *                        opt-out; audit sequence.cancelled_*).
+ * - handoff              AI menyerahkan percakapan ke manusia (audit
+ *                        agent.handoff).
+ * - contact_note_added   catatan KONTAK ditambahkan (audit
+ *                        contact.note_created).
+ * - conversation_note_added  catatan PERCAKAPAN pada salah satu
+ *                        percakapan kontak ditambahkan (audit
+ *                        conversation.note_created) — jenis terpisah
+ *                        agar dua keluarga catatan tidak tercampur.
+ * Perubahan tahap pipeline & tag TIDAK termasuk: keduanya tidak
+ * dicatat sebagai riwayat di mana pun (hanya nilai kini di baris
+ * kontak), jadi menampilkannya berarti mengarang waktu perubahan.
+ */
+export const ContactTimelineEventKindSchema = z.enum([
+  "contact_created",
+  "first_message",
+  "last_message",
+  "opt_in_changed",
+  "merged_in",
+  "sequence_enrolled",
+  "sequence_completed",
+  "sequence_cancelled",
+  "handoff",
+  "contact_note_added",
+  "conversation_note_added",
+]);
+export type ContactTimelineEventKind = z.infer<
+  typeof ContactTimelineEventKindSchema
+>;
+
+/**
+ * Satu peristiwa linimasa. `detail` adalah peta datar nilai primitif
+ * yang isinya bergantung `kind` (kunci terdokumentasi per jenis di
+ * core/contact-timeline.ts); UI merender label jenis dari i18n dan
+ * membaca detail yang ia kenal — detail tak dikenal diabaikan, bukan
+ * membuat peristiwa gugur.
+ */
+export const ContactTimelineEventSchema = z.object({
+  kind: ContactTimelineEventKindSchema,
+  occurredAt: z.string().datetime(),
+  detail: z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.boolean(), z.null()]),
+  ),
+});
+export type ContactTimelineEvent = z.infer<typeof ContactTimelineEventSchema>;
+
+export const ContactTimelineResponseSchema = z.object({
+  /** Peristiwa terurut terbaru → terlama. */
+  events: z.array(ContactTimelineEventSchema),
+  /** true bila ada peristiwa yang tidak ikut terkirim karena batas. */
+  truncated: z.boolean(),
+});
+export type ContactTimelineResponse = z.infer<
+  typeof ContactTimelineResponseSchema
+>;
