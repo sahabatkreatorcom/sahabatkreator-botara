@@ -10,7 +10,10 @@ import {
   type EmbeddingProvider,
   type LlmProvider,
 } from "@sahabat-kreator/ai";
-import { MetaGraphClient } from "@sahabat-kreator/channel-messenger";
+import {
+  MetaGraphClient,
+  ThreadsGraphClient,
+} from "@sahabat-kreator/channel-messenger";
 import {
   APPOINTMENT_GOOGLE_SYNC_OUTBOX_TYPE,
   AUTH_SESSION_GRACE_DAYS,
@@ -407,13 +410,46 @@ void resolveAgentLlmProvider()
     process.exit(1);
   });
 
-// Aksi Graph langsung untuk evaluasi komentar (Fase 10B): balasan
-// publik + sembunyikan komentar dijalankan worker (bukan pesan
-// percakapan, jadi tidak lewat antrean/poller). Klien dibangun per
-// panggilan dengan token akun pemilik komentar yang diserahkan core;
-// base URL mengikuti env META_API_BASE (mock pada rantai uji).
+// Aksi Graph langsung untuk evaluasi komentar (Fase 10B; G7 menambah
+// Threads): balasan publik + sembunyikan komentar dijalankan worker
+// (bukan pesan percakapan, jadi tidak lewat antrean/poller). Klien
+// dibangun per panggilan dengan token akun pemilik komentar yang
+// diserahkan core; base URL mengikuti env META_API_BASE /
+// THREADS_API_BASE (mock pada rantai uji). DM TIDAK lewat sini — DM
+// Meta diantrekan core sebagai pesan; Threads tidak punya DM sama
+// sekali (core mencatatnya skipped, worker tidak pernah dipanggil).
 const commentGraphActions: CommentGraphActions = {
   async replyToComment(input) {
+    if (input.provider === "threads") {
+      // Balasan publik Threads: container teks dengan reply_to_id =
+      // media yang dikomentari, tunggu FINISHED, lalu terbitkan.
+      const client = new ThreadsGraphClient({
+        baseUrl: env.THREADS_API_BASE,
+        accessToken: input.accessToken,
+      });
+      const container = await client.createThreadsContainer({
+        threadsUserId: input.accountExternalId,
+        mediaType: "TEXT",
+        text: input.text,
+        replyToId: input.commentId,
+      });
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const status = await client.getThreadsContainerStatus(
+          container.containerId,
+        );
+        if (status === "FINISHED" || status === "PUBLISHED") break;
+        if (status === "ERROR" || status === "EXPIRED") {
+          throw new Error("threads_container_failed");
+        }
+        if (attempt === 19) throw new Error("threads_container_timeout");
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+      }
+      const published = await client.publishThreadsContainer({
+        threadsUserId: input.accountExternalId,
+        containerId: container.containerId,
+      });
+      return { replyId: published.providerPostId };
+    }
     const client = new MetaGraphClient({
       baseUrl: env.META_API_BASE,
       apiVersion: META_GRAPH_API_VERSION,
@@ -426,6 +462,17 @@ const commentGraphActions: CommentGraphActions = {
     });
   },
   async setCommentHidden(input) {
+    if (input.provider === "threads") {
+      const client = new ThreadsGraphClient({
+        baseUrl: env.THREADS_API_BASE,
+        accessToken: input.accessToken,
+      });
+      await client.manageThreadsReply({
+        replyId: input.commentId,
+        hide: input.hidden,
+      });
+      return;
+    }
     const client = new MetaGraphClient({
       baseUrl: env.META_API_BASE,
       apiVersion: META_GRAPH_API_VERSION,
