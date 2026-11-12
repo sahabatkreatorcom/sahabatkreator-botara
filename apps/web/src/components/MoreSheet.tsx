@@ -1,5 +1,5 @@
 import type { TranslationKey } from "@sahabat-kreator/i18n";
-import { moreItems, type NavItem } from "../navigation/registry";
+import { groupNavItems, moreItems, type NavItem } from "../navigation/registry";
 import { NavIcon } from "./NavIcon";
 
 interface MoreSheetProps {
@@ -27,24 +27,36 @@ export function MoreSheet({ t, open, activeId, onClose, onNavigate, controls, wo
         <div className="mb-3 text-base font-semibold text-ink">{t("nav.more")}</div>
         <div className="mb-4">{profile}</div>
         <div className="mb-4 border-t border-line pt-4">{workspace}</div>
-        <ul className="space-y-1">
-          {items.map((item) => (
-            <li key={item.id}>
-              <button
-                type="button"
-                onClick={() => onNavigate(item)}
-                className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${
-                  item.id === activeId
-                    ? "bg-accent/10 font-semibold text-accent"
-                    : "text-ink hover:bg-elevated"
-                }`}
-              >
-                <NavIcon name={item.icon} />
-                <span>{t(item.labelKey)}</span>
-              </button>
-            </li>
+        <div className="space-y-4">
+          {groupNavItems(items).map(({ group, items: groupItems }, groupIdx) => (
+            <section
+              key={group.id}
+              className={groupIdx > 0 ? "border-t border-line pt-4" : undefined}
+            >
+              <h2 className="px-3 pb-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                {t(group.labelKey)}
+              </h2>
+              <ul className="space-y-1">
+                {groupItems.map((item) => (
+                  <li key={item.id}>
+                    <button
+                      type="button"
+                      onClick={() => onNavigate(item)}
+                      className={`flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm ${
+                        item.id === activeId
+                          ? "bg-accent/10 font-semibold text-accent"
+                          : "text-ink hover:bg-elevated"
+                      }`}
+                    >
+                      <NavIcon name={item.icon} />
+                      <span>{t(item.labelKey)}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </section>
           ))}
-        </ul>
+        </div>
         <div className="mt-4 border-t border-line pt-4">{controls}</div>
       </div>
     </div>
