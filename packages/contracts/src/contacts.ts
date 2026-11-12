@@ -260,6 +260,100 @@ export const ContactFieldIssueSchema = z.object({
 });
 export type ContactFieldIssue = z.infer<typeof ContactFieldIssueSchema>;
 
+// ---------------------------------------------------------------------------
+// Pindai Pelanggan Otomatis (Gelombang G18 butir 2)
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu pekerjaan pindai riwayat komentar kanal. Statistik hanya
+ * bermakna sesudah status "completed" (sebelumnya nol/parsial dan UI
+ * menampilkannya sebagai proses berjalan, bukan hasil).
+ */
+export const ContactScanRunResponseSchema = z.object({
+  id: z.string().uuid(),
+  status: z.enum(["queued", "running", "completed", "failed"]),
+  stats: z.object({
+    commentsSeen: z.number().int().nonnegative(),
+    distinctAuthors: z.number().int().nonnegative(),
+    pending: z.number().int().nonnegative(),
+    alreadyContact: z.number().int().nonnegative(),
+    selfAccount: z.number().int().nonnegative(),
+  }),
+  error: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  completedAt: z.string().datetime().nullable(),
+});
+export type ContactScanRunResponse = z.infer<
+  typeof ContactScanRunResponseSchema
+>;
+
+export const ContactScanRunListResponseSchema = z.object({
+  scans: z.array(ContactScanRunResponseSchema),
+});
+export type ContactScanRunListResponse = z.infer<
+  typeof ContactScanRunListResponseSchema
+>;
+
+/**
+ * Satu kandidat hasil pindai. Status menentukan boleh-tidaknya impor:
+ * hanya "pending" yang bisa diimpor; "already_contact" (identitas
+ * sudah tertaut kontak) dan "self_account" (akun kanal tenant
+ * sendiri) adalah klasifikasi tercatat yang TIDAK PERNAH diimpor;
+ * "skipped_existing" lahir saat impor meninjau ulang dan menemukan
+ * penulisnya sudah menjadi kontak sejak pindai berjalan.
+ */
+export const ContactScanCandidateResponseSchema = z.object({
+  id: z.string().uuid(),
+  channelAccountId: z.string().uuid(),
+  provider: ChannelProviderSchema,
+  externalUserId: z.string(),
+  displayName: z.string().nullable(),
+  username: z.string().nullable(),
+  commentCount: z.number().int().nonnegative(),
+  lastCommentAt: z.string().datetime().nullable(),
+  sampleText: z.string().nullable(),
+  status: z.enum([
+    "pending",
+    "imported",
+    "already_contact",
+    "self_account",
+    "skipped_existing",
+  ]),
+  importedContactId: z.string().uuid().nullable(),
+});
+export type ContactScanCandidateResponse = z.infer<
+  typeof ContactScanCandidateResponseSchema
+>;
+
+export const ContactScanDetailResponseSchema = z.object({
+  scan: ContactScanRunResponseSchema,
+  candidates: z.array(ContactScanCandidateResponseSchema),
+});
+export type ContactScanDetailResponse = z.infer<
+  typeof ContactScanDetailResponseSchema
+>;
+
+/**
+ * Body POST /contacts/scans/:scanId/import — kandidat yang diimpor;
+ * kosong/tidak dikirim = semua kandidat "pending" pada pindai itu.
+ */
+export const ContactScanImportRequestSchema = z.object({
+  candidateIds: z.array(z.string().uuid()).max(500).optional(),
+});
+export type ContactScanImportRequest = z.infer<
+  typeof ContactScanImportRequestSchema
+>;
+
+export const ContactScanImportResponseSchema = z.object({
+  imported: z.number().int().nonnegative(),
+  skippedExisting: z.number().int().nonnegative(),
+  /** Kandidat yang diminta tetapi tidak berstatus pending (sudah diproses / tidak bisa diimpor). */
+  notPending: z.number().int().nonnegative(),
+});
+export type ContactScanImportResponse = z.infer<
+  typeof ContactScanImportResponseSchema
+>;
+
 // --- Dedup & merge kontak (Fase 9B) ---
 
 /** Alasan dua kontak dinilai kandidat duplikat (sinyal yang cocok). */

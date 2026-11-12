@@ -12,6 +12,8 @@ import type {
   ContactFieldDefinitionResponse,
   ContactFieldType,
   ContactImportResponse,
+  ContactScanCandidateResponse,
+  ContactScanRunResponse,
   ContactNoteResponse,
   ContactResponse,
   ContactTimelineEvent,
@@ -276,6 +278,7 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
     ContactFieldDefinitionResponse[]
   >([]);
   const [showFieldManager, setShowFieldManager] = useState(false);
+  const [showScan, setShowScan] = useState(false);
   const loadFieldDefinitions = useCallback(async () => {
     if (!tenantId) return;
     try {
@@ -572,6 +575,13 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
             className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
           >
             {t("contacts.fields.manageButton")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowScan(true)}
+            className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink"
+          >
+            {t("contacts.scan.openButton")}
           </button>
           <button
             type="button"
@@ -1001,6 +1011,16 @@ export function ContactsPage({ t, locale, onNavigateTo }: ContactsPageProps) {
           definitions={fieldDefinitions}
           onClose={() => setShowFieldManager(false)}
           onChanged={() => void loadFieldDefinitions()}
+        />
+      ) : null}
+
+      {showScan ? (
+        <ContactScanModal
+          t={t}
+          locale={locale}
+          tenantId={active.id}
+          onClose={() => setShowScan(false)}
+          onImported={() => void loadFirst()}
         />
       ) : null}
 
@@ -2702,6 +2722,290 @@ function FieldDefinitionsModal({
             ) : null}
           </div>
         </form>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Pindai Pelanggan Otomatis (G18 butir 2). Pindai berjalan di latar
+ * (worker): modal ini meminta pindai, memantau statusnya, lalu
+ * menyajikan kandidat untuk DITINJAU — impor hanya terjadi atas
+ * pilihan eksplisit di sini dan hanya untuk kandidat "pending".
+ * Kandidat yang sudah menjadi kontak / akun kanal sendiri tampil
+ * dengan statusnya dan tidak bisa dipilih.
+ */
+function ContactScanModal({
+  t,
+  locale,
+  tenantId,
+  onClose,
+  onImported,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  onClose: () => void;
+  onImported: () => void;
+}) {
+  const [scans, setScans] = useState<ContactScanRunResponse[]>([]);
+  const [selectedScanId, setSelectedScanId] = useState<string | null>(null);
+  const [candidates, setCandidates] = useState<ContactScanCandidateResponse[]>(
+    [],
+  );
+  const [checked, setChecked] = useState<ReadonlySet<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<string | null>(null);
+
+  const selectedScan =
+    scans.find((s) => s.id === selectedScanId) ?? scans[0] ?? null;
+
+  const loadScans = useCallback(async () => {
+    try {
+      const rows = await api.contacts.listScans(tenantId);
+      setScans(rows);
+      return rows;
+    } catch {
+      setScans([]);
+      return [];
+    }
+  }, [tenantId]);
+
+  const loadDetail = useCallback(
+    async (scanId: string) => {
+      try {
+        const detail = await api.contacts.getScan(tenantId, scanId);
+        setCandidates(detail.candidates);
+        setScans((prev) =>
+          prev.map((s) => (s.id === scanId ? detail.scan : s)),
+        );
+        return detail.scan;
+      } catch {
+        return null;
+      }
+    },
+    [tenantId],
+  );
+
+  useEffect(() => {
+    void (async () => {
+      const rows = await loadScans();
+      if (rows[0]) {
+        setSelectedScanId(rows[0].id);
+        await loadDetail(rows[0].id);
+      }
+    })();
+  }, [loadScans, loadDetail]);
+
+  // Pantau pindai yang sedang berjalan sampai selesai/gagal.
+  useEffect(() => {
+    if (!selectedScan) return;
+    if (selectedScan.status !== "queued" && selectedScan.status !== "running") {
+      return;
+    }
+    const timer = setInterval(() => {
+      void (async () => {
+        const scan = await loadDetail(selectedScan.id);
+        if (scan && scan.status !== "queued" && scan.status !== "running") {
+          await loadScans();
+        }
+      })();
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [selectedScan, loadDetail, loadScans]);
+
+  const startScan = async () => {
+    setBusy(true);
+    setError(null);
+    setImportResult(null);
+    try {
+      const run = await api.contacts.createScan(tenantId);
+      setSelectedScanId(run.id);
+      setCandidates([]);
+      setChecked(new Set());
+      await loadScans();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectScan = (scanId: string) => {
+    setSelectedScanId(scanId);
+    setChecked(new Set());
+    setImportResult(null);
+    void loadDetail(scanId);
+  };
+
+  const runImport = async (candidateIds?: string[]) => {
+    if (!selectedScan) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.contacts.importScan(
+        tenantId,
+        selectedScan.id,
+        candidateIds,
+      );
+      setImportResult(
+        t("contacts.scan.importResult", {
+          imported: formatNumber(result.imported, locale),
+          skipped: formatNumber(result.skippedExisting, locale),
+        }),
+      );
+      setChecked(new Set());
+      await loadDetail(selectedScan.id);
+      if (result.imported > 0) onImported();
+    } catch (err) {
+      setError(translateApiError(t, err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const pendingCount = candidates.filter((k) => k.status === "pending").length;
+  const statusLabel = (status: ContactScanCandidateResponse["status"]) =>
+    t(`contacts.scan.candidateStatus.${status}` as TranslationKey);
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-4"
+      role="dialog"
+      aria-modal="true"
+    >
+      <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-t-2xl bg-surface p-5 shadow-xl sm:rounded-2xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-bold text-ink">
+              {t("contacts.scan.title")}
+            </h2>
+            <p className="mt-0.5 text-sm text-muted">
+              {t("contacts.scan.subtitle")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg bg-elevated px-3 py-1.5 text-sm font-medium text-ink"
+          >
+            {t("common.close")}
+          </button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => void startScan()}
+            disabled={busy}
+            className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+          >
+            {t("contacts.scan.startButton")}
+          </button>
+          {scans.length > 0 ? (
+            <select
+              value={selectedScan?.id ?? ""}
+              onChange={(e) => selectScan(e.target.value)}
+              className={`${inputClassName} w-auto`}
+              aria-label={t("contacts.scan.historyLabel")}
+            >
+              {scans.map((scan) => (
+                <option key={scan.id} value={scan.id}>
+                  {new Date(scan.createdAt).toLocaleString()} —{" "}
+                  {t(`contacts.scan.runStatus.${scan.status}` as TranslationKey)}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
+
+        {selectedScan ? (
+          <p className="mt-3 text-sm text-muted">
+            {selectedScan.status === "completed"
+              ? t("contacts.scan.statsLine", {
+                  comments: formatNumber(selectedScan.stats.commentsSeen, locale),
+                  pending: formatNumber(selectedScan.stats.pending, locale),
+                  already: formatNumber(selectedScan.stats.alreadyContact, locale),
+                  self: formatNumber(selectedScan.stats.selfAccount, locale),
+                })
+              : selectedScan.status === "failed"
+                ? t("contacts.scan.failedLine")
+                : t("contacts.scan.runningLine")}
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-muted">{t("contacts.scan.empty")}</p>
+        )}
+
+        {candidates.length > 0 ? (
+          <>
+            <ul className="mt-3 space-y-2">
+              {candidates.map((candidate) => (
+                <li
+                  key={candidate.id}
+                  className="flex items-start gap-2 rounded-lg bg-elevated/60 px-3 py-2"
+                >
+                  <input
+                    type="checkbox"
+                    disabled={candidate.status !== "pending"}
+                    checked={checked.has(candidate.id)}
+                    onChange={(e) =>
+                      setChecked((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(candidate.id);
+                        else next.delete(candidate.id);
+                        return next;
+                      })
+                    }
+                    className="mt-1"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-ink">
+                      {candidate.displayName ?? candidate.externalUserId}{" "}
+                      <span className="text-xs text-muted">
+                        · {candidate.provider} ·{" "}
+                        {t("contacts.scan.commentCount", {
+                          count: formatNumber(candidate.commentCount, locale),
+                        })}
+                      </span>
+                    </p>
+                    {candidate.sampleText ? (
+                      <p className="truncate text-xs text-muted">
+                        “{candidate.sampleText}”
+                      </p>
+                    ) : null}
+                  </div>
+                  <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-[11px] font-medium text-ink">
+                    {statusLabel(candidate.status)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={busy || checked.size === 0}
+                onClick={() => void runImport([...checked])}
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {t("contacts.scan.importSelected", { count: checked.size })}
+              </button>
+              <button
+                type="button"
+                disabled={busy || pendingCount === 0}
+                onClick={() => void runImport(undefined)}
+                className="rounded-lg bg-elevated px-4 py-2 text-sm font-medium text-ink disabled:opacity-60"
+              >
+                {t("contacts.scan.importAll", { count: pendingCount })}
+              </button>
+            </div>
+          </>
+        ) : null}
+
+        {importResult ? (
+          <p className="mt-3 text-sm text-ink">{importResult}</p>
+        ) : null}
+        <FieldError message={error} />
       </div>
     </div>
   );

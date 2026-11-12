@@ -216,6 +216,37 @@ export const id: Resources = {
       customFieldAdd: "Tambah field",
       customFieldRemove: "Hapus",
     },
+    scan: {
+      openButton: "Pindai pelanggan",
+      title: "Pindai Pelanggan Otomatis",
+      subtitle:
+        "Memindai riwayat komentar kanal (Instagram/Messenger/Threads) untuk menemukan penulis yang belum menjadi kontak. Hasilnya ditinjau dulu — tidak ada yang diimpor tanpa pilihan Anda.",
+      startButton: "Mulai pindai baru",
+      historyLabel: "Riwayat pindai",
+      empty: "Belum ada pindai. Mulai pindai pertama Anda.",
+      runningLine: "Pindai sedang berjalan di latar…",
+      failedLine: "Pindai terakhir gagal. Coba jalankan pindai baru.",
+      statsLine:
+        "{comments} komentar diperiksa — {pending} kandidat baru, {already} sudah menjadi kontak, {self} komentar akun sendiri.",
+      commentCount: "{count} komentar",
+      importSelected: "Impor terpilih ({count})",
+      importAll: "Impor semua kandidat ({count})",
+      importResult:
+        "Selesai: {imported} kontak dibuat, {skipped} dilewati karena sudah menjadi kontak.",
+      candidateStatus: {
+        pending: "Kandidat baru",
+        imported: "Sudah diimpor",
+        already_contact: "Sudah kontak",
+        self_account: "Akun sendiri",
+        skipped_existing: "Dilewati — sudah kontak",
+      },
+      runStatus: {
+        queued: "mengantre",
+        running: "berjalan",
+        completed: "selesai",
+        failed: "gagal",
+      },
+    },
     fields: {
       manageButton: "Skema field",
       title: "Skema field kustom",

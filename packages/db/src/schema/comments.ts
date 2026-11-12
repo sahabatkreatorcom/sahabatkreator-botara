@@ -1,5 +1,6 @@
 import {
   index,
+  integer,
   jsonb,
   pgEnum,
   pgTable,
@@ -147,3 +148,99 @@ export const comments = pgTable(
 
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
+
+/**
+ * Pindai Pelanggan Otomatis (Gelombang G18 butir 2): pekerjaan latar
+ * yang memindai riwayat KOMENTAR kanal (Instagram/Messenger/Threads)
+ * untuk menemukan penulis komentar yang BELUM menjadi kontak.
+ *
+ * Mengapa komentar: penulis DM selalu menjadi kontak saat pesan
+ * pertamanya masuk (ingest semua kanal membuat baris kontak +
+ * identitas), tetapi penulis komentar TIDAK — `comments.contact_id`
+ * hanya terisi bila aksi comment-to-DM pernah berjalan untuknya.
+ * Jadi komentator adalah satu-satunya populasi lawan bicara yang
+ * benar-benar ada di data kanal tanpa menjadi kontak; memindai
+ * percakapan DM hanya akan menemukan kontak yang sudah ada.
+ *
+ * `contact_scan_runs` = satu pekerjaan pindai (queued → running →
+ * completed/failed) beserta statistik hasil; `contact_scan_candidates`
+ * = SATU baris per penulis unik per akun pada pindai itu, dengan
+ * klasifikasi: pending (siap impor) / imported / already_contact
+ * (identitasnya sudah tertaut kontak — dilewati tercatat) /
+ * self_account (penulis adalah akun kanal tenant sendiri — TIDAK
+ * PERNAH diimpor). Impor meninjau ulang identitas saat eksekusi:
+ * kandidat yang sejak pindai sudah menjadi kontak dilewati sebagai
+ * `skipped_existing`, tidak diduplikatkan.
+ */
+export const contactScanRuns = pgTable(
+  "contact_scan_runs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    /** 'queued' | 'running' | 'completed' | 'failed' (divalidasi core). */
+    status: varchar("status", { length: 16 }).notNull().default("queued"),
+    /** Statistik hasil saat selesai: {commentsSeen, distinctAuthors, pending, alreadyContact, selfAccount}. */
+    stats: jsonb("stats").$type<Record<string, number>>().notNull().default({}),
+    /** Pesan kegagalan bila status='failed'; null selain itu. */
+    error: text("error"),
+    /** User yang meminta pindai (audit); null = jalur sistem. */
+    createdByUserId: uuid("created_by_user_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (t) => [index("contact_scan_runs_tenant_id_idx").on(t.tenantId)],
+);
+
+export const contactScanCandidates = pgTable(
+  "contact_scan_candidates",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    scanRunId: uuid("scan_run_id")
+      .notNull()
+      .references(() => contactScanRuns.id, { onDelete: "cascade" }),
+    channelAccountId: uuid("channel_account_id")
+      .notNull()
+      .references(() => channelAccounts.id, { onDelete: "cascade" }),
+    /** Denormalisasi provider akun (instagram/messenger/threads). */
+    provider: varchar("provider", { length: 32 }).notNull(),
+    /** Id penulis di provider (IGSID/PSID/Threads user id). */
+    externalUserId: varchar("external_user_id", { length: 255 }).notNull(),
+    /** Label penulis dari payload komentar (username/nama) — sumber nama kontak saat impor. */
+    displayName: varchar("display_name", { length: 255 }),
+    username: varchar("username", { length: 255 }),
+    /** Jumlah komentar penulis pada akun ini (bukti aktivitas untuk tinjauan). */
+    commentCount: integer("comment_count").notNull().default(0),
+    /** Komentar terakhir penulis pada akun ini. */
+    lastCommentAt: timestamp("last_comment_at", { withTimezone: true }),
+    /** Potongan teks komentar terakhir — konteks tinjauan sebelum impor. */
+    sampleText: text("sample_text"),
+    /** 'pending' | 'imported' | 'already_contact' | 'self_account' | 'skipped_existing'. */
+    status: varchar("status", { length: 24 }).notNull().default("pending"),
+    /** Kontak hasil impor (atau kontak yang sudah ada saat impor meninjau ulang). */
+    importedContactId: uuid("imported_contact_id").references(() => contacts.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("contact_scan_candidates_tenant_id_idx").on(t.tenantId),
+    index("contact_scan_candidates_run_id_idx").on(t.scanRunId),
+    uniqueIndex("contact_scan_candidates_run_account_author_unique").on(
+      t.scanRunId,
+      t.channelAccountId,
+      t.externalUserId,
+    ),
+  ],
+);
+
+export type ContactScanRun = typeof contactScanRuns.$inferSelect;
+export type NewContactScanRun = typeof contactScanRuns.$inferInsert;
+export type ContactScanCandidate = typeof contactScanCandidates.$inferSelect;
+export type NewContactScanCandidate = typeof contactScanCandidates.$inferInsert;

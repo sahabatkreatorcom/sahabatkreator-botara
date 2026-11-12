@@ -173,6 +173,22 @@ export {
   type UpdateContactFieldDefinitionInput,
 } from "./contact-fields";
 export {
+  CONTACT_SCAN_REQUESTED_OUTBOX_TYPE,
+  SCAN_COMMENT_ROW_CAP,
+  commentAuthorDisplayName,
+  readScanStats,
+  createContactScan,
+  listContactScans,
+  getContactScan,
+  executeContactScan,
+  importContactScanCandidates,
+  type ContactScanStatus,
+  type ContactScanCandidateStatus,
+  type ContactScanStats,
+  type ExecuteContactScanResult,
+  type ImportContactScanResult,
+} from "./contact-scans";
+export {
   DEFAULT_OPT_IN_KEYWORDS,
   DEFAULT_OPT_OUT_KEYWORDS,
   DEFAULT_OPT_IN_SETTINGS,

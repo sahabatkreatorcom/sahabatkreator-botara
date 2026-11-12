@@ -1087,6 +1087,21 @@ Node "Kirim gambar dinamis" merender kartu PNG 1200×630
   definisi menjadi nilai field itu dan divalidasi; baris yang
   melanggar ditolak dengan alasan per field di laporan impor.
 
+### Butir 2 — Pindai Pelanggan Otomatis (tanpa tindakan pemilik)
+
+- Halaman Kontak → "Pindai pelanggan": pekerjaan latar memindai
+  riwayat komentar kanal dan menyajikan penulis yang belum menjadi
+  kontak sebagai kandidat untuk ditinjau sebelum diimpor. Tidak
+  ada kredensial/tindakan pemilik.
+- Catatan perilaku (sesuai model data, bukan bug): yang dipindai
+  adalah riwayat KOMENTAR (Instagram/Messenger/Threads), karena
+  penulis DM selalu menjadi kontak otomatis saat pesan pertamanya
+  masuk — memindai percakapan tidak akan menemukan orang baru.
+  Penulis yang sudah menjadi kontak dan komentar akun kanal tenant
+  sendiri dicatat sebagai klasifikasi dan TIDAK PERNAH diimpor;
+  penulis yang menjadi kontak sesudah pindai berjalan dilewati
+  saat impor (tidak diduplikatkan).
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +

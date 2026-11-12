@@ -217,6 +217,37 @@ export const en = {
       customFieldAdd: "Add field",
       customFieldRemove: "Remove",
     },
+    scan: {
+      openButton: "Scan customers",
+      title: "Automatic Customer Scan",
+      subtitle:
+        "Scans channel comment history (Instagram/Messenger/Threads) for authors who are not contacts yet. Results are reviewed first — nothing is imported without your selection.",
+      startButton: "Start new scan",
+      historyLabel: "Scan history",
+      empty: "No scans yet. Start your first scan.",
+      runningLine: "Scan is running in the background…",
+      failedLine: "The last scan failed. Try starting a new one.",
+      statsLine:
+        "{comments} comments checked — {pending} new candidates, {already} already contacts, {self} own-account comments.",
+      commentCount: "{count} comments",
+      importSelected: "Import selected ({count})",
+      importAll: "Import all candidates ({count})",
+      importResult:
+        "Done: {imported} contacts created, {skipped} skipped because they were already contacts.",
+      candidateStatus: {
+        pending: "New candidate",
+        imported: "Imported",
+        already_contact: "Already a contact",
+        self_account: "Own account",
+        skipped_existing: "Skipped — already a contact",
+      },
+      runStatus: {
+        queued: "queued",
+        running: "running",
+        completed: "completed",
+        failed: "failed",
+      },
+    },
     fields: {
       manageButton: "Field schema",
       title: "Custom field schema",

@@ -117,6 +117,10 @@ import type {
   ContactFieldDefinitionResponse,
   CreateContactFieldDefinitionRequest,
   UpdateContactFieldDefinitionRequest,
+  ContactScanDetailResponse,
+  ContactScanImportResponse,
+  ContactScanRunListResponse,
+  ContactScanRunResponse,
   CreateFlowRequest,
   CreateGrowthLinkRequest,
   GrowthLinkAttributedContactsResponse,
@@ -695,6 +699,45 @@ export const api = {
       return request<void>(
         `/api/tenants/${tenantId}/contacts/field-definitions/${definitionId}`,
         { method: "DELETE" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/contacts/scans → minta pindai pelanggan otomatis (G18; eksekusi di worker). */
+    createScan(tenantId: string): Promise<ContactScanRunResponse> {
+      return request<ContactScanRunResponse>(
+        `/api/tenants/${tenantId}/contacts/scans`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/contacts/scans → pindai terakhir. */
+    async listScans(tenantId: string): Promise<ContactScanRunResponse[]> {
+      const body = await request<ContactScanRunListResponse>(
+        `/api/tenants/${tenantId}/contacts/scans`,
+        { method: "GET" },
+      );
+      return body.scans;
+    },
+    /** GET /api/tenants/:tenantId/contacts/scans/:id → detail + kandidat untuk ditinjau. */
+    getScan(
+      tenantId: string,
+      scanId: string,
+    ): Promise<ContactScanDetailResponse> {
+      return request<ContactScanDetailResponse>(
+        `/api/tenants/${tenantId}/contacts/scans/${scanId}`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/contacts/scans/:id/import → impor kandidat pending terpilih (kosong = semua pending). */
+    importScan(
+      tenantId: string,
+      scanId: string,
+      candidateIds?: string[],
+    ): Promise<ContactScanImportResponse> {
+      return request<ContactScanImportResponse>(
+        `/api/tenants/${tenantId}/contacts/scans/${scanId}/import`,
+        {
+          method: "POST",
+          body: JSON.stringify(candidateIds ? { candidateIds } : {}),
+        },
       );
     },
     /** GET /api/tenants/:tenantId/contacts/duplicates → kelompok kandidat duplikat (Fase 9B). */

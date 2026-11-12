@@ -45,7 +45,8 @@
     "verify:deals": "tsx scripts/verify-deals.ts",
     "verify:discount-codes": "tsx scripts/verify-discount-codes.ts",
     "verify:sla-working-hours": "tsx scripts/verify-sla-working-hours.ts",
-    "verify:contact-field-schema": "tsx scripts/verify-contact-field-schema.ts"
+    "verify:contact-field-schema": "tsx scripts/verify-contact-field-schema.ts",
+    "verify:contact-scan": "tsx scripts/verify-contact-scan.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.7",

@@ -8,6 +8,12 @@ import {
   ContactFieldDefinitionListResponseSchema,
   ContactFieldDefinitionResponseSchema,
   ContactImportRequestSchema,
+  ContactScanCandidateResponseSchema,
+  ContactScanDetailResponseSchema,
+  ContactScanImportRequestSchema,
+  ContactScanImportResponseSchema,
+  ContactScanRunListResponseSchema,
+  ContactScanRunResponseSchema,
   ContactImportResponseSchema,
   ContactListResponseSchema,
   ContactNoteListResponseSchema,
@@ -23,6 +29,8 @@ import {
   type ContactFieldDefinitionResponse,
   type ContactNoteResponse,
   type ContactResponse,
+  type ContactScanCandidateResponse,
+  type ContactScanRunResponse,
 } from "@sahabat-kreator/contracts";
 import {
   buildContactsCsv,
@@ -33,6 +41,11 @@ import {
   createContact,
   createContactFieldDefinition,
   createContactNote,
+  createContactScan,
+  getContactScan,
+  importContactScanCandidates,
+  listContactScans,
+  readScanStats,
   deleteContactFieldDefinition,
   deleteContactNote,
   effectiveOptInStatus,
@@ -55,7 +68,12 @@ import {
   updateContactFieldDefinition,
   type ContactNoteWithAuthor,
 } from "@sahabat-kreator/core";
-import type { Contact, ContactFieldDefinition } from "@sahabat-kreator/db";
+import type {
+  Contact,
+  ContactFieldDefinition,
+  ContactScanCandidate,
+  ContactScanRun,
+} from "@sahabat-kreator/db";
 import type { AuthBundle } from "../../auth";
 import { apiError, type AppVariables } from "../../http";
 import {
@@ -122,6 +140,39 @@ export function serializeContactFieldDefinition(
     required: row.required,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+  });
+}
+
+/** Serialisasi satu pindai pelanggan otomatis (G18 butir 2). */
+export function serializeContactScanRun(
+  row: ContactScanRun,
+): ContactScanRunResponse {
+  return ContactScanRunResponseSchema.parse({
+    id: row.id,
+    status: row.status,
+    stats: readScanStats(row),
+    error: row.error,
+    createdAt: row.createdAt.toISOString(),
+    completedAt: row.completedAt?.toISOString() ?? null,
+  });
+}
+
+/** Serialisasi satu kandidat pindai (G18 butir 2). */
+export function serializeContactScanCandidate(
+  row: ContactScanCandidate,
+): ContactScanCandidateResponse {
+  return ContactScanCandidateResponseSchema.parse({
+    id: row.id,
+    channelAccountId: row.channelAccountId,
+    provider: row.provider,
+    externalUserId: row.externalUserId,
+    displayName: row.displayName,
+    username: row.username,
+    commentCount: row.commentCount,
+    lastCommentAt: row.lastCommentAt?.toISOString() ?? null,
+    sampleText: row.sampleText,
+    status: row.status,
+    importedContactId: row.importedContactId,
   });
 }
 
@@ -256,6 +307,14 @@ const ExportContactsQuerySchema = z.object({
  * Penulisan kontak (POST/PATCH di atas + impor CSV) divalidasi core
  * terhadap definisi ini; pelanggaran → 400 CONTACT_FIELD_INVALID
  * dengan details.issues per field.
+ *
+ * Route tambahan Gelombang G18 butir 2 (pindai pelanggan otomatis):
+ *   POST /tenants/:tenantId/contacts/scans                 minta pindai (202; eksekusi worker)
+ *   GET  /tenants/:tenantId/contacts/scans                 daftar pindai terakhir
+ *   GET  /tenants/:tenantId/contacts/scans/:scanId         detail + kandidat untuk ditinjau
+ *   POST /tenants/:tenantId/contacts/scans/:scanId/import  impor kandidat pending terpilih
+ * Sumber pindai adalah riwayat komentar kanal (satu-satunya lawan
+ * bicara yang belum tentu menjadi kontak — lihat core/contact-scans).
  * Catatan kontak adalah keluarga TERPISAH dari catatan percakapan
  * (modul notes, /conversations/:id/notes) — subjeknya kontak, dan
  * kedua daftar tidak pernah dicampur; linimasa merakit peristiwa dari
@@ -281,6 +340,10 @@ export function createContactsRoutes(
     app.post(`${base}/field-definitions`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.patch(`${base}/field-definitions/:definitionId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.delete(`${base}/field-definitions/:definitionId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/scans`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/scans`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.get(`${base}/scans/:scanId`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
+    app.post(`${base}/scans/:scanId/import`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/conversations`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
     app.get(`${base}/:id/notes`, (c) => apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"));
@@ -642,6 +705,77 @@ export function createContactsRoutes(
     );
     if (!deleted) return apiError(c, 404, "NOT_FOUND", "Field definition not found");
     return c.body(null, 204);
+  });
+
+  // --- Pindai Pelanggan Otomatis (G18 butir 2) ---
+  // POST membuat baris pindai + event outbox; eksekusinya pekerjaan
+  // worker (relay → job contact-scan.run). GET membaca hasil +
+  // kandidat untuk DITINJAU; impor adalah langkah terpisah yang
+  // mengeksekusi kandidat pending terpilih.
+
+  app.post(`${base}/scans`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const run = await createContactScan(bundle.db, {
+      tenantId: tenant.id,
+      userId: c.get("appUser").id,
+    });
+    return c.json(serializeContactScanRun(run), 202);
+  });
+
+  app.get(`${base}/scans`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const rows = await listContactScans(bundle.db, { tenantId: tenant.id });
+    return c.json(
+      ContactScanRunListResponseSchema.parse({
+        scans: rows.map(serializeContactScanRun),
+      }),
+    );
+  });
+
+  app.get(`${base}/scans/:scanId`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const scanId = c.req.param("scanId");
+    if (!z.string().uuid().safeParse(scanId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact scan not found");
+    }
+    const detail = await getContactScan(bundle.db, { tenantId: tenant.id }, scanId);
+    if (!detail) return apiError(c, 404, "NOT_FOUND", "Contact scan not found");
+    return c.json(
+      ContactScanDetailResponseSchema.parse({
+        scan: serializeContactScanRun(detail.run),
+        candidates: detail.candidates.map(serializeContactScanCandidate),
+      }),
+    );
+  });
+
+  app.post(`${base}/scans/:scanId/import`, async (c) => {
+    const tenant = await resolveTenantForUser(bundle, c.req.param("tenantId"), c.get("appUser").id);
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const scanId = c.req.param("scanId");
+    if (!z.string().uuid().safeParse(scanId).success) {
+      return apiError(c, 404, "NOT_FOUND", "Contact scan not found");
+    }
+    let json: unknown = {};
+    try {
+      const text = await c.req.text();
+      if (text.trim()) json = JSON.parse(text) as unknown;
+    } catch {
+      return apiError(c, 400, "VALIDATION_ERROR", "Request body must be valid JSON");
+    }
+    const parsed = ContactScanImportRequestSchema.safeParse(json);
+    if (!parsed.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid scan import payload");
+    }
+    const result = await importContactScanCandidates(
+      bundle.db,
+      { tenantId: tenant.id, userId: c.get("appUser").id },
+      { scanRunId: scanId, candidateIds: parsed.data.candidateIds },
+    );
+    if (!result) return apiError(c, 404, "NOT_FOUND", "Contact scan not found");
+    return c.json(ContactScanImportResponseSchema.parse(result));
   });
 
   app.get(`${base}/:id`, async (c) => {

@@ -57,6 +57,7 @@ export const APPOINTMENT_GOOGLE_SYNC_JOB = "appointment.google_sync";
 export const POST_PUBLISH_JOB = "post.publish";
 export const OUTBOUND_WEBHOOK_FANOUT_JOB = "outbound-webhook.fanout";
 export const AD_CONVERSION_SEND_JOB = "ad-conversion.send";
+export const CONTACT_SCAN_JOB = "contact-scan.run";
 
 export interface AutomationEvaluateJobData {
   tenantId: string;
@@ -240,6 +241,20 @@ export interface AdConversionSendJobData {
   adConversionEventRowId: string;
 }
 
+/**
+ * Job G18 butir 2: jalankan SATU pindai pelanggan otomatis
+ * (`contact_scan_runs`). Di-enqueue oleh relay outbox dari event
+ * `contact_scan.requested`; jobId deterministik dari id event
+ * outbox. Eksekusi idempoten per baris pindai (yang sudah
+ * 'completed' tidak dihitung ulang).
+ */
+export interface ContactScanJobData {
+  tenantId: string;
+  outboxEventId: string;
+  /** Id baris `contact_scan_runs` yang dijalankan. */
+  scanRunId: string;
+}
+
 /** jobId deterministik dari id event outbox — fondasi idempotensi relay. */
 export function automationEvaluateJobId(outboxEventId: string): string {
   return `automation-evaluate-${outboxEventId}`;
@@ -286,6 +301,11 @@ export function invitationEmailJobId(outboxEventId: string): string {
 /** jobId deterministik sinkron Google janji dari id event outbox. */
 export function appointmentGoogleSyncJobId(outboxEventId: string): string {
   return `appointment-google-sync-${outboxEventId}`;
+}
+
+/** jobId deterministik pindai pelanggan dari id event outbox. */
+export function contactScanJobId(outboxEventId: string): string {
+  return `contact-scan-${outboxEventId}`;
 }
 
 /** jobId deterministik fan-out webhook keluar dari id event outbox. */
@@ -343,7 +363,8 @@ export type MainJobData =
   | AppointmentGoogleSyncJobData
   | PostPublishJobData
   | OutboundWebhookFanoutJobData
-  | AdConversionSendJobData;
+  | AdConversionSendJobData
+  | ContactScanJobData;
 
 export type MainQueue = Queue<MainJobData>;
 
@@ -647,6 +668,26 @@ export async function enqueueAdConversionSend(
     ...options,
   });
   return job.id ?? adConversionSendJobId(data.outboxEventId);
+}
+
+/**
+ * Meng-enqueue eksekusi satu pindai pelanggan otomatis. Aman
+ * dipanggil berulang: jobId diturunkan dari id event outbox.
+ */
+export async function enqueueContactScan(
+  queue: MainQueue,
+  data: ContactScanJobData,
+  options?: JobsOptions,
+): Promise<string> {
+  const job = await queue.add(CONTACT_SCAN_JOB, data, {
+    jobId: contactScanJobId(data.outboxEventId),
+    attempts: 3,
+    backoff: { type: "exponential", delay: 1_000 },
+    removeOnComplete: 1_000,
+    removeOnFail: 1_000,
+    ...options,
+  });
+  return job.id ?? contactScanJobId(data.outboxEventId);
 }
 
 export {

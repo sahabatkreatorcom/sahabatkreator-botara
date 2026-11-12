@@ -39,6 +39,8 @@ import {
   AD_CONVERSION_REQUESTED_OUTBOX_TYPE,
   deliverAdConversion,
   type AdConversionDeps,
+  CONTACT_SCAN_REQUESTED_OUTBOX_TYPE,
+  executeContactScan,
   purgeExpiredTrashedChannels,
   reconcileBroadcasts,
   recordPermanentJobFailure,
@@ -82,6 +84,7 @@ import {
   POST_PUBLISH_JOB,
   OUTBOUND_WEBHOOK_FANOUT_JOB,
   AD_CONVERSION_SEND_JOB,
+  CONTACT_SCAN_JOB,
   createAutomationQueue,
   createRealtimePublisher,
   createRedisConnection,
@@ -95,6 +98,7 @@ import {
   enqueuePostPublish,
   enqueueOutboundWebhookFanout,
   enqueueAdConversionSend,
+  enqueueContactScan,
   enqueueKbEmbed,
   enqueueSequenceStep,
   type AgentRespondJobData,
@@ -106,6 +110,7 @@ import {
   type PostPublishJobData,
   type OutboundWebhookFanoutJobData,
   type AdConversionSendJobData,
+  type ContactScanJobData,
   type InvitationEmailJobData,
   type KbEmbedJobData,
   type MainJobData,
@@ -570,6 +575,20 @@ const bullWorker = new Worker<MainJobData>(
       );
       console.log(
         `[worker] ad-conversion.send event=${data.outboxEventId} row=${data.adConversionEventRowId} result=${result.kind}`,
+      );
+      return result;
+    }
+    if (job.name === CONTACT_SCAN_JOB) {
+      // G18 butir 2: jalankan satu pindai pelanggan otomatis.
+      // Kegagalan DB dilempar core (baris pindai ditandai 'failed')
+      // agar BullMQ mencoba lagi; eksekusi idempoten per baris.
+      const data = job.data as ContactScanJobData;
+      const result = await executeContactScan(db, {
+        tenantId: data.tenantId,
+        scanRunId: data.scanRunId,
+      });
+      console.log(
+        `[worker] contact-scan.run event=${data.outboxEventId} scan=${data.scanRunId} result=${result.kind}`,
       );
       return result;
     }
@@ -1041,6 +1060,24 @@ async function relayTick(): Promise<void> {
           tenantId: event.tenantId,
           outboxEventId: event.id,
           adConversionEventRowId: payload.adConversionEventRowId,
+        });
+        return;
+      }
+      // G18 butir 2: pindai pelanggan otomatis diminta dari halaman
+      // Kontak → job eksekusi pindai. jobId deterministik dari id
+      // event; payload tidak lengkap ditandai published tanpa job.
+      if (event.type === CONTACT_SCAN_REQUESTED_OUTBOX_TYPE) {
+        const payload = event.payload as { scanRunId?: unknown };
+        if (typeof payload.scanRunId !== "string") {
+          console.warn(
+            `[worker] event contact_scan.requested ${event.id} payload tidak lengkap — ditandai published tanpa job`,
+          );
+          return;
+        }
+        await enqueueContactScan(queue, {
+          tenantId: event.tenantId,
+          outboxEventId: event.id,
+          scanRunId: payload.scanRunId,
         });
         return;
       }
