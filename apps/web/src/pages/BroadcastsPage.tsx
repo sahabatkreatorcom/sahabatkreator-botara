@@ -17,6 +17,7 @@ import { useWorkspace } from "../workspace/WorkspaceProvider";
 import { BroadcastDetail } from "./broadcasts/BroadcastDetail";
 import { BroadcastForm } from "./broadcasts/BroadcastForm";
 import { OptInSettingsCard } from "./broadcasts/OptInSettingsCard";
+import { RecurrenceSection } from "./broadcasts/RecurrenceSection";
 import { WhatsAppTemplatesSection } from "./broadcasts/WhatsAppTemplatesSection";
 import { StatusChip } from "./broadcasts/chips";
 import {
@@ -59,6 +60,11 @@ export function BroadcastsPage({ t, locale }: BroadcastsPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [confirming, setConfirming] = useState<string | null>(null);
+  // G9: benih formulir jadwal berulang dari tombol "Jadikan berulang".
+  const [recurrenceSeed, setRecurrenceSeed] = useState<{
+    sourceId: string;
+    nonce: number;
+  } | null>(null);
   const requestSeq = useRef(0);
 
   const load = useCallback(
@@ -285,6 +291,20 @@ export function BroadcastsPage({ t, locale }: BroadcastsPageProps) {
                 >
                   {t("broadcasts.viewRecipients")}
                 </button>
+                {canManage ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRecurrenceSeed({
+                        sourceId: b.id,
+                        nonce: Date.now(),
+                      })
+                    }
+                    className="rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-ink hover:bg-surface-2"
+                  >
+                    {t("broadcastRecurrence.makeRecurringAction")}
+                  </button>
+                ) : null}
                 {canManage && b.status === "draft" ? (
                   <>
                     <button
@@ -348,6 +368,15 @@ export function BroadcastsPage({ t, locale }: BroadcastsPageProps) {
           </button>
         </div>
       ) : null}
+
+      <RecurrenceSection
+        t={t}
+        locale={locale}
+        tenantId={tenantId}
+        canManage={canManage}
+        seed={recurrenceSeed}
+        onOpenBroadcast={(id) => setView({ kind: "detail", id })}
+      />
 
       <OptInSettingsCard t={t} tenantId={tenantId} canManage={canManage} />
 

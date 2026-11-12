@@ -24,7 +24,13 @@ import type {
   BroadcastAbResultsResponse,
   BroadcastListResponse,
   BroadcastRecipientListResponse,
+  BroadcastRecurrenceListResponse,
+  BroadcastRecurrenceOccurrenceListResponse,
+  BroadcastRecurrencePreviewRequest,
+  BroadcastRecurrencePreviewResponse,
+  BroadcastRecurrenceResponse,
   BroadcastResponse,
+  CreateBroadcastRecurrenceRequest,
   CreateBroadcastRequest,
   CreatePostGroupRequest,
   CreatePostRequest,
@@ -2368,6 +2374,88 @@ export const api = {
     ): Promise<BroadcastAbResultsResponse> {
       return request<BroadcastAbResultsResponse>(
         `/api/tenants/${tenantId}/broadcasts/${broadcastId}/ab-results`,
+        { method: "GET" },
+      );
+    },
+  },
+  broadcastRecurrences: {
+    /** GET /api/tenants/:tenantId/broadcast-recurrences → daftar aturan berulang (G9). */
+    list(
+      tenantId: string,
+      query: { status?: string; cursor?: string; limit?: number } = {},
+    ): Promise<BroadcastRecurrenceListResponse> {
+      const params = new URLSearchParams();
+      if (query.status) params.set("status", query.status);
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<BroadcastRecurrenceListResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences${qs ? `?${qs}` : ""}`,
+        { method: "GET" },
+      );
+    },
+    /** POST /api/tenants/:tenantId/broadcast-recurrences → 201 aturan baru (owner/admin). */
+    create(
+      tenantId: string,
+      input: CreateBroadcastRecurrenceRequest,
+    ): Promise<BroadcastRecurrenceResponse> {
+      return request<BroadcastRecurrenceResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/broadcast-recurrences/preview → slot berikutnya pola yang belum disimpan. */
+    preview(
+      tenantId: string,
+      input: BroadcastRecurrencePreviewRequest,
+    ): Promise<BroadcastRecurrencePreviewResponse> {
+      return request<BroadcastRecurrencePreviewResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences/preview`,
+        { method: "POST", body: JSON.stringify(input) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/broadcast-recurrences/:id/pause → jeda aturan (owner/admin). */
+    pause(
+      tenantId: string,
+      ruleId: string,
+    ): Promise<BroadcastRecurrenceResponse> {
+      return request<BroadcastRecurrenceResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences/${ruleId}/pause`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/broadcast-recurrences/:id/resume → lanjutkan aturan (owner/admin). */
+    resume(
+      tenantId: string,
+      ruleId: string,
+    ): Promise<BroadcastRecurrenceResponse> {
+      return request<BroadcastRecurrenceResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences/${ruleId}/resume`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** POST /api/tenants/:tenantId/broadcast-recurrences/:id/cancel → batalkan aturan (owner/admin). */
+    cancel(
+      tenantId: string,
+      ruleId: string,
+    ): Promise<BroadcastRecurrenceResponse> {
+      return request<BroadcastRecurrenceResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences/${ruleId}/cancel`,
+        { method: "POST", body: JSON.stringify({}) },
+      );
+    },
+    /** GET /api/tenants/:tenantId/broadcast-recurrences/:id/occurrences → ledger kejadian per slot. */
+    listOccurrences(
+      tenantId: string,
+      ruleId: string,
+      query: { cursor?: string; limit?: number } = {},
+    ): Promise<BroadcastRecurrenceOccurrenceListResponse> {
+      const params = new URLSearchParams();
+      if (query.cursor) params.set("cursor", query.cursor);
+      if (query.limit) params.set("limit", String(query.limit));
+      const qs = params.toString();
+      return request<BroadcastRecurrenceOccurrenceListResponse>(
+        `/api/tenants/${tenantId}/broadcast-recurrences/${ruleId}/occurrences${qs ? `?${qs}` : ""}`,
         { method: "GET" },
       );
     },
