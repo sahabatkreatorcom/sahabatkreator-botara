@@ -1,0 +1,31 @@
+-- 0031_agent_conversation_reply_cap.sql
+--
+-- Gelombang G6 (Tier 1 butir 7 program adopsi): PENGAMAN AI
+-- PELENGKAP — cap balasan AI PER PERCAKAPAN dengan klaim slot atomik.
+--
+-- Masalah yang ditutup: pengaman yang sudah ada berskala tenant
+-- (cap harian 200 respons dari usage_ledger) dan anti-burst
+-- (batching). Tidak ada batas PER PERCAKAPAN: satu percakapan yang
+-- berputar (kontak yang terus menulis, atau loop balasan) bisa
+-- menghabiskan jatah tenant dan membombardir satu pelanggan.
+--
+-- Yang dibangun migrasi ini: dua kolom jendela pada `conversations`:
+-- - `agent_reply_window_started_at` timestamptz NULL — awal jendela
+--   bergulir 24 jam yang sedang berjalan (NULL = belum ada klaim).
+-- - `agent_reply_window_count` int NOT NULL DEFAULT 0 — slot balasan
+--   yang sudah diklaim pada jendela itu.
+-- Klaim slot = satu UPDATE kondisional ber-RETURNING pada baris
+-- percakapan (lihat `claimConversationReplySlot` di
+-- packages/core/src/agent-guards.ts): kunci baris Postgres
+-- menserialkan klaim bersamaan sehingga balapan dua balasan tidak
+-- bisa menembus cap. Batasnya sendiri hidup di konfigurasi agent
+-- (`agents.config.maxConversationReplies`, bawaan 20, 0 = nonaktif)
+-- — BUKAN kolom baru, mengikuti pola `maxReplyChars`/`language`.
+--
+-- Tanpa tabel/policy baru: hitungan verify DB tetap 67 tabel / 92
+-- policy. Tanpa backfill: baris lama mulai dengan jendela NULL dan
+-- hitungan 0 (jendela pertama dimulai pada klaim pertama).
+
+ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "agent_reply_window_started_at" timestamp with time zone;
+--> statement-breakpoint
+ALTER TABLE "conversations" ADD COLUMN IF NOT EXISTS "agent_reply_window_count" integer DEFAULT 0 NOT NULL;

@@ -218,6 +218,13 @@
       "when": 1794477824042,
       "tag": "0030_trigger_postback_quickreply_welcome",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1794477824043,
+      "tag": "0031_agent_conversation_reply_cap",
+      "breakpoints": true
     }
   ]
 }

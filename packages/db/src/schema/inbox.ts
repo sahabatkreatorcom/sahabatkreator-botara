@@ -187,6 +187,23 @@ export const conversations = pgTable(
     }),
     /** Apakah AI agent boleh membalas otomatis di percakapan ini. */
     agentEnabled: boolean("agent_enabled").notNull().default(true),
+    /**
+     * Jendela cap balasan AI PER PERCAKAPAN (Gelombang G6): awal
+     * jendela bergulir 24 jam + jumlah slot balasan yang sudah diklaim
+     * di jendela itu. Klaim dilakukan runtime agent lewat SATU UPDATE
+     * kondisional ber-RETURNING pada baris percakapan ini (kunci baris
+     * Postgres menserialkan klaim bersamaan — lihat
+     * `claimConversationReplySlot` di core/agent-guards.ts). NULL =
+     * belum pernah ada klaim (jendela belum mulai). Kolom ini murni
+     * penghitung penegakan; riwayat balasan yang otoritatif tetap
+     * tabel `messages` + `usage_ledger`.
+     */
+    agentReplyWindowStartedAt: timestamp("agent_reply_window_started_at", {
+      withTimezone: true,
+    }),
+    agentReplyWindowCount: integer("agent_reply_window_count")
+      .notNull()
+      .default(0),
     unreadCount: integer("unread_count").notNull().default(0),
     lastMessageAt: timestamp("last_message_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
