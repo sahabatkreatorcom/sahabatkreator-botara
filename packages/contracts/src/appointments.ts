@@ -245,6 +245,39 @@ export type GoogleConnectStartResponse = z.infer<
   typeof GoogleConnectStartResponseSchema
 >;
 
+/**
+ * Layanan Google berkoneksi OAuth mandiri (pemisahan Google,
+ * 2026-11-12): calendar (janji temu), youtube (content schedule),
+ * business (Google Business Profile). Tiap layanan = consent +
+ * koneksi + klien OAuth proyek Cloud-nya sendiri.
+ */
+export const GoogleServiceSchema = z.enum(["calendar", "youtube", "business"]);
+export type GoogleService = z.infer<typeof GoogleServiceSchema>;
+
+/** Keadaan koneksi SATU layanan Google tenant (TANPA token apa pun). */
+export const GoogleServiceConnectionSchema = z.object({
+  service: GoogleServiceSchema,
+  connected: z.boolean(),
+  /** Email akun Google layanan ini; null bila belum terhubung. */
+  accountEmail: z.string().nullable(),
+  connectedAt: z.string().datetime().nullable(),
+});
+export type GoogleServiceConnection = z.infer<
+  typeof GoogleServiceConnectionSchema
+>;
+
+/**
+ * Keadaan koneksi SEMUA layanan Google tenant — selalu tiga entri
+ * (calendar, youtube, business), layanan belum terhubung tampil
+ * connected=false. Dasar blok Google per layanan di Channels.
+ */
+export const GoogleServiceConnectionsResponseSchema = z.object({
+  services: z.array(GoogleServiceConnectionSchema),
+});
+export type GoogleServiceConnectionsResponse = z.infer<
+  typeof GoogleServiceConnectionsResponseSchema
+>;
+
 /** Query daftar booking API publik /v1 (Fase 13G) — rentang + status. */
 export const V1ListAppointmentsQuerySchema = z.object({
   from: z.string().datetime().optional(),

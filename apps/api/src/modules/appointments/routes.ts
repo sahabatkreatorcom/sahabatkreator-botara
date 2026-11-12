@@ -14,6 +14,7 @@ import {
   GoogleCalendarConnectionResponseSchema,
   GoogleCalendarListResponseSchema,
   GoogleConnectStartResponseSchema,
+  GoogleServiceConnectionsResponseSchema,
   UpdateAppointmentAvailabilityRequestSchema,
   UpdateAppointmentServiceRequestSchema,
   UpdateAppointmentSettingsRequestSchema,
@@ -38,13 +39,16 @@ import {
   getBooking,
   getContact,
   getGoogleConnection,
+  googleServiceScopes,
+  isGoogleService,
   listAppointmentAvailability,
   listAppointmentServices,
   listBookings,
   listGoogleCalendars,
+  listGoogleServiceConnections,
   replaceAppointmentAvailability,
-  resolveGoogleOAuthClient,
-  saveGoogleConnection,
+  resolveGoogleServiceClient,
+  saveGoogleServiceConnection,
   syncGoogleBusinessLocationAccounts,
   syncYouTubeChannelAccount,
   setGoogleConnectionCalendar,
@@ -53,6 +57,7 @@ import {
   type BookingWithNames,
   type GoogleBases,
   type GoogleDeps,
+  type GoogleService,
   type PlatformSettingsOptions,
 } from "@sahabat-kreator/core";
 import type {
@@ -85,6 +90,16 @@ import { resolveTenantForUser } from "../tenants/guard";
  *   PUT    /tenants/:tenantId/appointments/google/calendar      pilih kalender (owner/admin)
  *   DELETE /tenants/:tenantId/appointments/google         putus koneksi (owner/admin)
  *   GET    /google/oauth/callback                         callback publik (state bertanda tangan)
+ *
+ * Pemisahan Google per layanan (2026-11-12): modul ini juga rumah
+ * bagi OAuth tiga layanan Google — state bertanda tangan kini memuat
+ * LAYANAN (calendar/youtube/business) dan halaman asal, dan SATU
+ * callback yang sama melayani ketiganya (satu redirect URI untuk
+ * semua proyek Cloud):
+ *   GET    /tenants/:tenantId/google/status               status tiga layanan
+ *   POST   /tenants/:tenantId/google/:service/connect     mulai OAuth layanan itu (owner/admin)
+ * Rute appointments/google/* di atas adalah bentuk Calendar-nya
+ * (halaman Janji Temu); consent-nya kini SEMPIT kalender saja.
  *
  * Lapisan janji bekerja PENUH tanpa Google. Klien OAuth Google milik
  * PLATFORM (Panel Admin, resolusi panel → env): tanpa client id/secret
@@ -154,6 +169,10 @@ interface OAuthStatePayload {
   userId: string;
   nonce: string;
   exp: number;
+  /** Layanan yang sedang dihubungkan — callback menyimpan koneksi + menyinkronkan HANYA layanan ini. */
+  service: GoogleService;
+  /** Halaman asal alur: callback mengembalikan browser ke sana (banner per konteks). */
+  returnTo: "appointments" | "channels";
 }
 
 function signOAuthState(secret: string, payload: OAuthStatePayload): string {
@@ -186,7 +205,10 @@ function verifyOAuthState(
       typeof payload.userId !== "string" ||
       typeof payload.nonce !== "string" ||
       typeof payload.exp !== "number" ||
-      payload.exp < Date.now()
+      payload.exp < Date.now() ||
+      typeof payload.service !== "string" ||
+      !isGoogleService(payload.service) ||
+      (payload.returnTo !== "appointments" && payload.returnTo !== "channels")
     ) {
       return null;
     }
@@ -239,6 +261,8 @@ export function createAppointmentsRoutes(
     app.get(`${base}/google/calendars`, unavailable);
     app.put(`${base}/google/calendar`, unavailable);
     app.delete(`${base}/google`, unavailable);
+    app.get("/tenants/:tenantId/google/status", unavailable);
+    app.post("/tenants/:tenantId/google/:service/connect", unavailable);
     app.get("/google/oauth/callback", unavailable);
     return app;
   }
@@ -603,12 +627,24 @@ export function createAppointmentsRoutes(
     );
   });
 
-  app.post(`${base}/google/connect`, async (c) => {
-    const g = await guard(c, { ownerAdmin: true });
-    if ("error" in g) return g.error;
-    const client = await resolveGoogleOAuthClient(
-      bundle.db,
+  /**
+   * Mulai OAuth SATU layanan Google: dialog dibangun dari klien
+   * LAYANAN itu (resolusi berjenjang per-layanan → bersama) dan
+   * scope SEMPIT layanannya; state bertanda tangan memuat layanan +
+   * halaman asal agar SATU callback melayani semua alur. Dipakai
+   * rute janji temu (calendar, asal appointments) dan rute Channels
+   * per layanan (asal channels).
+   */
+  async function startGoogleServiceConnect(
+    c: AppContext,
+    g: GuardOk,
+    service: GoogleService,
+    returnTo: "appointments" | "channels",
+  ): Promise<Response> {
+    const client = await resolveGoogleServiceClient(
+      bundle!.db,
       options.platform,
+      service,
     );
     if (!client) {
       // Kejujuran NOT_CONFIGURED (pola Resend 11B): klien OAuth
@@ -617,7 +653,7 @@ export function createAppointmentsRoutes(
         c,
         422,
         "GOOGLE_NOT_CONFIGURED",
-        "Google Calendar is not configured by the platform yet",
+        "Google is not configured by the platform yet",
       );
     }
     if (!options.stateSecret || !webBase) {
@@ -625,7 +661,7 @@ export function createAppointmentsRoutes(
         c,
         422,
         "GOOGLE_NOT_CONFIGURED",
-        "Google Calendar OAuth is not configured on this server",
+        "Google OAuth is not configured on this server",
       );
     }
     if (!options.tokenSecret) {
@@ -652,14 +688,54 @@ export function createAppointmentsRoutes(
       userId: g.appUser.id,
       nonce,
       exp: Date.now() + STATE_TTL_MS,
+      service,
+      returnTo,
     });
     const url = buildGoogleAuthorizeUrl({
       clientId: client.clientId,
       redirectUri,
       state,
+      scopes: googleServiceScopes(service),
       authBase: options.googleBases?.authBase,
     });
     return c.json(GoogleConnectStartResponseSchema.parse({ url }));
+  }
+
+  app.post(`${base}/google/connect`, async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    return startGoogleServiceConnect(c, g, "calendar", "appointments");
+  });
+
+  // --- Google per layanan (Channels) -------------------------------------
+  app.get("/tenants/:tenantId/google/status", async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const rows = await listGoogleServiceConnections(bundle.db, g.tenant.id);
+    const services = (
+      ["calendar", "youtube", "business"] as GoogleService[]
+    ).map((service) => {
+      const row = rows.find((r) => r.service === service);
+      return {
+        service,
+        connected: row !== undefined,
+        accountEmail: row?.accountEmail ?? null,
+        connectedAt: row ? row.createdAt.toISOString() : null,
+      };
+    });
+    return c.json(
+      GoogleServiceConnectionsResponseSchema.parse({ services }),
+    );
+  });
+
+  app.post("/tenants/:tenantId/google/:service/connect", async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const service = c.req.param("service") ?? "";
+    if (!isGoogleService(service)) {
+      return apiError(c, 404, "NOT_FOUND", "Unknown Google service");
+    }
+    return startGoogleServiceConnect(c, g, service, "channels");
   });
 
   app.get(`${base}/google/calendars`, async (c) => {
@@ -729,26 +805,38 @@ export function createAppointmentsRoutes(
   });
 
   // --- Callback OAuth publik (identitas dari state bertanda tangan) -----
+  // SATU callback untuk tiga layanan + tiga proyek Cloud: layanan dan
+  // halaman asal dibaca dari state bertanda tangan (bukan dari query
+  // yang bisa dipalsukan), token ditukar dengan klien LAYANAN ITU, dan
+  // koneksi disimpan ke baris layanan itu saja.
   app.get("/google/oauth/callback", async (c) => {
-    const fail = (code: string) =>
+    const failAppointments = (code: string) =>
       c.redirect(
         `${webBase}/appointments?google=error&reason=${encodeURIComponent(code)}`,
         302,
       );
     if (!options.stateSecret || !webBase || !options.tokenSecret) {
-      return fail("GOOGLE_NOT_CONFIGURED");
+      return failAppointments("GOOGLE_NOT_CONFIGURED");
     }
     const stateRaw = c.req.query("state");
     const code = c.req.query("code");
-    if (!stateRaw || !code) return fail("GOOGLE_STATE_INVALID");
+    if (!stateRaw || !code) return failAppointments("GOOGLE_STATE_INVALID");
     const state = verifyOAuthState(options.stateSecret, stateRaw);
-    if (!state) return fail("GOOGLE_STATE_INVALID");
+    if (!state) return failAppointments("GOOGLE_STATE_INVALID");
+    const fail = (failCode: string) =>
+      state.returnTo === "channels"
+        ? c.redirect(
+            `${webBase}/channels?google_oauth_error=${encodeURIComponent(failCode)}&google_service=${state.service}`,
+            302,
+          )
+        : failAppointments(failCode);
     if (!(await oauthState.consumeNonce(state.nonce))) {
       return fail("GOOGLE_STATE_INVALID");
     }
-    const client = await resolveGoogleOAuthClient(
+    const client = await resolveGoogleServiceClient(
       bundle.db,
       options.platform,
+      state.service,
     );
     if (!client) return fail("GOOGLE_NOT_CONFIGURED");
     try {
@@ -760,7 +848,7 @@ export function createAppointmentsRoutes(
         googleDeps,
         tokens.accessToken,
       );
-      await saveGoogleConnection(bundle.db, state.tenantId, {
+      await saveGoogleServiceConnection(bundle.db, state.tenantId, state.service, {
         tokens,
         accountEmail: email,
         tokenSecret: options.tokenSecret,
@@ -768,30 +856,34 @@ export function createAppointmentsRoutes(
     } catch {
       return fail("GOOGLE_EXCHANGE_FAILED");
     }
-    // Gelombang 2: consent yang sama kini juga membawa scope YouTube —
-    // petakan koneksi ini ke akun channel youtube tenant agar kanal
-    // muncul sebagai sasaran content schedule. FAIL-SOFT sepenuhnya:
-    // YouTube tidak boleh menggagalkan koneksi Calendar yang sudah
-    // berhasil disimpan di atas (scope kurang / akun tanpa kanal
-    // dijawab null oleh core dan diabaikan di sini).
+    // Sinkron turunan HANYA untuk layanan yang baru terhubung —
+    // FAIL-SOFT sepenuhnya (kegagalan sinkron tidak menggagalkan
+    // koneksi yang sudah tersimpan):
+    // - youtube: petakan koneksi youtube ke akun channel youtube
+    //   tenant agar kanal muncul sebagai sasaran content schedule
+    //   (Gelombang 2; dulu ikut callback consent gabungan).
+    // - business: petakan lokasi Business Profile ke akun lokasi
+    //   google_business (Gelombang 3; pola yang sama).
+    // - calendar: tidak ada turunan — janji temu membaca koneksinya
+    //   langsung.
     try {
-      await syncYouTubeChannelAccount(bundle.db, state.tenantId, googleDeps);
+      if (state.service === "youtube") {
+        await syncYouTubeChannelAccount(bundle.db, state.tenantId, googleDeps);
+      } else if (state.service === "business") {
+        await syncGoogleBusinessLocationAccounts(
+          bundle.db,
+          state.tenantId,
+          googleDeps,
+        );
+      }
     } catch {
-      /* abaikan — sinkron YouTube bukan syarat koneksi Google */
+      /* abaikan — sinkron turunan bukan syarat koneksi layanan */
     }
-    // Gelombang 3: consent yang sama kini juga membawa scope
-    // business.manage — petakan lokasi Business Profile tenant ke
-    // akun lokasi google_business agar lokasi muncul sebagai sasaran
-    // content schedule. FAIL-SOFT sepenuhnya, sama seperti YouTube:
-    // sinkron lokasi tidak boleh menggagalkan koneksi Calendar.
-    try {
-      await syncGoogleBusinessLocationAccounts(
-        bundle.db,
-        state.tenantId,
-        googleDeps,
+    if (state.returnTo === "channels") {
+      return c.redirect(
+        `${webBase}/channels?google_oauth=connected&google_service=${state.service}`,
+        302,
       );
-    } catch {
-      /* abaikan — sinkron Google Business bukan syarat koneksi Google */
     }
     return c.redirect(`${webBase}/appointments?google=connected`, 302);
   });
