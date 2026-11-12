@@ -335,6 +335,19 @@ export {
   type AgentPlaygroundUsageSummary,
 } from "./agent-runtime";
 export {
+  AGENT_CONVERSATION_REPLY_CAP,
+  AGENT_CONVERSATION_REPLY_WINDOW_HOURS,
+  AGENT_HANDOFF_SUMMARY_REF_TYPE,
+  resolveConversationReplyCap,
+  claimConversationReplySlot,
+  releaseConversationReplySlot,
+  generateHandoffSummary,
+  handoffConversationToHuman,
+  type ConversationReplyClaim,
+  type HandoffSummaryOutcome,
+  type HandoffToHumanResult,
+} from "./agent-guards";
+export {
   listSuggestions,
   getSuggestion,
   approveSuggestion,
@@ -965,6 +978,7 @@ export {
 export {
   listConversationNotes,
   createConversationNote,
+  createAgentConversationNote,
   deleteConversationNote,
   type ConversationNoteWithAuthor,
   type CreateNoteResult,

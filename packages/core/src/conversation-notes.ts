@@ -142,6 +142,57 @@ export async function createConversationNote(
   });
 }
 
+/**
+ * Membuat catatan ATAS NAMA AGENT/SISTEM (Gelombang G6): penulis
+ * `author_user_id` NULL — bentuk yang memang diantisipasi skema
+ * (catatan penulis yatim; UI menampilkan label cadangan) — dengan
+ * audit `conversation.note_created` beraktor `agent:<id>` dan meta
+ * `via` penanda jalur pembuatnya. Dipakai ringkasan handoff otomatis
+ * (core/agent-guards.ts): ringkasan adalah catatan tim biasa di tabel
+ * yang sama, BUKAN tabel catatan kedua — hanya penulisnya yang bukan
+ * manusia. Isi catatan tetap tidak masuk audit (hanya id).
+ */
+export async function createAgentConversationNote(
+  db: Database,
+  input: {
+    tenantId: string;
+    agentId: string;
+    conversationId: string;
+    body: string;
+    via: string;
+  },
+): Promise<CreateNoteResult> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    if (!(await conversationExists(tx, input.tenantId, input.conversationId))) {
+      return { kind: "conversation_not_found" } as const;
+    }
+    const [row] = await tx
+      .insert(conversationNotes)
+      .values({
+        tenantId: input.tenantId,
+        conversationId: input.conversationId,
+        authorUserId: null,
+        body: input.body,
+      })
+      .returning();
+    await tx.insert(auditLogs).values({
+      tenantId: input.tenantId,
+      actorType: "agent",
+      actorId: `agent:${input.agentId}`,
+      action: "conversation.note_created",
+      meta: {
+        conversationId: input.conversationId,
+        noteId: row.id,
+        via: input.via,
+      },
+    });
+    return {
+      kind: "created",
+      note: { ...row, authorName: null },
+    } as const;
+  });
+}
+
 export async function deleteConversationNote(
   db: Database,
   input: {

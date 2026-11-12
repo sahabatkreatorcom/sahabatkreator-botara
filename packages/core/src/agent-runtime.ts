@@ -23,6 +23,14 @@ import {
 import type { TenantContext } from "./tenant";
 import { withTenantDb, type DbTx } from "./tx";
 import { getActiveAgent, getAgent } from "./agents";
+import {
+  AGENT_CONVERSATION_REPLY_WINDOW_HOURS,
+  claimConversationReplySlot,
+  handoffConversationToHuman,
+  releaseConversationReplySlot,
+  resolveConversationReplyCap,
+  type ConversationReplyClaim,
+} from "./agent-guards";
 import { buildAgentCatalogContext } from "./commerce";
 import { listMessages } from "./conversations";
 import { searchKbChunks, type KbSearchHit } from "./kb";
@@ -56,6 +64,12 @@ import type { PaymentDeps } from "./payments";
  *    sekali oleh job pesan terbarunya.
  * 3. Cek caps harian tenant (AGENT_DAILY_RESPONSE_CAP respons/hari dari
  *    usage_ledger; lewat → audit `agent.capped`, tidak menjawab).
+ * 3b. Klaim slot cap PER PERCAKAPAN (Gelombang G6, core/agent-guards.ts):
+ *    satu UPDATE kondisional atomik pada jendela bergulir 24 jam
+ *    percakapan; gagal klaim → audit `agent.conversation_capped` +
+ *    handoff ke manusia (dengan ringkasan otomatis gagal-aman) dan
+ *    reason `conversation_capped`. Handoff lewat tool juga membuat
+ *    ringkasan yang sama. Detail model ada di agent-guards.ts.
  * 4. Rakit konteks: prompt sistem agent + riwayat 20 pesan terakhir +
  *    retrieval KB untuk teks pesan pemicu (full-text top 5; HIBRIDA
  *    full-text + vektor sejak Fase 12D bila pemanggil menyerahkan
@@ -132,6 +146,18 @@ export interface AgentToolOptions {
    * Tanpa ini tool hanya berhasil bila provider tenant 'simulation'.
    */
   payments?: PaymentDeps;
+  /**
+   * Provider LLM untuk RINGKASAN HANDOFF otomatis (Gelombang G6):
+   * bila disediakan, eksekusi tool `handoff_to_human` dilanjutkan
+   * pembuatan ringkasan percakapan gagal-aman yang menempel sebagai
+   * catatan internal (core/agent-guards.ts). Tanpa provider, handoff
+   * tetap terjadi — hanya ringkasannya yang dilewati. Runtime utama
+   * meneruskan provider-nya sendiri; pemanggil lain (uji executor
+   * langsung) boleh tidak mengisinya.
+   */
+  summaryProvider?: LlmProvider;
+  /** Model untuk panggilan ringkasan (dari konfigurasi agent pemanggil). */
+  summaryModel?: string;
 }
 
 async function insertAgentAudit(
@@ -248,32 +274,31 @@ export async function executeAgentToolCall(
       typeof call.arguments.reason === "string"
         ? call.arguments.reason.slice(0, 500)
         : "";
-    return withTenantDb(db, tenantId, async (tx) => {
-      const [updated] = await tx
-        .update(conversations)
-        .set({ agentEnabled: false, updatedAt: new Date() })
-        .where(
-          and(
-            eq(conversations.tenantId, tenantId),
-            eq(conversations.id, toolCtx.conversationId),
-          ),
-        )
-        .returning({ id: conversations.id });
-      if (!updated) {
-        return {
-          name: call.name,
-          executed: false,
-          note: "conversation_not_found",
-        };
-      }
-      await insertAgentAudit(tx, tenantId, toolCtx.agentId, "agent.handoff", {
-        reason,
-        contactId: toolCtx.contactId,
+    // Jalur handoff BERSAMA (G6): matikan AI + audit lewat
+    // handoffConversationToHuman agar semantiknya identik dengan
+    // pemicu cap per percakapan; ringkasan otomatis gagal-aman
+    // menyusul bila pemanggil menyediakan provider ringkasan.
+    const handoff = await handoffConversationToHuman(
+      db,
+      options?.summaryProvider ?? null,
+      {
+        tenantId,
+        agentId: toolCtx.agentId,
+        model: options?.summaryModel,
         conversationId: toolCtx.conversationId,
+        contactId: toolCtx.contactId,
+        reason,
         via: "agent_tool",
-      });
-      return { name: call.name, executed: true, note: "handoff_done" };
-    });
+      },
+    );
+    if (!handoff.handedOff) {
+      return {
+        name: call.name,
+        executed: false,
+        note: "conversation_not_found",
+      };
+    }
+    return { name: call.name, executed: true, note: "handoff_done" };
   }
 
   if (call.name === "send_payment_link") {
@@ -513,6 +538,7 @@ export type AgentSkipReason =
   | "no_active_agent"
   | "batched"
   | "capped"
+  | "conversation_capped"
   | "provider_error"
   | "empty_response";
 
@@ -733,6 +759,52 @@ export async function respondToInboundMessage(
     return { responded: false, reason: "capped" };
   }
 
+  // 3b. Cap balasan PER PERCAKAPAN (G6): klaim slot atomik pada
+  // jendela bergulir percakapan ini SEBELUM panggilan LLM (klaim
+  // sekaligus membatasi belanja token per percakapan). Klaim gagal =
+  // cap tercapai: AI berhenti di percakapan ini dengan jejak audit
+  // `agent.conversation_capped`, dan percakapan DISERAHKAN ke manusia
+  // lewat jalur handoff bersama (termasuk ringkasan gagal-aman) —
+  // jalan keluar yang ditawarkan sistem, bukan kebuntuan senyap.
+  // Slot yang berhasil diklaim DILEPAS lagi bila generasi gagal
+  // (provider error / respons kosong) agar kegagalan tidak membakar
+  // jatah pelanggan. Cap nonaktif (config 0) melewati langkah ini.
+  const replyCap = resolveConversationReplyCap(agent);
+  let replyClaim: ConversationReplyClaim | null = null;
+  if (replyCap !== null) {
+    replyClaim = await claimConversationReplySlot(db, {
+      tenantId,
+      conversationId,
+      cap: replyCap,
+    });
+    if (!replyClaim.claimed) {
+      await withTenantDb(db, tenantId, async (tx) => {
+        await insertAgentAudit(
+          tx,
+          tenantId,
+          agent.id,
+          "agent.conversation_capped",
+          {
+            conversationId,
+            triggerMessageId: messageId,
+            cap: replyCap,
+            windowHours: AGENT_CONVERSATION_REPLY_WINDOW_HOURS,
+          },
+        );
+      });
+      await handoffConversationToHuman(db, provider, {
+        tenantId,
+        agentId: agent.id,
+        model: agent.model,
+        conversationId,
+        contactId: conversation.contactId,
+        reason: `Batas balasan AI per percakapan tercapai (${replyCap} balasan dalam ${AGENT_CONVERSATION_REPLY_WINDOW_HOURS} jam)`,
+        via: "conversation_cap",
+      });
+      return { responded: false, reason: "conversation_capped" };
+    }
+  }
+
   // 4+5. Riwayat → draft balasan lewat jalur bersama (retrieval KB dari
   // teks pesan pemicu + prompt + provider). Error provider dicatat
   // sebagai audit `agent.failed`, tidak pernah melempar keluar.
@@ -760,6 +832,15 @@ export async function respondToInboundMessage(
     });
   } catch (err) {
     const errorText = err instanceof Error ? err.message : String(err);
+    // Generasi gagal: lepas slot cap per percakapan yang sudah
+    // diklaim — kegagalan provider tidak membakar jatah pelanggan.
+    if (replyClaim?.claimed) {
+      await releaseConversationReplySlot(db, {
+        tenantId,
+        conversationId,
+        windowStartedAt: replyClaim.windowStartedAt,
+      }).catch(() => undefined);
+    }
     await withTenantDb(db, tenantId, async (tx) => {
       await insertAgentAudit(tx, tenantId, agent.id, "agent.failed", {
         conversationId,
@@ -786,6 +867,14 @@ export async function respondToInboundMessage(
   };
 
   if (!text && result.toolCalls.length === 0) {
+    // Respons kosong bukan balasan: lepas slot cap per percakapan.
+    if (replyClaim?.claimed) {
+      await releaseConversationReplySlot(db, {
+        tenantId,
+        conversationId,
+        windowStartedAt: replyClaim.windowStartedAt,
+      }).catch(() => undefined);
+    }
     // Tetap catat metering (token terpakai) tetapi tidak mengirim apa pun.
     await recordUsageAndAudit(db, tenantId, {
       agentId: agent.id,
@@ -854,6 +943,11 @@ export async function respondToInboundMessage(
       await executeAgentToolCall(db, ctx, toolCtx, call, {
         publicBaseUrl: input.publicBaseUrl,
         payments: input.payments,
+        // G6: tool handoff_to_human dari runtime selalu membawa
+        // provider aktif agar ringkasan handoff otomatis dibuat
+        // (gagal-aman di core/agent-guards.ts).
+        summaryProvider: provider,
+        summaryModel: agent.model,
       }),
     );
   }
