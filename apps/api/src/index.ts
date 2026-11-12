@@ -57,6 +57,7 @@ import { createLogsRoutes } from "./modules/logs/routes";
 import { createAuditRoutes } from "./modules/audit/routes";
 import { createBroadcastsRoutes } from "./modules/broadcasts/routes";
 import { createBroadcastRecurrenceRoutes } from "./modules/broadcast-recurrences/routes";
+import { createOutboundWebhooksRoutes } from "./modules/outbound-webhooks/routes";
 import { createPostsRoutes } from "./modules/posts/routes";
 import { createWhatsAppTemplatesRoutes } from "./modules/whatsapp-templates/routes";
 import { createCommentsRoutes } from "./modules/comments/routes";
@@ -317,6 +318,15 @@ routes.route("/", createBroadcastsRoutes(authBundle));
 // /tenants/:tenantId/broadcast-recurrences; materialisasi slot oleh
 // penyapu worker menjadi broadcast biasa lewat jalur Fase 7C.
 routes.route("/", createBroadcastRecurrenceRoutes(authBundle));
+// Modul outbound-webhooks (G11) — webhook KELUAR tenant:
+// /tenants/:tenantId/outbound-webhooks; pengiriman peristiwa oleh
+// worker (relay outbox → job fan-out → penyapu percobaan ulang).
+routes.route(
+  "/",
+  createOutboundWebhooksRoutes(authBundle, {
+    channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+  }),
+);
 // Modul posts (Fase 23) — Content Schedule untuk channel Telegram
 // /tenants/:tenantId/posts; penerbitan oleh worker (event outbox
 // post.publish_due → job post.publish). Opsi modul dipakai

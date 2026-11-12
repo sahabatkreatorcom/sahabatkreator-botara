@@ -246,6 +246,15 @@ export const ErrorCodeSchema = z.enum([
   // Gelombang Perbaikan /contacts: berkas impor CSV melewati batas
   // baris per impor (MAX_IMPORT_ROWS di core).
   "CONTACTS_IMPORT_TOO_MANY_ROWS",
+  // Gelombang G11: webhook keluar tenant — URL endpoint ditolak
+  // (format/skema/anti-SSRF), peristiwa di luar katalog, atau batas
+  // jumlah endpoint per tenant tercapai.
+  "WEBHOOK_URL_INVALID",
+  "WEBHOOK_URL_NOT_HTTPS",
+  "WEBHOOK_URL_UNSAFE_HOST",
+  "WEBHOOK_EVENT_UNKNOWN",
+  "WEBHOOK_EVENTS_EMPTY",
+  "WEBHOOK_ENDPOINT_LIMIT",
   "RATE_LIMITED",
   "ENTITLEMENT_EXCEEDED",
   "INTERNAL_ERROR",
