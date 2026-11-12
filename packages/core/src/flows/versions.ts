@@ -23,11 +23,12 @@ import { and, desc, eq, max } from "drizzle-orm";
 import {
   flowVersions,
   flows,
+  type Database,
   type Flow,
   type FlowRun,
   type FlowVersion,
 } from "@sahabat-kreator/db";
-import type { DbTx } from "../tx";
+import { withTenantDb, type DbTx } from "../tx";
 
 import { normalizeFlowGraph, type FlowGraphData } from "./graph";
 
@@ -105,6 +106,31 @@ export async function latestFlowVersion(
     .orderBy(desc(flowVersions.version))
     .limit(1);
   return row ?? null;
+}
+
+/**
+ * Satu baris versi menurut nomornya (baca-saja, ber-scope tenant);
+ * null bila flow/versi tidak ada di tenant ini. Dipakai simulator
+ * (G4) untuk mensimulasikan graf snapshot tanpa menjalankan apa pun.
+ */
+export async function getFlowVersion(
+  db: Database,
+  input: { tenantId: string; flowId: string; version: number },
+): Promise<FlowVersion | null> {
+  return withTenantDb(db, input.tenantId, async (tx) => {
+    const [row] = await tx
+      .select()
+      .from(flowVersions)
+      .where(
+        and(
+          eq(flowVersions.tenantId, input.tenantId),
+          eq(flowVersions.flowId, input.flowId),
+          eq(flowVersions.version, input.version),
+        ),
+      )
+      .limit(1);
+    return row ?? null;
+  });
 }
 
 export interface ResolvedRunGraph {

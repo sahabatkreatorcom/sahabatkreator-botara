@@ -10,6 +10,8 @@
  *   appointment.ts    node book_appointment (Fase 13G)
  *   validate.ts       validasi graf saat aktivasi
  *   versions.ts       snapshot versi + resolusi graf ter-pin (G3)
+ *   simulate.ts       interpreter kering panel uji (G4) — murni,
+ *                     tanpa DB; efek dikumpulkan sebagai data
  *   pagination.ts     util kursor halaman
  *   crud.ts           manajemen flow (sisi API dashboard) + riwayat/
  *                     pemulihan versi
@@ -190,11 +192,24 @@ export {
 export {
   copyFlowGraph,
   flowGraphsEqual,
+  getFlowVersion,
   latestFlowVersion,
   resolveRunGraph,
   snapshotFlowVersion,
   type ResolvedRunGraph,
 } from "./versions";
+export {
+  simulateFlow,
+  simulateFlowRun,
+  type FlowSimContactState,
+  type FlowSimEffect,
+  type FlowSimEffectKind,
+  type FlowSimStatus,
+  type FlowSimStep,
+  type FlowSimulateOptions,
+  type FlowSimulateResult,
+  type SimulateFlowInput,
+} from "./simulate";
 export {
   createFlow,
   instantiateFlowTemplate,
