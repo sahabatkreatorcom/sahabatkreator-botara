@@ -1279,6 +1279,64 @@ diketahui pemilik platform:
   materialisasi. Media pada aturan/item yang sudah selesai atau
   terhapus kembali menjadi kandidat pembersihan seperti biasa.
 
+## Fase Susulan S3 — Analitik per Platform untuk Postingan (2026-11-13)
+
+Postingan yang sudah terbit kini ditarik angka keterlibatan NYATA-nya
+dari API resmi tiap platform (berdasarkan id postingan yang tersimpan
+saat penerbitan) oleh penyapu worker, disimpan sebagai snapshot
+deret waktu, dan ditampilkan per target di halaman Postingan serta
+sebagai agregat per platform di halaman Analitik. Yang bekerja TANPA
+tindakan pemilik apa pun: **YouTube** (statistik video; scope baca
+sudah termasuk koneksi), **Pinterest** (analitik Pin; scope
+`pins:read` sudah ada — hanya akun bisnis yang dilayani Pinterest),
+dan **Bluesky** (hitungan publik AppView, tanpa kredensial).
+Frekuensi tarik konservatif: hanya 30 hari pertama sejak terbit,
+snapshot berhasil disegarkan paling cepat tiap 6 jam.
+
+**Tidak akan pernah ada angkanya — tanpa tindakan pemilik yang bisa
+membukanya:** **Telegram** (Bot API tidak menyediakan statistik per
+pesan channel; angka views/reaksi hanya ada di API pengguna MTProto)
+dan **Google Business** (Google menghentikan metrik per postingan
+lokal pada 2023; API performa hanya menyediakan angka level lokasi).
+Keduanya tampil di UI persis sebagai "tidak tersedia dari platform".
+
+Tindakan pemilik platform (sekali, per platform yang ingin dibaca
+metriknya penuh) — sampai selesai, penarikan terkait tercatat
+`failed`/parsial dengan kode alasannya dan TIDAK mengarang angka:
+
+- **Instagram**: tambahkan izin `instagram_manage_insights` ke
+  aplikasi Meta (App Review bila diperlukan), lalu hubungkan ulang
+  akun Instagram. Sampai itu selesai, yang tampil hanya jumlah suka +
+  komentar dari izin dasar koneksi (ditandai di data sebagai lapis
+  parsial); tayangan/jangkauan/simpan belum terbaca.
+- **Threads**: tambahkan izin `threads_manage_insights` ke aplikasi
+  Threads, lalu hubungkan ulang akun Threads. Sampai itu selesai,
+  metrik Threads tercatat gagal izin.
+- **TikTok**: tambahkan scope `video.list` (produk Display API) ke
+  aplikasi TikTok, lalu hubungkan ulang akun TikTok. Catatan:
+  endpoint metrik hanya melayani VIDEO — postingan foto dan
+  postingan yang id tersimpannya berupa publish_id (status akhir
+  tidak sempat terkonfirmasi) tercatat `tiktok_video_not_found`.
+- **LinkedIn**: ajukan akses produk **Community Management API**
+  untuk mendapatkan scope `r_member_postAnalytics`, lalu hubungkan
+  ulang akun LinkedIn. API statistik postingan anggota memang hanya
+  dibuka lewat program itu; tanpa itu LinkedIn menjawab 403 dan
+  snapshot tercatat `linkedin_forbidden`.
+- **Facebook Page**: pastikan Page token membawa
+  `pages_read_engagement` (izin engagement yang di aplikasi ini
+  opsional di balik persetujuan Meta) agar hitungan reaksi/komentar/
+  bagikan terbaca penuh; tayangan postingan (insights
+  `post_media_view`) secara khusus butuh izin `read_insights` + peran
+  Analyze pada Page — tanpa itu angka engagement tetap tampil dan
+  snapshot membawa catatan `facebook_views_unavailable`.
+
+Catatan perilaku untuk pemilik tenant: angka pada snapshot adalah
+penghitung KUMULATIF platform (total sampai saat tarik), jadi total
+di Analitik memakai nilai terakhir per postingan — bukan penjumlahan
+riwayat. Postingan yang token/koneksinya dicabut akan tercatat
+`failed` pada penarikan berikutnya dan dicoba lagi maksimal sekali
+sehari sampai koneksi pulih atau postingan melewati jendela 30 hari.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -1298,6 +1356,11 @@ tanpa tindakan pemilik baru, hanya catatan perilaku/batas) +
 Fase Susulan S1 (alur persetujuan postingan — tanpa tindakan
 pemilik, hanya catatan perilaku) + Fase Susulan S2 (jadwal berulang
 postingan + antrean rutin — tanpa tindakan pemilik, hanya catatan
-perilaku).
+perilaku) + Fase Susulan S3 (analitik per platform untuk postingan —
+izin/scope tambahan per platform: instagram_manage_insights,
+threads_manage_insights, TikTok video.list, LinkedIn
+r_member_postAnalytics via Community Management API, Meta
+pages_read_engagement/read_insights; Telegram & Google Business
+memang tidak tersedia dari platform).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
