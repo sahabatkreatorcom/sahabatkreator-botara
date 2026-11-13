@@ -1664,6 +1664,113 @@ export class MetaGraphClient extends GraphHttpClient {
     if (!body.id) throw new MetaGraphError(200, null, "missing_post_id");
     return { providerPostId: body.id };
   }
+
+  // -------------------------------------------------------------------------
+  // Analitik postingan (Fase Susulan S3) — arah BACA metrik organik.
+  // Semua metode di seksi ini mengembalikan HANYA angka yang benar-benar
+  // ada di respons platform; field yang tidak dilaporkan dikembalikan
+  // sebagai kunci absen, bukan 0.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Keterlibatan objek post Facebook Page: field objek post
+   * `reactions.summary(true)` (total reaksi → suka pada pemetaan S3),
+   * `comments.summary(true)`, dan `shares`. Butuh Page access token;
+   * hitungan ringkasan mensyaratkan izin baca engagement Page.
+   */
+  async getPagePostEngagement(
+    postId: string,
+  ): Promise<{ likes?: number; comments?: number; shares?: number }> {
+    const body = await this.getJsonParams<{
+      reactions?: { summary?: { total_count?: number } };
+      comments?: { summary?: { total_count?: number } };
+      shares?: { count?: number };
+    }>(`/${encodeURIComponent(postId)}`, {
+      fields:
+        "reactions.summary(true).limit(0),comments.summary(true).limit(0),shares",
+    });
+    const out: { likes?: number; comments?: number; shares?: number } = {};
+    if (typeof body.reactions?.summary?.total_count === "number") {
+      out.likes = body.reactions.summary.total_count;
+    }
+    if (typeof body.comments?.summary?.total_count === "number") {
+      out.comments = body.comments.summary.total_count;
+    }
+    if (typeof body.shares?.count === "number") {
+      out.shares = body.shares.count;
+    }
+    return out;
+  }
+
+  /**
+   * Tayangan post Page dari insights: metrik `post_media_view`
+   * (pengganti level-post yang masih ditawarkan Meta sesudah
+   * pensiunnya keluarga post_impressions per Juni 2026). Butuh izin
+   * `read_insights`. null = metrik tidak ada di respons (bukan 0).
+   */
+  async getPagePostViewCount(postId: string): Promise<number | null> {
+    const body = await this.getJsonParams<{
+      data?: Array<{ values?: Array<{ value?: number }> }>;
+    }>(`/${encodeURIComponent(postId)}/insights`, {
+      metric: "post_media_view",
+    });
+    const value = body.data?.[0]?.values?.[0]?.value;
+    return typeof value === "number" ? value : null;
+  }
+
+  /**
+   * Insights media Instagram (lifetime): views, reach, likes,
+   * comments, shares, saved. Butuh `instagram_manage_insights`;
+   * satu metrik yang tidak didukung jenis media menggagalkan seluruh
+   * panggilan di sisi Meta, jadi himpunan metrik ini adalah yang
+   * berlaku untuk semua jenis media yang diterbitkan Botara.
+   * Mengembalikan peta nama metrik platform → nilai apa adanya;
+   * pemetaan ke kunci ternormalisasi adalah urusan pemanggil.
+   */
+  async getInstagramMediaInsights(
+    mediaId: string,
+  ): Promise<Record<string, number>> {
+    const body = await this.getJsonParams<{
+      data?: Array<{
+        name?: string;
+        values?: Array<{ value?: number }>;
+        total_value?: { value?: number };
+      }>;
+    }>(`/${encodeURIComponent(mediaId)}/insights`, {
+      metric: "views,reach,likes,comments,shares,saved",
+    });
+    const out: Record<string, number> = {};
+    for (const item of body.data ?? []) {
+      const value = item.values?.[0]?.value ?? item.total_value?.value;
+      if (typeof item.name === "string" && typeof value === "number") {
+        out[item.name] = value;
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Hitungan dasar media Instagram dari field objek media
+   * (`like_count`, `comments_count`) — terbaca dengan izin dasar
+   * koneksi. Dipakai adapter S3 sebagai lapis jujur bila insights
+   * ditolak karena scope `instagram_manage_insights` belum ada.
+   */
+  async getInstagramMediaCounts(
+    mediaId: string,
+  ): Promise<{ likes?: number; comments?: number }> {
+    const body = await this.getJsonParams<{
+      like_count?: number;
+      comments_count?: number;
+    }>(`/${encodeURIComponent(mediaId)}`, {
+      fields: "like_count,comments_count",
+    });
+    const out: { likes?: number; comments?: number } = {};
+    if (typeof body.like_count === "number") out.likes = body.like_count;
+    if (typeof body.comments_count === "number") {
+      out.comments = body.comments_count;
+    }
+    return out;
+  }
 }
 
 /** Base URL Threads API — host dan versi terpisah dari Graph Facebook. */
@@ -1819,6 +1926,36 @@ export class ThreadsGraphClient extends GraphHttpClient {
       `${encodeURIComponent(input.replyId)}/manage_reply`,
       { hide: input.hide },
     );
+  }
+
+  /**
+   * Insights media Threads (Fase Susulan S3): views, likes, replies,
+   * reposts, quotes, shares — lifetime, dari `GET /{media-id}/insights`.
+   * Butuh izin `threads_manage_insights`. Mengembalikan peta nama
+   * metrik platform → nilai apa adanya (respons memakai `values[0]`
+   * atau `total_value` tergantung metrik); pemetaan ke kunci
+   * ternormalisasi adalah urusan pemanggil.
+   */
+  async getThreadsMediaInsights(
+    mediaId: string,
+  ): Promise<Record<string, number>> {
+    const body = await this.getJsonParams<{
+      data?: Array<{
+        name?: string;
+        values?: Array<{ value?: number }>;
+        total_value?: { value?: number };
+      }>;
+    }>(`/${encodeURIComponent(mediaId)}/insights`, {
+      metric: "views,likes,replies,reposts,quotes,shares",
+    });
+    const out: Record<string, number> = {};
+    for (const item of body.data ?? []) {
+      const value = item.values?.[0]?.value ?? item.total_value?.value;
+      if (typeof item.name === "string" && typeof value === "number") {
+        out[item.name] = value;
+      }
+    }
+    return out;
   }
 
   // -------------------------------------------------------------------------

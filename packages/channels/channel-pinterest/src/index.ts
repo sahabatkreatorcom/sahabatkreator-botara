@@ -338,6 +338,55 @@ export class PinterestClient {
    * mengikuti urutan provider (board pertama daftar = board pertama
    * akun, dasar fallback penerbit sejak Gelombang 3).
    */
+  /**
+   * Analitik SATU Pin (Fase Susulan S3): `GET /v5/pins/{pin_id}
+   * /analytics?start_date&end_date&metric_types=IMPRESSION,SAVE,
+   * PIN_CLICK,OUTBOUND_CLICK` (scope `pins:read`; hanya akun
+   * bisnis). Respons v5 membawa `all_time.metrics` (agregat seumur
+   * Pin sampai end_date) dan/atau `daily_metrics[]` per hari —
+   * metode ini mengutamakan all_time; bila absen, menjumlahkan
+   * baris harian pada rentang yang diminta. Mengembalikan peta nama
+   * metrik platform → nilai; metrik yang tidak dilaporkan absen.
+   */
+  async getPinAnalytics(input: {
+    accessToken: string;
+    pinId: string;
+    startDate: string;
+    endDate: string;
+  }): Promise<Record<string, number>> {
+    const query = new URLSearchParams({
+      start_date: input.startDate,
+      end_date: input.endDate,
+      metric_types: "IMPRESSION,SAVE,PIN_CLICK,OUTBOUND_CLICK",
+    }).toString();
+    const body = (await this.request(
+      input.accessToken,
+      `/v5/pins/${encodeURIComponent(input.pinId)}/analytics?${query}`,
+      { method: "GET" },
+    )) as {
+      all_time?: { metrics?: Record<string, unknown> };
+      daily_metrics?: Array<{ metrics?: Record<string, unknown> }>;
+    };
+    const out: Record<string, number> = {};
+    const absorb = (
+      metrics: Record<string, unknown> | undefined,
+      sum: boolean,
+    ): void => {
+      if (!metrics) return;
+      for (const [key, value] of Object.entries(metrics)) {
+        if (typeof value === "number") {
+          out[key] = sum ? (out[key] ?? 0) + value : value;
+        }
+      }
+    };
+    if (body.all_time?.metrics) {
+      absorb(body.all_time.metrics, false);
+    } else {
+      for (const day of body.daily_metrics ?? []) absorb(day.metrics, true);
+    }
+    return out;
+  }
+
   async listBoards(accessToken: string): Promise<PinterestBoard[]> {
     const boards: PinterestBoard[] = [];
     let bookmark: string | null = null;

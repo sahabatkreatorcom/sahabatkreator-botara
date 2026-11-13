@@ -205,6 +205,67 @@ export class YouTubeClient {
     this.uploadTimeoutMs = options.uploadTimeoutMs ?? 180_000;
   }
 
+  /**
+   * Statistik SATU video (Fase Susulan S3): `GET /youtube/v3/videos
+   * ?part=statistics&id=<videoId>` (1 unit kuota). Angka Google
+   * berbentuk string; `likeCount` ABSEN bila pemilik menyembunyikan
+   * jumlah suka dan `commentCount` absen bila komentar dinonaktifkan
+   * — keduanya diteruskan sebagai kunci absen, bukan 0. null bila
+   * video tidak ditemukan untuk token ini.
+   */
+  async getVideoStatistics(input: {
+    accessToken: string;
+    videoId: string;
+  }): Promise<{
+    views?: number;
+    likes?: number;
+    comments?: number;
+  } | null> {
+    const query = new URLSearchParams({
+      part: "statistics",
+      id: input.videoId,
+    }).toString();
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/youtube/v3/videos?${query}`,
+        {
+          method: "GET",
+          signal: AbortSignal.timeout(this.timeoutMs),
+          headers: { Authorization: `Bearer ${input.accessToken}` },
+        },
+      );
+    } catch {
+      throw new YouTubeApiError(0, null, "network_error");
+    }
+    if (!response.ok) throw await this.parseError(response);
+    const body = (await response.json().catch(() => ({}))) as {
+      items?: Array<{
+        statistics?: {
+          viewCount?: unknown;
+          likeCount?: unknown;
+          commentCount?: unknown;
+        };
+      }>;
+    };
+    const stats = body.items?.[0]?.statistics;
+    if (!stats) return null;
+    const parse = (value: unknown): number | undefined => {
+      if (typeof value === "string" && /^\d+$/.test(value)) {
+        return Number.parseInt(value, 10);
+      }
+      return typeof value === "number" ? value : undefined;
+    };
+    const out: { views?: number; likes?: number; comments?: number } = {};
+    const views = parse(stats.viewCount);
+    if (views !== undefined) out.views = views;
+    const likes = parse(stats.likeCount);
+    if (likes !== undefined) out.likes = likes;
+    const comments = parse(stats.commentCount);
+    if (comments !== undefined) out.comments = comments;
+    return out;
+  }
+
   private async parseError(response: Response): Promise<YouTubeApiError> {
     let body: GoogleErrorBody = {};
     try {

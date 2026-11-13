@@ -589,6 +589,50 @@ export class TikTokClient {
     };
   }
 
+  /**
+   * Metrik SATU video (Fase Susulan S3): Display API
+   * `POST /v2/video/query/?fields=id,view_count,like_count,
+   * comment_count,share_count` dengan filter video_ids (maks 20).
+   * Mensyaratkan scope `video.list` — tanpa itu TikTok menjawab
+   * envelope error `scope_not_authorized`. Mengembalikan objek video
+   * apa adanya, atau null bila id tidak ditemukan (mis. id yang
+   * tersimpan adalah publish_id, bukan id video publik — atau
+   * postingannya foto, yang memang tidak dilayani endpoint video).
+   */
+  async queryVideoMetrics(
+    accessToken: string,
+    videoId: string,
+  ): Promise<{
+    views?: number;
+    likes?: number;
+    comments?: number;
+    shares?: number;
+  } | null> {
+    const data = await this.request(
+      accessToken,
+      "/v2/video/query/?fields=id,view_count,like_count,comment_count,share_count",
+      { filters: { video_ids: [videoId] } },
+    );
+    const videos = Array.isArray(data.videos) ? data.videos : [];
+    const video = videos[0] as Record<string, unknown> | undefined;
+    if (!video) return null;
+    const out: {
+      views?: number;
+      likes?: number;
+      comments?: number;
+      shares?: number;
+    } = {};
+    if (typeof video.view_count === "number") out.views = video.view_count;
+    if (typeof video.like_count === "number") out.likes = video.like_count;
+    if (typeof video.comment_count === "number") {
+      out.comments = video.comment_count;
+    }
+    if (typeof video.share_count === "number") {
+      out.shares = video.share_count;
+    }
+    return out;
+  }
+
   /** Buka sesi unggah video; mengembalikan publish_id + upload_url. */
   async initVideoPublish(
     accessToken: string,

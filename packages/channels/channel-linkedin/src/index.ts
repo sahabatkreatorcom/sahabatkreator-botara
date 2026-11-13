@@ -261,6 +261,63 @@ export class LinkedInClient {
     return new LinkedInApiError(response.status, description);
   }
 
+  /** GET JSON ke permukaan /rest/*; mengembalikan body JSON terurai. */
+  private async getRest(
+    accessToken: string,
+    path: string,
+  ): Promise<unknown> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        method: "GET",
+        signal: AbortSignal.timeout(this.timeoutMs),
+        headers: this.restHeaders(accessToken),
+      });
+    } catch {
+      throw new LinkedInApiError(0, "network_error");
+    }
+    if (!response.ok) throw await this.parseError(response);
+    return response.json().catch(() => ({}));
+  }
+
+  /**
+   * Statistik postingan anggota (Fase Susulan S3): Member Post
+   * Statistics — `GET /rest/memberCreatorPostAnalytics?q=entity
+   * &entity=(share:<urn>|ugc:<urn>)&queryType=<T>&aggregation=TOTAL`,
+   * SATU panggilan per queryType (IMPRESSION, MEMBERS_REACHED,
+   * REACTION, COMMENT, RESHARE). Mensyaratkan scope
+   * `r_member_postAnalytics` (produk Community Management API);
+   * tanpa itu LinkedIn menjawab 403 dan error-nya diteruskan apa
+   * adanya. Mengembalikan peta queryType → count hanya untuk
+   * queryType yang elemennya benar-benar ada di respons.
+   */
+  async getMemberPostAnalytics(
+    accessToken: string,
+    postUrn: string,
+  ): Promise<Record<string, number>> {
+    const kind = postUrn.startsWith("urn:li:ugcPost:") ? "ugc" : "share";
+    const entity = `(${kind}:${encodeURIComponent(postUrn)})`;
+    const queryTypes = [
+      "IMPRESSION",
+      "MEMBERS_REACHED",
+      "REACTION",
+      "COMMENT",
+      "RESHARE",
+    ] as const;
+    const out: Record<string, number> = {};
+    for (const queryType of queryTypes) {
+      const body = (await this.getRest(
+        accessToken,
+        `/rest/memberCreatorPostAnalytics?q=entity&entity=${entity}&queryType=${queryType}&aggregation=TOTAL`,
+      )) as {
+        elements?: Array<{ count?: unknown }>;
+      };
+      const count = body.elements?.[0]?.count;
+      if (typeof count === "number") out[queryType] = count;
+    }
+    return out;
+  }
+
   /** POST JSON ke permukaan /rest/*; mengembalikan body JSON terurai. */
   private async postRest(
     accessToken: string,

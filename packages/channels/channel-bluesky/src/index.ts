@@ -37,6 +37,13 @@
 
 export const DEFAULT_BLUESKY_API_BASE = "https://bsky.social";
 
+/**
+ * Base AppView publik untuk pembacaan agregat (S3 `getPostCounts`):
+ * host ini melayani `app.bsky.feed.getPosts` tanpa sesi, berbeda dari
+ * entryway PDS di atas yang untuk tulis/sesi.
+ */
+export const DEFAULT_BLUESKY_APPVIEW_BASE = "https://public.api.bsky.app";
+
 /** Koleksi record postingan linimasa Bluesky. */
 export const BLUESKY_POST_COLLECTION = "app.bsky.feed.post";
 
@@ -294,6 +301,58 @@ export class BlueskyClient {
       throw new BlueskyApiError(200, null, "missing_record_uri");
     }
     return { uri: body.uri, cid: body.cid };
+  }
+
+  /**
+   * Hitungan keterlibatan SATU post (Fase Susulan S3):
+   * `GET /xrpc/app.bsky.feed.getPosts?uris=<at-uri>`. Ini metode
+   * AppView — klien untuk panggilan ini dibangun dengan base URL
+   * AppView (publik `https://public.api.bsky.app`), BUKAN entryway
+   * PDS sesi. Hitungan tertanam pada objek post dan bersifat publik:
+   * tanpa kredensial. null bila AppView tidak menemukan post-nya;
+   * field hitungan yang absen tetap absen (bukan 0).
+   */
+  async getPostCounts(uri: string): Promise<{
+    likes?: number;
+    comments?: number;
+    shares?: number;
+    quotes?: number;
+  } | null> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(
+        `${this.baseUrl}/xrpc/app.bsky.feed.getPosts?uris=${encodeURIComponent(uri)}`,
+        {
+          method: "GET",
+          headers: { accept: "application/json" },
+          signal: AbortSignal.timeout(this.timeoutMs),
+        },
+      );
+    } catch {
+      throw new BlueskyApiError(0, null, "network_error");
+    }
+    if (!response.ok) throw await this.parseError(response);
+    const body = (await response.json().catch(() => ({}))) as {
+      posts?: Array<{
+        likeCount?: unknown;
+        replyCount?: unknown;
+        repostCount?: unknown;
+        quoteCount?: unknown;
+      }>;
+    };
+    const post = body.posts?.[0];
+    if (!post) return null;
+    const out: {
+      likes?: number;
+      comments?: number;
+      shares?: number;
+      quotes?: number;
+    } = {};
+    if (typeof post.likeCount === "number") out.likes = post.likeCount;
+    if (typeof post.replyCount === "number") out.comments = post.replyCount;
+    if (typeof post.repostCount === "number") out.shares = post.repostCount;
+    if (typeof post.quoteCount === "number") out.quotes = post.quoteCount;
+    return out;
   }
 }
 

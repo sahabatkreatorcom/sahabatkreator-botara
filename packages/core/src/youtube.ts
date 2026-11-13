@@ -332,3 +332,27 @@ export async function getYouTubePublishAccess(
   }
   return { kind: "ok", accessToken: access.accessToken };
 }
+
+export type YouTubeAnalyticsAccess = YouTubePublishAccess;
+
+/**
+ * Access token untuk membaca STATISTIK video (Fase Susulan S3):
+ * jalur yang sama persis dengan publikasi, tetapi gerbang scopenya
+ * adalah `youtube.readonly` — scope baca yang SUDAH termasuk consent
+ * koneksi YouTube sejak pemisahan layanan Google (0023), jadi
+ * analitik tidak menuntut reconnect apa pun. Bentuk hasilnya sama
+ * dengan akses publikasi (ok / not_connected / scope_missing) supaya
+ * adapter penarikan memetakan kode alasannya dengan cara yang sama.
+ */
+export async function getYouTubeAnalyticsAccess(
+  db: Database,
+  tenantId: string,
+  deps: GoogleDeps,
+): Promise<YouTubeAnalyticsAccess> {
+  const access = await getValidGoogleServiceAccess(db, tenantId, "youtube", deps);
+  if (!access) return { kind: "not_connected" };
+  if (!googleScopesInclude(access.connection.scopes, YOUTUBE_READONLY_SCOPE)) {
+    return { kind: "scope_missing" };
+  }
+  return { kind: "ok", accessToken: access.accessToken };
+}
