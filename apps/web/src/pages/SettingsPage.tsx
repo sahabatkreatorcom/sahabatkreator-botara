@@ -729,7 +729,10 @@ export function SettingsPage({ t, locale }: SettingsPageProps) {
  * kolom kosong saat simpan = pertahankan, tombol hapus = hapus) +
  * test event code. Google Ads: customer ID + conversion action ID +
  * tombol Hubungkan akun Google layanan 'ads' (consent OAuth terpisah;
- * developer token adalah urusan platform, di sini hanya statusnya).
+ * developer token adalah urusan platform, di sini hanya statusnya) +
+ * tombol Putuskan per layanan (S4 — hanya koneksi 'ads' yang dicabut;
+ * customer ID + ID aksi konversi di formulir ini BUKAN hibah OAuth dan
+ * tetap tersimpan).
  * Riwayat pengiriman konversi terbaru ditampilkan sebagai status
  * operasional (terkirim/gagal/dilewati + alasannya).
  */
@@ -760,6 +763,12 @@ function AdConversionsSection({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState<string | null>(null);
+  // Putus akun Google layanan ads (S4): hanya koneksi 'ads' yang
+  // dicabut — customer ID/aksi konversi di formulir ini bertahan.
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [disconnectError, setDisconnectError] = useState<string | null>(
+    null,
+  );
 
   const applyView = useCallback((v: AdConnectionsResponse) => {
     setView(v);
@@ -828,6 +837,22 @@ function AdConversionsSection({
     } catch (err) {
       setConnectError(translateApiError(t, err));
       setConnecting(false);
+    }
+  };
+
+  const disconnectGoogleAds = async () => {
+    if (!window.confirm(t("settings.adConversions.googleDisconnectConfirm"))) {
+      return;
+    }
+    setDisconnecting(true);
+    setDisconnectError(null);
+    try {
+      await api.appointments.googleServiceDisconnect(tenantId, "ads");
+      await load();
+    } catch (err) {
+      setDisconnectError(translateApiError(t, err));
+    } finally {
+      setDisconnecting(false);
     }
   };
 
@@ -999,19 +1024,38 @@ function AdConversionsSection({
                   </p>
                 )}
                 {canManage ? (
-                  <button
-                    type="button"
-                    onClick={() => void connectGoogleAds()}
-                    disabled={connecting}
-                    className="mt-2 rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
-                  >
-                    {view.google.adsAccountConnected
-                      ? t("settings.adConversions.googleReconnectButton")
-                      : t("settings.adConversions.googleConnectButton")}
-                  </button>
+                  <span className="mt-2 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void connectGoogleAds()}
+                      disabled={connecting || disconnecting}
+                      className="rounded-lg bg-accent px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {view.google.adsAccountConnected
+                        ? t("settings.adConversions.googleReconnectButton")
+                        : t("settings.adConversions.googleConnectButton")}
+                    </button>
+                    {view.google.adsAccountConnected ? (
+                      <button
+                        type="button"
+                        onClick={() => void disconnectGoogleAds()}
+                        disabled={connecting || disconnecting}
+                        className="rounded-lg px-3 py-1.5 text-sm font-semibold text-danger disabled:opacity-60"
+                      >
+                        {disconnecting
+                          ? t("settings.adConversions.googleDisconnecting")
+                          : t(
+                              "settings.adConversions.googleDisconnectButton",
+                            )}
+                      </button>
+                    ) : null}
+                  </span>
                 ) : null}
                 {connectError ? (
                   <p className="mt-2 text-sm text-danger">{connectError}</p>
+                ) : null}
+                {disconnectError ? (
+                  <p className="mt-2 text-sm text-danger">{disconnectError}</p>
                 ) : null}
                 <p className="mt-1 text-xs text-muted">
                   {t("settings.adConversions.googleDeveloperTokenNote", {

@@ -241,6 +241,7 @@ import type {
   GoogleCalendarListResponse,
   GoogleConnectStartResponse,
   GoogleService,
+  GoogleServiceConnection,
   GoogleServiceConnectionsResponse,
   UpdateAppointmentAvailabilityRequest,
   UpdateAppointmentServiceRequest,
@@ -2094,6 +2095,21 @@ export const api = {
       return request<GoogleConnectStartResponse>(
         `/api/tenants/${tenantId}/google/${service}/connect`,
         { method: "POST" },
+      );
+    },
+    /**
+     * DELETE /tenants/:tenantId/google/:service → putus koneksi SATU
+     * layanan Google itu saja (owner/admin; Fase Susulan S4). Layanan
+     * lain tidak tersentuh; layanan yang memang tidak terhubung
+     * menjawab 422 GOOGLE_NOT_CONNECTED.
+     */
+    googleServiceDisconnect(
+      tenantId: string,
+      service: GoogleService,
+    ): Promise<GoogleServiceConnection> {
+      return request<GoogleServiceConnection>(
+        `/api/tenants/${tenantId}/google/${service}`,
+        { method: "DELETE" },
       );
     },
     /** GET .../appointments/google/calendars → kalender akun (owner/admin). */

@@ -241,26 +241,49 @@ export function ProviderOAuthStepBlock({
   );
 }
 
-/** Tiga layanan Google yang masing-masing punya koneksi sendiri. */
+/** Layanan Google yang masing-masing punya koneksi sendiri. */
 const GOOGLE_SERVICE_ROWS = [
-  { service: "calendar", nameKey: "channels.googleServiceCalendar" },
-  { service: "youtube", nameKey: "channels.googleServiceYoutube" },
-  { service: "business", nameKey: "channels.googleServiceBusiness" },
+  {
+    service: "calendar",
+    nameKey: "channels.googleServiceCalendar",
+    disconnectConfirmKey: "channels.googleDisconnectConfirmCalendar",
+  },
+  {
+    service: "youtube",
+    nameKey: "channels.googleServiceYoutube",
+    disconnectConfirmKey: "channels.googleDisconnectConfirmYoutube",
+  },
+  {
+    service: "business",
+    nameKey: "channels.googleServiceBusiness",
+    disconnectConfirmKey: "channels.googleDisconnectConfirmBusiness",
+  },
   // G17: layanan Sheets — consent-nya memberi node flow
   // append_sheet_row akses ke spreadsheet akun tenant.
-  { service: "sheets", nameKey: "channels.googleServiceSheets" },
+  {
+    service: "sheets",
+    nameKey: "channels.googleServiceSheets",
+    disconnectConfirmKey: "channels.googleDisconnectConfirmSheets",
+  },
 ] as const;
 
 /**
  * Blok Google di modal Channels — sejak pemisahan Google
- * (2026-11-12) ada TIGA koneksi mandiri, satu per layanan: Calendar
- * (janji temu), YouTube (kanal), Google Business (lokasi). Tiap
- * baris menampilkan status + email akun layanan ITU dan tombol
- * Hubungkan sendiri yang membuka dialog consent SEMPIT layanan itu
- * lewat backend (satu callback untuk ketiganya); sinkron turunan
- * (kanal/lokasi) terjadi di callback OAuth API. Menggantikan blok
- * consent gabungan gelombang Semua OAuth agar billing/kuota/
- * persetujuan API terpisah per layanan.
+ * (2026-11-12) ada koneksi mandiri SATU per layanan: Calendar
+ * (janji temu), YouTube (kanal), Google Business (lokasi), Sheets
+ * (node flow). Tiap baris menampilkan status + email akun layanan
+ * ITU dan tombol Hubungkan sendiri yang membuka dialog consent
+ * SEMPIT layanan itu lewat backend (satu callback untuk semuanya);
+ * sinkron turunan (kanal/lokasi) terjadi di callback OAuth API.
+ * Menggantikan blok consent gabungan gelombang Semua OAuth agar
+ * billing/kuota/persetujuan API terpisah per layanan.
+ *
+ * Fase Susulan S4: baris yang terhubung juga punya tombol Putuskan
+ * SENDIRI (DELETE per layanan di API) — memutus satu layanan tidak
+ * menyentuh layanan lain. Konfirmasi menyebut nama layanan +
+ * konsekuensi persisnya untuk layanan itu (kunci per baris di
+ * GOOGLE_SERVICE_ROWS); untuk YouTube/Business konsekuensinya
+ * termasuk akun channel turunannya yang ikut nonaktif.
  */
 export function GoogleChannelsStepBlock({
   t,
@@ -268,59 +291,92 @@ export function GoogleChannelsStepBlock({
   startingService,
   startError,
   onConnect,
+  disconnectingService,
+  disconnectError,
+  onDisconnect,
 }: {
   t: Translate;
   services: GoogleServiceConnection[] | null;
   startingService: GoogleService | null;
   startError: string | null;
   onConnect: (service: GoogleService) => void;
+  disconnectingService: GoogleService | null;
+  disconnectError: string | null;
+  onDisconnect: (service: GoogleService) => void;
 }) {
   const byService = new Map((services ?? []).map((row) => [row.service, row]));
+  const busy = startingService !== null || disconnectingService !== null;
   return (
     <div className="mt-4">
       <p className="text-sm text-muted">{t("channels.googleConnectBody")}</p>
       <div className="mt-3 space-y-2">
-        {GOOGLE_SERVICE_ROWS.map(({ service, nameKey }) => {
-          const status = byService.get(service);
-          const starting = startingService === service;
-          return (
-            <div
-              key={service}
-              className="flex items-center justify-between gap-3 rounded-lg border border-line bg-elevated/40 p-3"
-            >
-              <div className="min-w-0 text-sm">
-                <p className="font-medium text-ink">{t(nameKey)}</p>
-                {status?.connected ? (
-                  <span className="text-ink">
-                    {t("channels.googleConnectedAs", {
-                      email: status.accountEmail ?? "—",
-                    })}
-                  </span>
-                ) : (
-                  <span className="text-muted">
-                    {t("channels.googleNotConnected")}
-                  </span>
-                )}
-              </div>
-              <button
-                type="button"
-                disabled={startingService !== null}
-                onClick={() => onConnect(service)}
-                className="shrink-0 rounded-md bg-accent px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-60"
+        {GOOGLE_SERVICE_ROWS.map(
+          ({ service, nameKey, disconnectConfirmKey }) => {
+            const status = byService.get(service);
+            const starting = startingService === service;
+            const disconnecting = disconnectingService === service;
+            return (
+              <div
+                key={service}
+                className="flex items-center justify-between gap-3 rounded-lg border border-line bg-elevated/40 p-3"
               >
-                {starting
-                  ? t("channels.googleConnecting")
-                  : status?.connected
-                    ? t("channels.googleReconnectButton")
-                    : t("channels.googleConnectButton")}
-              </button>
-            </div>
-          );
-        })}
+                <div className="min-w-0 text-sm">
+                  <p className="font-medium text-ink">{t(nameKey)}</p>
+                  {status?.connected ? (
+                    <span className="text-ink">
+                      {t("channels.googleConnectedAs", {
+                        email: status.accountEmail ?? "—",
+                      })}
+                    </span>
+                  ) : (
+                    <span className="text-muted">
+                      {t("channels.googleNotConnected")}
+                    </span>
+                  )}
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  {status?.connected ? (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        if (window.confirm(t(disconnectConfirmKey))) {
+                          onDisconnect(service);
+                        }
+                      }}
+                      className="rounded-md px-3.5 py-2 text-sm font-semibold text-danger disabled:opacity-60"
+                    >
+                      {disconnecting
+                        ? t("channels.googleDisconnecting")
+                        : t("channels.googleDisconnectButton")}
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => onConnect(service)}
+                    className="rounded-md bg-accent px-3.5 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                  >
+                    {starting
+                      ? t("channels.googleConnecting")
+                      : status?.connected
+                        ? t("channels.googleReconnectButton")
+                        : t("channels.googleConnectButton")}
+                  </button>
+                </div>
+              </div>
+            );
+          },
+        )}
       </div>
       {startError ? (
         <div className="mt-2">
           <FieldError message={startError} />
+        </div>
+      ) : null}
+      {disconnectError ? (
+        <div className="mt-2">
+          <FieldError message={disconnectError} />
         </div>
       ) : null}
     </div>

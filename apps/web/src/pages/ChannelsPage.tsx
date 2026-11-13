@@ -204,6 +204,13 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
   const [googleStartError, setGoogleStartError] = useState<string | null>(
     null,
   );
+  // Putus per layanan Google (S4): layanan yang sedang diputus +
+  // galatnya (nama dibedakan dari state disconnect channel di bawah).
+  const [googleDisconnectingService, setGoogleDisconnectingService] =
+    useState<GoogleService | null>(null);
+  const [googleDisconnectError, setGoogleDisconnectError] = useState<
+    string | null
+  >(null);
   const [copiedWebhookField, setCopiedWebhookField] = useState<string | null>(
     null,
   );
@@ -352,6 +359,7 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
     setThreadsOAuthStartError(null);
     setProviderOAuthStartError(null);
     setGoogleStartError(null);
+    setGoogleDisconnectError(null);
     setBlueskyError(null);
   }, [connectStep]);
 
@@ -806,6 +814,33 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
           : t("errors.generic"),
       );
       setGoogleStartingService(null);
+    }
+  };
+
+  /**
+   * Putus koneksi SATU layanan Google (Fase Susulan S4) — konfirmasi
+   * (nama layanan + konsekuensi persisnya) sudah ditanyakan blok;
+   * di sini panggil DELETE per layanan lalu segarkan keadaan blok
+   * DAN daftar channel (akun turunan YouTube/Business ikut berubah
+   * status menjadi terputus di server).
+   */
+  const handleGoogleDisconnect = async (service: GoogleService) => {
+    if (!tenantId || googleDisconnectingService) return;
+    setGoogleDisconnectingService(service);
+    setGoogleDisconnectError(null);
+    try {
+      await api.appointments.googleServiceDisconnect(tenantId, service);
+      const status = await api.appointments.googleServicesStatus(tenantId);
+      setGoogleServices(status.services);
+      void load();
+    } catch (err) {
+      setGoogleDisconnectError(
+        err instanceof ApiClientError
+          ? translateApiError(t, err)
+          : t("errors.generic"),
+      );
+    } finally {
+      setGoogleDisconnectingService(null);
     }
   };
 
@@ -1889,6 +1924,11 @@ export function ChannelsPage({ t, locale }: ChannelsPageProps) {
                     startingService={googleStartingService}
                     startError={googleStartError}
                     onConnect={(service) => void handleGoogleConnect(service)}
+                    disconnectingService={googleDisconnectingService}
+                    disconnectError={googleDisconnectError}
+                    onDisconnect={(service) =>
+                      void handleGoogleDisconnect(service)
+                    }
                   />
                 ) : null}
 
