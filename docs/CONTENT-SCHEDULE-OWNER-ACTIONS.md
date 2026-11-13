@@ -1398,6 +1398,43 @@ Catatan perilaku untuk pemilik tenant:
   Sesudah token Botara terhapus, Botara tidak bisa lagi memakai
   izin itu.
 
+## Fase Susulan S5 — Perapihan Infrastruktur (2026-11-13)
+
+Hasil audit server 2026-11-13 (dibaca langsung dari VPS): tunnel
+Cloudflare berjalan dengan `--token-file` (tunnel terkelola
+jarak jauh — aturan ingress hidup di dashboard Cloudflare, BUKAN
+berkas lokal server); service host `postgresql` (127.0.0.1:5432),
+`redis-server` (127.0.0.1:6379), dan `nginx` (port 80) berstatus
+aktif tetapi TIDAK dipakai tumpukan Docker Botara (DB/Redis
+memakai container sendiri; tunnel mengarah ke port web container
+secara langsung). CheatClipPro berjalan mandiri (uvicorn
+127.0.0.1:8000) dan tidak bergantung pada ketiganya. Dua langkah
+di bawah memerlukan tangan pemilik; urutannya penting.
+
+- **Langkah 1 (pemilik, dashboard Cloudflare):** Zero Trust →
+  Networks → Tunnels → tunnel yang melayani botara.my.id →
+  Public Hostnames: ubah service `botara.my.id` dari
+  `http://localhost:8080` menjadi `http://localhost:5180`.
+  Periksa juga hostname lain pada tunnel yang sama (bila ada
+  yang mengarah ke `localhost:8080`, ubah dengan cara yang sama).
+  Sesudah disimpan, pastikan https://botara.my.id tetap menjawab
+  200.
+- **Langkah 2 (beri tahu Muse sesudah Langkah 1):** Muse
+  menghapus port sementara `127.0.0.1:8080` dari
+  `deploy/docker-compose.prod.yml` di server (diff lokal 1 baris
+  sejak go-live), membuat ulang container web, dan memverifikasi
+  situs + `/ready` tetap sehat lewat 5180. JANGAN menghapus port
+  8080 sebelum Langkah 1 selesai — situs akan putus.
+- **Langkah 3 (pemilik, sudo di VPS — disposisi service host
+  lama):** pertama pastikan tidak ada hostname tunnel lain yang
+  mengarah ke `localhost:80` (nginx) — bila ada, pertahankan
+  nginx. Lalu: `sudo systemctl stop postgresql redis-server
+  nginx` dan `sudo systemctl disable postgresql redis-server
+  nginx`. Amati satu hari; pencopotan paket sesudahnya opsional.
+  Bila Botara/cheatclippro terganggu sesudah langkah ini
+  (seharusnya tidak), nyalakan lagi dengan `sudo systemctl
+  enable --now <nama-service>`.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -1424,6 +1461,10 @@ r_member_postAnalytics via Community Management API, Meta
 pages_read_engagement/read_insights; Telegram & Google Business
 memang tidak tersedia dari platform) + Fase Susulan S4 (tombol
 putuskan per layanan Google — tanpa tindakan pemilik platform,
-hanya catatan perilaku pemutusan per layanan).
+hanya catatan perilaku pemutusan per layanan) + Fase Susulan
+S5 (perapihan infrastruktur — tindakan pemilik: ubah ingress
+tunnel di dashboard Cloudflare ke 5180 lalu beri tahu Muse
+untuk mencabut port 8080 di server; disposisi service host
+postgresql/redis-server/nginx lama lewat sudo).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._
