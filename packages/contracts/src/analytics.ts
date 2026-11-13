@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+import { ChannelProviderSchema } from "./inbox";
+import { PostMetricValuesSchema } from "./posts";
+
 // ---------------------------------------------------------------------------
 // Fase 9B — Analitik pemakaian AI (dasbor /analytics)
 // ---------------------------------------------------------------------------
@@ -91,4 +94,54 @@ export const ReplyTimeReportResponseSchema = z.object({
 });
 export type ReplyTimeReportResponse = z.infer<
   typeof ReplyTimeReportResponseSchema
+>;
+
+// ---------------------------------------------------------------------------
+// Fase Susulan S3 — Agregat analitik postingan per platform
+// ---------------------------------------------------------------------------
+
+/**
+ * Satu titik tren harian: total metrik per platform pada akhir hari
+ * itu (tanggal UTC), dihitung dari snapshot dengan pola
+ * carry-forward — nilai satu postingan pada satu hari adalah
+ * snapshot `ok` TERAKHIR pada atau sebelum akhir hari itu. Metrik
+ * yang tidak pernah dilaporkan platform apa pun pada hari itu absen
+ * dari `metrics` (bukan 0 karangan).
+ */
+export const PostPlatformAnalyticsDayPointSchema = z.object({
+  date: z.string(),
+  metrics: PostMetricValuesSchema,
+});
+export type PostPlatformAnalyticsDayPoint = z.infer<
+  typeof PostPlatformAnalyticsDayPointSchema
+>;
+
+/**
+ * Agregat satu platform dari snapshot yang BENAR-BENAR tertarik:
+ * - `postsWithSnapshots`: postingan terbit pada jendela yang punya
+ *   ≥1 snapshot (status apa pun).
+ * - `postsWithMetrics`: yang snapshot terbarunya `ok` — hanya ini
+ *   yang menyumbang `totals` dan `daily`.
+ * - `totals`: jumlah nilai snapshot TERBARU per postingan. Bukan
+ *   penjumlahan riwayat — snapshot adalah penghitung kumulatif
+ *   platform, menjumlah antar-snapshot akan menggandakan angka.
+ */
+export const PostPlatformAnalyticsEntrySchema = z.object({
+  provider: ChannelProviderSchema,
+  metricsSupported: z.boolean(),
+  postsWithSnapshots: z.number().int().nonnegative(),
+  postsWithMetrics: z.number().int().nonnegative(),
+  totals: PostMetricValuesSchema,
+  daily: z.array(PostPlatformAnalyticsDayPointSchema),
+});
+export type PostPlatformAnalyticsEntry = z.infer<
+  typeof PostPlatformAnalyticsEntrySchema
+>;
+
+export const PostPlatformAnalyticsResponseSchema = z.object({
+  days: z.number().int().positive(),
+  platforms: z.array(PostPlatformAnalyticsEntrySchema),
+});
+export type PostPlatformAnalyticsResponse = z.infer<
+  typeof PostPlatformAnalyticsResponseSchema
 >;

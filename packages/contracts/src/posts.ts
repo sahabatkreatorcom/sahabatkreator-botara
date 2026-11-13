@@ -1310,3 +1310,214 @@ export const PostQueueFiringListQuerySchema = z.object({
 export type PostQueueFiringListQuery = z.infer<
   typeof PostQueueFiringListQuerySchema
 >;
+
+// ---------------------------------------------------------------------------
+// Fase Susulan S3 — Analitik per platform untuk postingan
+// ---------------------------------------------------------------------------
+
+/**
+ * Kunci metrik ternormalisasi lintas platform. Pemetaan dari nama
+ * metrik asli platform ke kunci ini terjadi SATU kali di adapter
+ * penarikan worker (mis. Threads `replies` → `comments`, LinkedIn
+ * IMPRESSION → `views`, Pinterest IMPRESSION → `views`); UI dan
+ * agregat hanya pernah melihat kunci di daftar ini.
+ */
+export const PostMetricKeySchema = z.enum([
+  "views",
+  "likes",
+  "comments",
+  "shares",
+  "reach",
+  "saves",
+  "clicks",
+  "reposts",
+  "quotes",
+  "outboundClicks",
+]);
+export type PostMetricKey = z.infer<typeof PostMetricKeySchema>;
+export const POST_METRIC_KEYS: readonly PostMetricKey[] =
+  PostMetricKeySchema.options;
+
+/**
+ * Nilai metrik satu snapshot. KEJUJURAN adalah kontraknya: hanya
+ * kunci yang BENAR-BENAR dikembalikan API platform pada penarikan
+ * itu yang hadir; metrik yang tidak dilaporkan platform (mis. suka
+ * yang disembunyikan pemilik video YouTube) ABSEN — bukan 0. Skema
+ * kawat memakai record string bebas; produsen (core) menyaring
+ * kunci ke POST_METRIC_KEYS sebelum menyimpan.
+ */
+export const PostMetricValuesSchema = z.record(
+  z.string(),
+  z.number().int().nonnegative(),
+);
+export type PostMetricValues = Partial<Record<PostMetricKey, number>>;
+
+/**
+ * Deklarasi kemampuan ANALITIK per provider — pasangan
+ * POST_PROVIDER_CAPABILITIES untuk arah baca. Dua jenis nilai:
+ * - `metricsSupported: false` = platform memang TIDAK menawarkan
+ *   metrik untuk postingan organik lewat API resmi (Telegram Bot API
+ *   tidak mengekspos statistik per pesan; Google menghentikan
+ *   metrik per postingan lokal Business Profile pada 2023). UI
+ *   menampilkan keadaan ini apa adanya; worker menulis SATU snapshot
+ *   `unavailable` dan tidak pernah mencoba lagi.
+ * - `requiresScope`: izin/scope yang dibutuhkan API metrik di luar
+ *   yang diminta jalur koneksi saat capability ini ditulis. null =
+ *   koneksi yang ada sudah cukup (Bluesky publik tanpa kredensial;
+ *   YouTube `youtube.readonly` sudah termasuk consent; Pinterest
+ *   `pins:read` sudah termasuk). Nilai non-null TIDAK membuat kode
+ *   meminta scope itu diam-diam — kebutuhan pemiliknya dicatat di
+ *   docs/CONTENT-SCHEDULE-OWNER-ACTIONS.md (aturan F5); sampai
+ *   terpenuhi, penarikan tercatat `failed` dengan kode alasan persis.
+ */
+export const PostProviderMetricsCapabilitySchema = z.object({
+  metricsSupported: z.boolean(),
+  metricKeys: z.array(PostMetricKeySchema),
+  requiresScope: z.string().nullable(),
+});
+export type PostProviderMetricsCapability = z.infer<
+  typeof PostProviderMetricsCapabilitySchema
+>;
+
+export const POST_PROVIDER_METRICS_CAPABILITIES: Record<
+  ChannelProvider,
+  PostProviderMetricsCapability
+> = {
+  telegram: {
+    // Bot API tidak menyediakan statistik per pesan channel (views/
+    // reaksi hanya ada di API MTProto sisi pengguna) — tidak tersedia.
+    metricsSupported: false,
+    metricKeys: [],
+    requiresScope: null,
+  },
+  messenger: {
+    // Facebook Page: field objek post (reactions/comments/shares)
+    // + insights post_media_view untuk tayangan.
+    metricsSupported: true,
+    metricKeys: ["likes", "comments", "shares", "views"],
+    requiresScope: "pages_read_engagement",
+  },
+  instagram: {
+    // Media insights (views/reach/likes/comments/shares/saved).
+    metricsSupported: true,
+    metricKeys: ["views", "reach", "likes", "comments", "shares", "saves"],
+    requiresScope: "instagram_manage_insights",
+  },
+  threads: {
+    // Media insights (views/likes/replies/reposts/quotes/shares);
+    // replies dipetakan ke comments, sisanya kunci sendiri.
+    metricsSupported: true,
+    metricKeys: ["views", "likes", "comments", "shares", "reposts", "quotes"],
+    requiresScope: "threads_manage_insights",
+  },
+  bluesky: {
+    // app.bsky.feed.getPosts di AppView publik — hitungan tertanam
+    // pada post, tanpa kredensial.
+    metricsSupported: true,
+    metricKeys: ["likes", "comments", "shares", "quotes"],
+    requiresScope: null,
+  },
+  youtube: {
+    // Data API videos.list part=statistics; scope youtube.readonly
+    // SUDAH termasuk consent koneksi Google yang ada.
+    metricsSupported: true,
+    metricKeys: ["views", "likes", "comments"],
+    requiresScope: null,
+  },
+  linkedin: {
+    // Member Post Statistics (memberCreatorPostAnalytics) — butuh
+    // scope r_member_postAnalytics dari program Community
+    // Management API; token koneksi saat ini tidak membawanya.
+    metricsSupported: true,
+    metricKeys: ["views", "reach", "likes", "comments", "shares"],
+    requiresScope: "r_member_postAnalytics",
+  },
+  pinterest: {
+    // Pin analytics v5; scope pins:read SUDAH termasuk koneksi.
+    // Hanya akun bisnis yang dilayani API ini.
+    metricsSupported: true,
+    metricKeys: ["views", "saves", "clicks", "outboundClicks"],
+    requiresScope: null,
+  },
+  google_business: {
+    // Metrik per postingan lokal dihentikan Google (metode
+    // reportInsights pensiun; Performance API hanya level lokasi) —
+    // tidak tersedia dari platform.
+    metricsSupported: false,
+    metricKeys: [],
+    requiresScope: null,
+  },
+  tiktok: {
+    // Display API video/query (view/like/comment/share count) —
+    // butuh scope video.list di luar koneksi publikasi saat ini.
+    metricsSupported: true,
+    metricKeys: ["views", "likes", "comments", "shares"],
+    requiresScope: "video.list",
+  },
+  whatsapp: {
+    // Bukan sasaran linimasa — tidak ada postingan untuk diukur.
+    metricsSupported: false,
+    metricKeys: [],
+    requiresScope: null,
+  },
+  webchat: {
+    metricsSupported: false,
+    metricKeys: [],
+    requiresScope: null,
+  },
+};
+
+/** Keadaan satu penarikan metrik (baris snapshot deret-waktu). */
+export const PostAnalyticsStatusSchema = z.enum([
+  "ok",
+  "unavailable",
+  "failed",
+]);
+export type PostAnalyticsStatus = z.infer<typeof PostAnalyticsStatusSchema>;
+
+/**
+ * Satu snapshot metrik per target postingan. Snapshot TIDAK PERNAH
+ * ditimpa: tiap penarikan menambah baris baru, dan permukaan baca
+ * memakai yang terbaru. `metrics` null kecuali status `ok`;
+ * `reason` adalah kode alasan persis untuk `unavailable`/`failed`
+ * (mis. `platform_metrics_unsupported`, `tiktok_scope_missing`),
+ * dan boleh terisi pada `ok` untuk catatan parsial (mis. tayangan
+ * Facebook tidak terbaca tanpa izin insights).
+ */
+export const PostAnalyticsSnapshotSchema = z.object({
+  postId: z.string().uuid(),
+  provider: ChannelProviderSchema,
+  status: PostAnalyticsStatusSchema,
+  reason: z.string().nullable(),
+  metrics: PostMetricValuesSchema.nullable(),
+  fetchedAt: z.string().datetime(),
+});
+export type PostAnalyticsSnapshot = z.infer<
+  typeof PostAnalyticsSnapshotSchema
+>;
+
+/** Batch snapshot TERBARU per postingan — permukaan daftar /posts. */
+export const PostAnalyticsLatestResponseSchema = z.object({
+  items: z.array(PostAnalyticsSnapshotSchema),
+});
+export type PostAnalyticsLatestResponse = z.infer<
+  typeof PostAnalyticsLatestResponseSchema
+>;
+
+/** Riwayat snapshot satu postingan (terbaru dulu) — permukaan detail. */
+export const PostAnalyticsHistoryResponseSchema = z.object({
+  postId: z.string().uuid(),
+  provider: ChannelProviderSchema.nullable(),
+  items: z.array(PostAnalyticsSnapshotSchema),
+});
+export type PostAnalyticsHistoryResponse = z.infer<
+  typeof PostAnalyticsHistoryResponseSchema
+>;
+
+export const PostAnalyticsLatestQuerySchema = z.object({
+  /** Daftar id postingan (koma-terpisah) yang diminta snapshot terbarunya. */
+  postIds: z.string().min(1).max(8192),
+});
+export type PostAnalyticsLatestQuery = z.infer<
+  typeof PostAnalyticsLatestQuerySchema
+>;

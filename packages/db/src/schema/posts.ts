@@ -645,3 +645,81 @@ export type PostQueueSlotStatus = PostQueueSlot["status"];
 export type PostQueueSlotFiring = typeof postQueueSlotFirings.$inferSelect;
 export type NewPostQueueSlotFiring = typeof postQueueSlotFirings.$inferInsert;
 export type PostQueueSlotFiringStatus = PostQueueSlotFiring["status"];
+
+/**
+ * Keadaan satu penarikan metrik postingan (Fase Susulan S3):
+ * - `ok`          : API platform mengembalikan angka; `metrics` terisi
+ *                   (hanya kunci yang benar-benar dilaporkan).
+ * - `unavailable` : platform memang tidak menawarkan metrik postingan
+ *                   organik lewat API resmi (Telegram, Google
+ *                   Business) — terminal, ditulis sekali per postingan.
+ * - `failed`      : penarikan dicoba dan gagal (izin/scope belum ada,
+ *                   token bermasalah, provider menolak); `reason`
+ *                   membawa kode persisnya dan penyapu mencoba lagi
+ *                   sesudah jeda yang lebih panjang.
+ */
+export const postMetricSnapshotStatusEnum = pgEnum(
+  "post_metric_snapshot_status",
+  ["ok", "unavailable", "failed"],
+);
+
+/**
+ * Snapshot DERET WAKTU metrik satu target postingan (Fase Susulan S3,
+ * migrasi 0048). Satu baris `posts` = satu sasaran = satu postingan
+ * platform, dan tiap penarikan penyapu worker MENAMBAH satu baris di
+ * sini — tidak pernah menimpa — supaya tren bisa dirakit dari
+ * riwayat, bukan dari satu angka terakhir saja.
+ *
+ * - `provider` didenormalisasi dari percakapan sasaran saat
+ *   penarikan: agregat per platform tidak perlu join, dan riwayat
+ *   tetap benar walau percakapan berubah sesudahnya.
+ * - `metrics` jsonb bentuk `PostMetricValues` kontrak: kunci metrik
+ *   ternormalisasi → hitungan kumulatif platform. NULL kecuali
+ *   status `ok`. Kunci yang tidak dilaporkan platform ABSEN dari
+ *   objek — bukan 0 (0 karangan dilarang di seluruh gelombang ini).
+ * - `reason` varchar 128 cermin `posts.error_code`: kode aman tanpa
+ *   token/URL. Pada status `ok` boleh terisi sebagai catatan parsial
+ *   (mis. tayangan Facebook tak terbaca tanpa izin insights).
+ */
+export const postMetricSnapshots = pgTable(
+  "post_metric_snapshots",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    postId: uuid("post_id")
+      .notNull()
+      .references(() => posts.id, { onDelete: "cascade" }),
+    /** Provider sasaran saat penarikan (varchar — cermin conversations.provider). */
+    provider: varchar("provider", { length: 32 }).notNull(),
+    status: postMetricSnapshotStatusEnum("status").notNull(),
+    reason: varchar("reason", { length: 128 }),
+    metrics: jsonb("metrics").$type<Record<string, number>>(),
+    /** Stempel penarikan; deret waktu diurutkan kolom ini. */
+    fetchedAt: timestamp("fetched_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("post_metric_snapshots_tenant_id_idx").on(t.tenantId),
+    // Snapshot terbaru per postingan + riwayat satu postingan.
+    index("post_metric_snapshots_post_fetched_idx").on(
+      t.postId,
+      t.fetchedAt,
+    ),
+    // Agregat per platform pada jendela waktu.
+    index("post_metric_snapshots_tenant_provider_fetched_idx").on(
+      t.tenantId,
+      t.provider,
+      t.fetchedAt,
+    ),
+  ],
+);
+
+export type PostMetricSnapshot = typeof postMetricSnapshots.$inferSelect;
+export type NewPostMetricSnapshot = typeof postMetricSnapshots.$inferInsert;
+export type PostMetricSnapshotStatus = PostMetricSnapshot["status"];

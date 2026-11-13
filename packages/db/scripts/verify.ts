@@ -141,7 +141,9 @@ console.log(`    jumlah tabel public: ${tablesRes.rows[0].count}`);
 // + 5 tabel Fase Susulan S2 / migrasi 0047 (post_recurrence_rules,
 //   post_recurrence_occurrences, post_queue_items, post_queue_slots,
 //   post_queue_slot_firings — jadwal berulang postingan + antrean rutin)
-assert.equal(Number(tablesRes.rows[0].count), 93);
+// + 1 tabel Fase Susulan S3 / migrasi 0048 (post_metric_snapshots —
+//   snapshot deret waktu metrik postingan per platform)
+assert.equal(Number(tablesRes.rows[0].count), 94);
 
 // ---------- 2. Seed 2 tenant ----------
 await db.query(
@@ -359,7 +361,13 @@ const policies = await db.query<{ count: string }>(
 // `post_queue_items` (tenant_isolation), `post_queue_slots`
 // (tenant_isolation + system_post_recurrence_scan), dan
 // `post_queue_slot_firings` (tenant_isolation) → 123.
-assert.equal(Number(policies.rows[0].count), 123);
+//
+// Migrasi 0048 (Fase Susulan S3 — analitik per platform) menambah
+// `post_metric_snapshots` (tenant_isolation +
+// system_post_analytics_scan) dan policy
+// `system_post_analytics_scan` pada `posts` untuk penyapu worker
+// → 126.
+assert.equal(Number(policies.rows[0].count), 126);
 console.log(`[4] policy RLS terpasang: ${policies.rows[0].count} (termasuk system_relay outbox)`);
 
 await db.exec(`
