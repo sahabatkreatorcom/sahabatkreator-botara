@@ -72,6 +72,7 @@ import {
   type DeliveryPoller,
 } from "./delivery";
 import { publishPost } from "./delivery/post-publisher";
+import { processPostAnalytics } from "./delivery/post-metrics";
 import {
   AGENT_RESPOND_JOB,
   AUTOMATION_EVALUATE_JOB,
@@ -1586,6 +1587,51 @@ const postRecurrenceTimer = setInterval(
 void postRecurrenceTick();
 
 // ---------------------------------------------------------------------------
+// Analitik postingan (S3): penyapu penarikan metrik per platform —
+// memindai postingan terbit yang jatuh tempo tarik lintas tenant
+// (lengan baca system_post_analytics_scan; matematika jadwalnya di
+// core post-analytics: jendela 30 hari sejak terbit, snapshot ok
+// disegarkan ≥6 jam, gagal dicoba lagi ≥24 jam, unavailable
+// terminal) lalu `processPostAnalytics` menarik angka dari API resmi
+// tiap platform lewat MetricsAdapter dan MENAMBAH snapshot deret
+// waktu. Sapuan tiap 15 menit: angka organik tidak butuh kesegaran
+// menit, dan kuota/batas laju platform dihormati lewat batas batch +
+// jeda antar target di orkestrator.
+const POST_ANALYTICS_INTERVAL_MS = 15 * 60_000;
+let postAnalyticsRunning = false;
+async function postAnalyticsTick(): Promise<void> {
+  if (postAnalyticsRunning) return;
+  postAnalyticsRunning = true;
+  try {
+    const result = await processPostAnalytics(db, {
+      channelTokenSecret: env.CHANNEL_TOKEN_SECRET,
+      metaApiBase: env.META_API_BASE,
+      metaGraphApiVersion: META_GRAPH_API_VERSION,
+      threadsApiBase: env.THREADS_API_BASE,
+      blueskyAppViewBase: env.BLUESKY_APPVIEW_API_BASE,
+      google: googleDeps,
+      linkedinApiBase: env.LINKEDIN_API_BASE,
+      pinterestApiBase: env.PINTEREST_API_BASE,
+      tiktokApiBase: env.TIKTOK_API_BASE,
+    });
+    if (result.scanned > 0) {
+      console.log(
+        `[worker] analitik postingan: ${result.scanned} target jatuh tempo — ok=${result.ok} unavailable=${result.unavailable} failed=${result.failed} skipped=${result.skipped}`,
+      );
+    }
+  } catch (err) {
+    console.error("[worker] analitik postingan gagal (akan dicoba lagi):", err);
+  } finally {
+    postAnalyticsRunning = false;
+  }
+}
+const postAnalyticsTimer = setInterval(
+  () => void postAnalyticsTick(),
+  POST_ANALYTICS_INTERVAL_MS,
+);
+void postAnalyticsTick();
+
+// ---------------------------------------------------------------------------
 // Webhook keluar (G11): penyapu percobaan ulang pengiriman — memindai
 // baris `outbound_webhook_deliveries` yang jatuh tempo lintas tenant
 // (lengan baca system_outbound_webhook_scan), lalu tiap baris dicoba
@@ -1898,6 +1944,7 @@ async function shutdown(signal: string): Promise<void> {
   clearInterval(broadcastReconcileTimer);
   clearInterval(broadcastRecurrenceTimer);
   clearInterval(postRecurrenceTimer);
+  clearInterval(postAnalyticsTimer);
   clearInterval(outboundWebhookRetryTimer);
   clearInterval(tokenLifecycleTimer);
   clearInterval(threadsTokenLifecycleTimer);

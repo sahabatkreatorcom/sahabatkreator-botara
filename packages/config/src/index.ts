@@ -116,6 +116,13 @@ const EnvSchema = z.object({
    */
   BLUESKY_API_BASE: z.string().url().optional(),
   /**
+   * Base URL AppView Bluesky untuk pembacaan agregat publik
+   * (analitik postingan S3: `app.bsky.feed.getPosts`). Default
+   * https://public.api.bsky.app — host BERBEDA dari entryway PDS di
+   * atas; override hanya untuk uji mock.
+   */
+  BLUESKY_APPVIEW_API_BASE: z.string().url().optional(),
+  /**
    * Base URL LinkedIn API (Posts API). Default https://api.linkedin.com;
    * override hanya untuk uji mock — pola yang sama dengan
    * META_API_BASE/BLUESKY_API_BASE. Versi REST bulanan ter-pin di
