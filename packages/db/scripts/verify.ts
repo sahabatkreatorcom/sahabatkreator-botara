@@ -2567,8 +2567,12 @@ function oneHotVector(index: number): string {
   // post_queue_slots (tenant_isolation +
   // system_post_recurrence_scan), post_queue_slot_firings
   // (tenant_isolation) → tabel 93, policy 123.
-  assert.equal(counts.rows[0].tables, "93");
-  assert.equal(counts.rows[0].policies, "123");
+  // 2026-11-13: migrasi 0048 (Fase Susulan S3 — analitik per
+  // platform untuk postingan) menambah post_metric_snapshots
+  // (tenant_isolation + system_post_analytics_scan) dan policy
+  // system_post_analytics_scan pada posts → tabel 94, policy 126.
+  assert.equal(counts.rows[0].tables, "94");
+  assert.equal(counts.rows[0].policies, "126");
   console.log(
     "[34] Fase 11A+11A.1: baseline squash — contacts.avatar_url & messages.provider_cost tidak ada (dijatuhkan 0040), 12 index FK terpasang, tabel & policy global sesuai hitungan berjalan: OK",
   );
