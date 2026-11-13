@@ -1337,6 +1337,67 @@ riwayat. Postingan yang token/koneksinya dicabut akan tercatat
 `failed` pada penarikan berikutnya dan dicoba lagi maksimal sekali
 sehari sampai koneksi pulih atau postingan melewati jendela 30 hari.
 
+## Fase Susulan S4 — Tombol Putuskan per Layanan Google (2026-11-13)
+
+Sejak pemisahan Google (migrasi 0023), koneksi Google tenant hidup
+sebagai baris per layanan di `google_connections` — kini LIMA
+layanan: Calendar, YouTube, Google Business, Google Ads (G16), dan
+Google Sheets (G17). Celahnya: UI hanya bisa MENGHUBUNGKAN; memutus
+satu layanan tanpa menyentuh yang lain tidak bisa (satu-satunya
+DELETE yang ada hanya untuk Calendar dari halaman Janji Temu).
+Celah itu kini tertutup: endpoint `DELETE
+/tenants/:tenantId/google/:service` (owner/admin) + tombol
+"Putuskan" per baris layanan di blok Google halaman Channels
+(Calendar/YouTube/Business/Sheets) dan di Pengaturan → Konversi
+Iklan (Ads). Setiap konfirmasi menyebut nama layanan + konsekuensi
+persisnya untuk layanan itu.
+
+**Tidak ada tindakan pemilik platform** — fitur ini internal
+produk: tanpa kredensial, izin aplikasi, atau pendaftaran portal
+baru. Yang memutuskan koneksi adalah pemilik/admin TENANT dari
+dalam produk.
+
+Catatan perilaku untuk pemilik tenant:
+
+- Memutus SATU layanan hanya mencabut baris koneksi layanan itu;
+  empat layanan lain tidak berubah sama sekali (terbukti
+  byte-identik di verify). Sesudah diputus, layanan itu kembali
+  menawarkan "Hubungkan" dan menghubungkan ulang bekerja seperti
+  biasa (untuk YouTube/Business, sinkron di callback menghidupkan
+  kembali akun channel/lokasi yang sama).
+- **YouTube / Google Business**: akun channel YouTube dan akun
+  lokasi Business adalah turunan koneksinya — saat layanannya
+  diputus, akun-akun itu diturunkan ke status terputus mengikuti
+  pola putus channel yang ada. Akibatnya mereka hilang dari daftar
+  sasaran postingan dan postingan BARU ke sana ditolak
+  (`POST_TARGET_NOT_CONNECTED`); postingan yang sudah terjadwal
+  gagal jujur saat jam tayang (`youtube_not_connected` /
+  `google_business_not_connected`). Percakapan dan riwayat
+  postingan TIDAK dihapus.
+- **Calendar**: janji temu berhenti menyinkronkan event ke Google;
+  booking lama mempertahankan jejak sinkronnya dan modul janji
+  temu tetap bekerja penuh tanpa Google.
+- **Google Ads**: yang dicabut hanya hibah OAuth akun Google.
+  Customer ID + ID aksi konversi di Pengaturan → Konversi Iklan
+  BUKAN hibah OAuth dan tetap tersimpan — node flow konversi
+  sesudahnya tercatat jujur `google_ads_not_connected`, dan
+  menghubungkan ulang memulihkan pengiriman tanpa mengisi ulang
+  ID. Koneksi Meta tidak terpengaruh.
+- **Google Sheets**: node flow "Tambah baris Google Sheets"
+  sesudahnya tercatat jujur `sheets_not_connected` sampai layanan
+  dihubungkan ulang.
+- Memutus layanan yang memang tidak terhubung dijawab jujur
+  `422 GOOGLE_NOT_CONNECTED` (bukan sukses pura-pura), dan setiap
+  pemutusan yang benar-benar terjadi tercatat di audit sebagai
+  `google.service_disconnected` (+ `channel.disconnected` per akun
+  turunan).
+- Batas yang dinyatakan apa adanya: pemutusan menghapus token
+  yang tersimpan di Botara; Botara tidak memanggil endpoint
+  pencabutan Google, jadi izin aplikasi dapat tetap tercatat di
+  halaman izin akun Google pemilik sampai dicabut dari sana.
+  Sesudah token Botara terhapus, Botara tidak bisa lagi memakai
+  izin itu.
+
 _Daftar ini lengkap untuk Gelombang 0 sampai 4 (seluruh roadmap
 content schedule) + gelombang Semua OAuth + Pemisahan Google +
 penyeragaman URL kanonis + Pilihan Privasi & AI per Postingan +
@@ -1361,6 +1422,8 @@ izin/scope tambahan per platform: instagram_manage_insights,
 threads_manage_insights, TikTok video.list, LinkedIn
 r_member_postAnalytics via Community Management API, Meta
 pages_read_engagement/read_insights; Telegram & Google Business
-memang tidak tersedia dari platform).
+memang tidak tersedia dari platform) + Fase Susulan S4 (tombol
+putuskan per layanan Google — tanpa tindakan pemilik platform,
+hanya catatan perilaku pemutusan per layanan).
 Entri baru hanya ditambahkan bila ada pengembangan lanjutan di
 luar roadmap._

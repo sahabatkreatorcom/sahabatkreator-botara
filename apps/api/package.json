@@ -25,6 +25,7 @@
     "verify:pinterest-boards": "tsx scripts/verify-pinterest-boards.ts",
     "verify:bluesky-connect": "tsx scripts/verify-bluesky-connect.ts",
     "verify:google-channels": "tsx scripts/verify-google-channels.ts",
+    "verify:google-disconnect": "tsx scripts/verify-google-disconnect.ts",
     "verify:agent-templates": "tsx scripts/verify-agent-templates.ts",
     "verify:sequence-templates": "tsx scripts/verify-sequence-templates.ts",
     "verify:sequence-enroll": "tsx scripts/verify-sequence-enroll.ts",
