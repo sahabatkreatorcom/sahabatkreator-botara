@@ -120,9 +120,11 @@ export type PostPlatformAnalyticsDayPoint = z.infer<
  * Agregat satu platform dari snapshot yang BENAR-BENAR tertarik:
  * - `postsWithSnapshots`: postingan terbit pada jendela yang punya
  *   ≥1 snapshot (status apa pun).
- * - `postsWithMetrics`: yang snapshot terbarunya `ok` — hanya ini
+ * - `postsWithMetrics`: yang punya ≥1 snapshot `ok` — hanya ini
  *   yang menyumbang `totals` dan `daily`.
- * - `totals`: jumlah nilai snapshot TERBARU per postingan. Bukan
+ * - `totals`: jumlah nilai snapshot `ok` TERAKHIR per postingan
+ *   (nilai terakhir yang berhasil ditarik tetap menjadi angka
+ *   terbaik yang diketahui walau penarikan sesudahnya gagal). Bukan
  *   penjumlahan riwayat — snapshot adalah penghitung kumulatif
  *   platform, menjumlah antar-snapshot akan menggandakan angka.
  */

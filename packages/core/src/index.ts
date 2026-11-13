@@ -882,6 +882,7 @@ export {
   syncYouTubeChannelAccount,
   backfillYouTubeChannelProfile,
   getYouTubePublishAccess,
+  getYouTubeAnalyticsAccess,
   googleScopesInclude,
   type YouTubeChannelIdentity,
   type YouTubePublishAccess,
@@ -1507,6 +1508,25 @@ export {
   type PostApprovalSettingsRecord,
   type PostApprovalHistoryRecord,
 } from "./posts";
+export {
+  POST_ANALYTICS_WINDOW_DAYS,
+  POST_ANALYTICS_REFRESH_OK_MS,
+  POST_ANALYTICS_RETRY_FAILED_MS,
+  POST_ANALYTICS_SCAN_LIMIT,
+  POST_ANALYTICS_BATCH_LIMIT,
+  getPostForAnalytics,
+  scanDuePostAnalyticsTargets,
+  recordPostMetricSnapshot,
+  listLatestPostAnalytics,
+  listPostAnalyticsHistory,
+  getPostPlatformAnalytics,
+  sanitizePostMetricValues,
+  type PostAnalyticsTarget,
+  type PostAnalyticsContext,
+  type PostAnalyticsSnapshotView,
+  type PostMetricSnapshotStatus,
+  type PostPlatformAnalyticsEntryData,
+} from "./post-analytics";
 export {
   AD_CONVERSION_REQUESTED_OUTBOX_TYPE,
   META_CAPI_GRAPH_VERSION,
