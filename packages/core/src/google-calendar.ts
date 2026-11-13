@@ -1,13 +1,19 @@
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import {
   appointmentServices,
+  auditLogs,
   bookings,
+  channelAccounts,
   contacts,
   googleConnections,
   type BookingRow,
   type Database,
   type GoogleConnectionRow,
 } from "@sahabat-kreator/db";
+import {
+  disconnectChannelAccount,
+  type ChannelProviderName,
+} from "./channels";
 import {
   decryptChannelSecret,
   encryptChannelSecret,
@@ -596,6 +602,130 @@ export async function deleteGoogleConnection(
   tenantId: string,
 ): Promise<boolean> {
   return deleteGoogleServiceConnection(db, tenantId, "calendar");
+}
+
+/**
+ * Provider channel TURUNAN per layanan Google: akun channel yang
+ * keberadaannya bergantung pada koneksi layanan itu (null = layanan
+ * tanpa turunan channel). YouTube menyinkronkan SATU akun kanal dan
+ * Google Business menyinkronkan akun per lokasi dari koneksinya —
+ * token penerbitan TIDAK pernah disalin ke baris akun itu; token
+ * hidup di baris `google_connections` layanan terkait.
+ */
+const GOOGLE_SERVICE_CHANNEL_PROVIDER: Record<
+  GoogleService,
+  ChannelProviderName | null
+> = {
+  calendar: null,
+  youtube: "youtube",
+  business: "google_business",
+  ads: null,
+  sheets: null,
+};
+
+export interface DisconnectGoogleServiceContext {
+  tenantId: string;
+  /** Jejak audit: 'user' untuk aksi dari dashboard. */
+  actorType: "user" | "system";
+  actorId: string;
+}
+
+export interface DisconnectGoogleServiceResult {
+  /** Baris `google_connections` layanan itu ada dan sudah dihapus. */
+  connectionRemoved: boolean;
+  /**
+   * Akun channel turunan (youtube / google_business) yang diturunkan
+   * ke 'disconnected' mengikuti pola putus channel yang ada.
+   */
+  channelAccountsDisconnected: number;
+}
+
+/**
+ * Putus koneksi SATU layanan Google (Fase Susulan S4) — menutup celah
+ * pemisahan 0023: dulu UI hanya bisa MENGHUBUNGKAN per layanan;
+ * memutus satu layanan tanpa menyentuh empat lainnya tidak bisa.
+ *
+ * Semantik per layanan (jujur, mengikuti keadaan yang sudah ada):
+ * - Baris koneksi layanan ITU saja yang dihapus (token dicabut);
+ *   baris layanan lain tidak dibaca/diubah sama sekali.
+ * - youtube / business: akun channel turunan diturunkan ke
+ *   'disconnected' lewat fungsi pola yang sama seperti disconnect
+ *   channel biasa (`disconnectChannelAccount`: status + kredensial
+ *   dikosongkan + audit `channel.disconnected` bermeta
+ *   `via: "google_service_disconnect"`). Akibatnya sasaran postingan
+ *   turunan hilang dari daftar sasaran dan pembuatan postingan baru
+ *   ke sana ditolak `POST_TARGET_NOT_CONNECTED` — persis perlakuan
+ *   channel putus mana pun. Percakapan & riwayat postingan TIDAK
+ *   dihapus; menghubungkan ulang layanan menyinkronkan akun kembali
+ *   ke 'connected'.
+ * - calendar: booking lama mempertahankan jejak sinkronnya; janji
+ *   temu berhenti menyinkron ke Google (modul janji tetap bekerja
+ *   penuh tanpa Google, seperti sebelum terhubung).
+ * - ads: konfigurasi tenant di `ad_connections` (customer ID + ID
+ *   aksi konversi + dataset/token Meta) BUKAN hibah OAuth dan TIDAK
+ *   ikut dihapus — node flow konversi sesudahnya tercatat jujur
+ *   `google_ads_not_connected`, dan menghubungkan ulang memulihkan
+ *   pengiriman tanpa mengisi ulang ID.
+ * - sheets: node flow `append_sheet_row` sesudahnya tercatat jujur
+ *   `sheets_not_connected`.
+ *
+ * Tercatat di audit sebagai `google.service_disconnected` (meta:
+ * layanan + jumlah akun turunan) HANYA bila benar-benar ada yang
+ * berubah; memutus layanan yang memang tidak terhubung mengembalikan
+ * `{ connectionRemoved: false, channelAccountsDisconnected: 0 }`
+ * tanpa audit — pemanggil menjawabnya secara jujur (bukan sukses
+ * pura-pura). Idempoten per langkah: pengulangan sesudah kegagalan
+ * parsial menuntaskan sisa langkah tanpa menggandakan audit channel
+ * (fungsi pola melewati akun yang sudah 'disconnected').
+ */
+export async function disconnectGoogleService(
+  db: Database,
+  ctx: DisconnectGoogleServiceContext,
+  service: GoogleService,
+): Promise<DisconnectGoogleServiceResult> {
+  const connectionRemoved = await deleteGoogleServiceConnection(
+    db,
+    ctx.tenantId,
+    service,
+  );
+
+  const provider = GOOGLE_SERVICE_CHANNEL_PROVIDER[service];
+  let channelAccountsDisconnected = 0;
+  if (provider) {
+    const accountIds = await withTenantDb(db, ctx.tenantId, async (tx) =>
+      tx
+        .select({ id: channelAccounts.id })
+        .from(channelAccounts)
+        .where(
+          and(
+            eq(channelAccounts.tenantId, ctx.tenantId),
+            eq(channelAccounts.provider, provider),
+            ne(channelAccounts.status, "disconnected"),
+          ),
+        ),
+    );
+    for (const { id } of accountIds) {
+      const row = await disconnectChannelAccount(db, ctx, id, {
+        via: "google_service_disconnect",
+        service,
+      });
+      if (row) channelAccountsDisconnected += 1;
+    }
+  }
+
+  if (connectionRemoved || channelAccountsDisconnected > 0) {
+    await withTenantDb(db, ctx.tenantId, async (tx) => {
+      await tx.insert(auditLogs).values({
+        tenantId: ctx.tenantId,
+        actorType: ctx.actorType,
+        actorId: ctx.actorId,
+        action: "google.service_disconnected",
+        meta: { service, channelAccountsDisconnected },
+      });
+    });
+  }
+
+  return { connectionRemoved, channelAccountsDisconnected };
 }
 
 /** Ganti kalender tujuan event pada koneksi calendar yang ada. */
