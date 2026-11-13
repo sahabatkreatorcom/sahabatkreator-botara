@@ -532,6 +532,7 @@ export async function fetchAndRecordPostMetrics(
   db: Database,
   target: PostAnalyticsTarget,
   opts: PostMetricsOptions,
+  now: Date = new Date(),
 ): Promise<PostAnalyticsFetchStatus> {
   const ctx = await getPostForAnalytics(db, {
     tenantId: target.tenantId,
@@ -548,6 +549,7 @@ export async function fetchAndRecordPostMetrics(
       provider: ctx.provider,
       status: "unavailable",
       reason: "platform_metrics_unsupported",
+      fetchedAt: now,
     });
     return "unavailable";
   }
@@ -559,6 +561,7 @@ export async function fetchAndRecordPostMetrics(
       provider: ctx.provider,
       status: "unavailable",
       reason: "metrics_adapter_missing",
+      fetchedAt: now,
     });
     return "unavailable";
   }
@@ -579,6 +582,7 @@ export async function fetchAndRecordPostMetrics(
     status: outcome.status,
     reason: outcome.status === "ok" ? (outcome.reason ?? null) : outcome.reason,
     metrics: outcome.status === "ok" ? outcome.metrics : null,
+    fetchedAt: now,
   });
   return outcome.status;
 }
@@ -617,7 +621,7 @@ export async function processPostAnalytics(
       await new Promise((resolve) => setTimeout(resolve, delayMs));
     }
     try {
-      const status = await fetchAndRecordPostMetrics(db, target, opts);
+      const status = await fetchAndRecordPostMetrics(db, target, opts, now);
       result[status] += 1;
     } catch (err) {
       result.failed += 1;
