@@ -4,6 +4,7 @@ import {
   getPostProviderCapability,
   type PinterestBoard,
   type PinterestBoardPrivacy,
+  type PostAnalyticsSnapshot,
   type PostApprovalHistoryEntry,
   type PostApprovalStatus,
   type PostPublishOptions,
@@ -26,6 +27,7 @@ import {
 } from "./postsComposer";
 import { PostRecurrenceSection } from "./posts/PostRecurrenceSection";
 import { PostQueueSection } from "./posts/PostQueueSection";
+import { PostMetricsLine } from "./posts/PostMetricsLine";
 
 /**
  * Halaman Jadwal Konten (Fase 23, diperluas Gelombang 0).
@@ -221,6 +223,12 @@ export function PostsPage({ t, locale }: PostsPageProps) {
   // tidak digambar, perilaku halaman persis seperti sebelum S1.
   const [approvalRequired, setApprovalRequired] = useState(false);
   const [reviewOnly, setReviewOnly] = useState(false);
+  // Analitik (S3): snapshot metrik TERBARU per postingan terbit,
+  // dikunci postId. Dimuat fail-soft sesudah daftar — kegagalannya
+  // tidak pernah menjatuhkan halaman jadwal.
+  const [analyticsByPost, setAnalyticsByPost] = useState<
+    Record<string, PostAnalyticsSnapshot>
+  >({});
 
   const [selectedTargets, setSelectedTargets] = useState<string[]>([]);
   const [title, setTitle] = useState("");
@@ -370,6 +378,24 @@ export function PostsPage({ t, locale }: PostsPageProps) {
         setApprovalRequired(approvalSettings.approvalRequired);
       }
       setPosts(list.items);
+      // Snapshot analitik untuk postingan terbit yang tampil (S3).
+      const publishedIds = list.items
+        .filter((post) => post.status === "published")
+        .map((post) => post.id);
+      if (publishedIds.length > 0) {
+        const analytics = await api.posts
+          .analyticsLatest(tenantId, publishedIds)
+          .catch(() => null);
+        if (analytics) {
+          setAnalyticsByPost(
+            Object.fromEntries(
+              analytics.items.map((item) => [item.postId, item]),
+            ),
+          );
+        }
+      } else {
+        setAnalyticsByPost({});
+      }
       setTargets(targetList.items);
       setSelectedTargets((current) =>
         current.length > 0
@@ -948,6 +974,7 @@ export function PostsPage({ t, locale }: PostsPageProps) {
                     run={run}
                     tenantId={tenantId}
                     approvalRequired={approvalRequired}
+                    analytics={analyticsByPost[post.id] ?? null}
                     onEdit={openEdit}
                   />
                 ))}
@@ -1235,6 +1262,8 @@ interface PostCardProps {
   tenantId: string | null;
   /** Sakelar persetujuan wajib tenant (S1) — mati = permukaan persetujuan disembunyikan. */
   approvalRequired: boolean;
+  /** Snapshot metrik terakhir postingan ini (S3); null = belum pernah ditarik. */
+  analytics: PostAnalyticsSnapshot | null;
   toIso: (local: string) => string | null;
   run: (action: () => Promise<unknown>) => Promise<boolean>;
   onEdit: (post: PostResponse) => void;
@@ -1249,6 +1278,7 @@ function PostCard({
   busy,
   tenantId,
   approvalRequired,
+  analytics,
   toIso,
   run,
   onEdit,
@@ -1369,6 +1399,14 @@ function PostCard({
                 : "—"}
             {post.errorCode ? ` · ${post.errorCode}` : ""}
           </p>
+          {post.status === "published" && (
+            <PostMetricsLine
+              snapshot={analytics}
+              t={t}
+              locale={locale}
+              timezone={timezone}
+            />
+          )}
           {post.errorCode === "publish_outcome_unknown" && (
             <p className="mt-1 text-xs text-warning">
               {t("posts.outcomeUnknownHint")}

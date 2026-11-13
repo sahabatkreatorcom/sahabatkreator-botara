@@ -4,6 +4,8 @@ import {
   ApprovePostRequestSchema,
   CreatePostGroupRequestSchema,
   CreatePostRequestSchema,
+  PostAnalyticsHistoryResponseSchema,
+  PostAnalyticsLatestResponseSchema,
   PostApprovalHistoryResponseSchema,
   PostApprovalSettingsSchema,
   PostGroupResponseSchema,
@@ -15,6 +17,7 @@ import {
   SchedulePostRequestSchema,
   UpdatePostApprovalSettingsRequestSchema,
   UpdatePostRequestSchema,
+  type ChannelProvider,
   type PostResponse,
 } from "@sahabat-kreator/contracts";
 import {
@@ -29,6 +32,8 @@ import {
   getChannelAccount,
   getPost,
   getPostApprovalSettings,
+  listLatestPostAnalytics,
+  listPostAnalyticsHistory,
   listPostApprovalHistory,
   listPostTargets,
   listPosts,
@@ -40,6 +45,7 @@ import {
   submitPostForReview,
   updatePost,
   updatePostApprovalSettings,
+  type PostAnalyticsSnapshotView,
   type PostErrorCode,
   type PostRecord,
 } from "@sahabat-kreator/core";
@@ -79,6 +85,15 @@ import { resolveTenantForUser } from "../tenants/guard";
  * yang mensinkronkan anggota); route hanya meneruskan post jangkar.
  * Aturan anti-setuju-sendiri + pengecualian tenant solo ditegakkan
  * core (POST_APPROVAL_SELF_REVIEW), bukan di sini.
+ *
+ * Analitik (Fase Susulan S3):
+ *   GET    /tenants/:tenantId/posts/analytics/latest?postIds=a,b  snapshot terbaru per postingan
+ *   GET    /tenants/:tenantId/posts/:id/analytics                 riwayat snapshot satu postingan
+ *
+ * Baca analitik = semua member, seperti daftar postingan. Route TIDAK
+ * pernah memanggil platform: angka dibaca dari snapshot yang ditarik
+ * penyapu worker; route hanya meneruskan keadaan terakhirnya
+ * (ok / unavailable / failed + kode alasan) apa adanya.
  *
  * Penerbitan BUKAN di sini: `schedule` menulis event outbox
  * `post.publish_due`; relay worker mengubahnya menjadi job tertunda
@@ -123,6 +138,18 @@ function serializePost(post: PostRecord): PostResponse {
     media: post.media,
     createdAt: post.createdAt.toISOString(),
     updatedAt: post.updatedAt.toISOString(),
+  };
+}
+
+/** Serializer snapshot analitik S3 (provider tersimpan adalah kunci kontrak). */
+function serializeAnalyticsSnapshot(view: PostAnalyticsSnapshotView) {
+  return {
+    postId: view.postId,
+    provider: view.provider as ChannelProvider,
+    status: view.status,
+    reason: view.reason,
+    metrics: view.metrics,
+    fetchedAt: view.fetchedAt.toISOString(),
   };
 }
 
@@ -199,6 +226,8 @@ export function createPostsRoutes(
     app.post(`${base}/:id/reject`, unavailable);
     app.post(`${base}/:id/request-changes`, unavailable);
     app.get(`${base}/:id/approval-history`, unavailable);
+    app.get(`${base}/analytics/latest`, unavailable);
+    app.get(`${base}/:id/analytics`, unavailable);
     return app;
   }
 
@@ -375,6 +404,29 @@ export function createPostsRoutes(
     );
   });
 
+  // ---- Analitik: snapshot terbaru per postingan (S3) ----------------------
+  // Segmen statis `analytics` didaftarkan sebelum `/:id` supaya tidak
+  // tertelan parameter id.
+  app.get(`${base}/analytics/latest`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const raw = c.req.query("postIds") ?? "";
+    const postIds = raw
+      .split(",")
+      .map((id) => id.trim())
+      .filter((id) => z.string().uuid().safeParse(id).success)
+      .slice(0, 200);
+    const items = await listLatestPostAnalytics(bundle.db, {
+      tenantId: g.tenant.id,
+      postIds,
+    });
+    return c.json(
+      PostAnalyticsLatestResponseSchema.parse({
+        items: items.map(serializeAnalyticsSnapshot),
+      }),
+    );
+  });
+
   // ---- Buat ---------------------------------------------------------------
   app.post(base, async (c) => {
     const g = await guard(c, { ownerAdmin: true });
@@ -467,6 +519,28 @@ export function createPostsRoutes(
     const post = await getPost(bundle.db, { tenantId: g.tenant.id, postId });
     if (!post) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
     return c.json(PostSchema.parse(serializePost(post)));
+  });
+
+  // ---- Analitik: riwayat snapshot satu postingan (S3) ---------------------
+  app.get(`${base}/:id/analytics`, async (c) => {
+    const g = await guard(c, { ownerAdmin: false });
+    if ("error" in g) return g.error;
+    const postId = parsePostId(c);
+    if (!postId) return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    const history = await listPostAnalyticsHistory(bundle.db, {
+      tenantId: g.tenant.id,
+      postId,
+    });
+    if (!history.provider) {
+      return apiError(c, 404, "POST_NOT_FOUND", "Post not found");
+    }
+    return c.json(
+      PostAnalyticsHistoryResponseSchema.parse({
+        postId,
+        provider: history.provider as ChannelProvider,
+        items: history.items.map(serializeAnalyticsSnapshot),
+      }),
+    );
   });
 
   // ---- Edit ---------------------------------------------------------------

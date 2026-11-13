@@ -2,11 +2,13 @@ import { Hono } from "hono";
 import { z } from "zod";
 import {
   AiUsageReportResponseSchema,
+  PostPlatformAnalyticsResponseSchema,
   ReplyTimeReportResponseSchema,
   SlaReportResponseSchema,
 } from "@sahabat-kreator/contracts";
 import {
   getAiUsageReport,
+  getPostPlatformAnalytics,
   getReplyTimeReport,
   getSlaReport,
 } from "@sahabat-kreator/core";
@@ -32,6 +34,7 @@ export function createAnalyticsRoutes(bundle: AuthBundle | null) {
   const base = "/tenants/:tenantId/analytics/ai-usage";
   const replyTimesBase = "/tenants/:tenantId/analytics/reply-times";
   const slaBase = "/tenants/:tenantId/analytics/sla";
+  const postPlatformsBase = "/tenants/:tenantId/analytics/post-platforms";
 
   if (!bundle) {
     app.get(base, (c) =>
@@ -41,6 +44,9 @@ export function createAnalyticsRoutes(bundle: AuthBundle | null) {
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     app.get(slaBase, (c) =>
+      apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
+    );
+    app.get(postPlatformsBase, (c) =>
       apiError(c, 503, "INTERNAL_ERROR", "Database is not configured"),
     );
     return app;
@@ -110,6 +116,28 @@ export function createAnalyticsRoutes(bundle: AuthBundle | null) {
       { days: query.data.days },
     );
     return c.json(SlaReportResponseSchema.parse(report));
+  });
+
+  // S3: agregat analitik postingan per platform — total + tren
+  // harian dari snapshot metrik yang ditarik penyapu worker (definisi
+  // carry-forward + kejujuran angkanya di kontrak
+  // PostPlatformAnalyticsResponseSchema + core post-analytics).
+  app.get(postPlatformsBase, async (c) => {
+    const tenant = await resolveTenantForUser(
+      bundle,
+      c.req.param("tenantId"),
+      c.get("appUser").id,
+    );
+    if (!tenant) return apiError(c, 404, "TENANT_NOT_FOUND", "Tenant not found");
+    const query = AiUsageQuerySchema.safeParse(c.req.query());
+    if (!query.success) {
+      return apiError(c, 400, "VALIDATION_ERROR", "Invalid query parameters");
+    }
+    const report = await getPostPlatformAnalytics(bundle.db, {
+      tenantId: tenant.id,
+      days: query.data.days,
+    });
+    return c.json(PostPlatformAnalyticsResponseSchema.parse(report));
   });
 
   return app;

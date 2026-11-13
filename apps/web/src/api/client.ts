@@ -82,7 +82,10 @@ import type {
   PostRecurrenceRuleResponse,
   UpdatePostQueueItemRequest,
   UpdatePostQueueSlotRequest,
+  PostAnalyticsHistoryResponse,
+  PostAnalyticsLatestResponse,
   PostApprovalHistoryResponse,
+  PostPlatformAnalyticsResponse,
   PostApprovalSettings,
   PostApprovalStatus,
   PostGroupResponse,
@@ -2740,6 +2743,27 @@ export const api = {
         { method: "GET" },
       );
     },
+    /** Snapshot metrik TERBARU per postingan untuk daftar id (S3). */
+    analyticsLatest(
+      tenantId: string,
+      postIds: string[],
+    ): Promise<PostAnalyticsLatestResponse> {
+      const qs = `?postIds=${postIds.map(encodeURIComponent).join(",")}`;
+      return request<PostAnalyticsLatestResponse>(
+        `/api/tenants/${tenantId}/posts/analytics/latest${qs}`,
+        { method: "GET" },
+      );
+    },
+    /** Riwayat snapshot metrik satu postingan (S3). */
+    analyticsHistory(
+      tenantId: string,
+      postId: string,
+    ): Promise<PostAnalyticsHistoryResponse> {
+      return request<PostAnalyticsHistoryResponse>(
+        `/api/tenants/${tenantId}/posts/${postId}/analytics`,
+        { method: "GET" },
+      );
+    },
     create(tenantId: string, input: CreatePostRequest): Promise<PostResponse> {
       return request<PostResponse>(`/api/tenants/${tenantId}/posts`, {
         method: "POST",
@@ -3717,6 +3741,17 @@ export const api = {
       const qs = days !== undefined ? `?days=${days}` : "";
       return request<ReplyTimeReportResponse>(
         `/api/tenants/${tenantId}/analytics/reply-times${qs}`,
+        { method: "GET" },
+      );
+    },
+    /** GET /api/tenants/:tenantId/analytics/post-platforms?days= → agregat metrik postingan per platform (S3). */
+    postPlatforms(
+      tenantId: string,
+      days?: number,
+    ): Promise<PostPlatformAnalyticsResponse> {
+      const qs = days !== undefined ? `?days=${days}` : "";
+      return request<PostPlatformAnalyticsResponse>(
+        `/api/tenants/${tenantId}/analytics/post-platforms${qs}`,
         { method: "GET" },
       );
     },

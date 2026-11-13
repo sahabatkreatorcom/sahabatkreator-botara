@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
-import type {
-  AiUsageReportResponse,
-  ReplyTimeReportResponse,
-  SlaReportResponse,
+import {
+  POST_METRIC_KEYS,
+  type AiUsageReportResponse,
+  type PostMetricKey,
+  type PostPlatformAnalyticsResponse,
+  type ReplyTimeReportResponse,
+  type SlaReportResponse,
 } from "@sahabat-kreator/contracts";
+import { POST_METRIC_LABEL_KEYS } from "./posts/PostMetricsLine";
 import {
   formatNumber,
   type Locale,
@@ -273,6 +277,10 @@ export function AnalyticsPage({ t, locale }: AnalyticsPageProps) {
       {tenantId ? (
         <SlaSection t={t} locale={locale} tenantId={tenantId} days={days} />
       ) : null}
+
+      {tenantId ? (
+        <PostPlatformsSection t={t} locale={locale} tenantId={tenantId} days={days} />
+      ) : null}
     </section>
   );
 }
@@ -523,6 +531,176 @@ function SlaSection({
         )
       ) : (
         <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Analitik postingan per platform (Fase Susulan S3): agregat dari
+ * snapshot metrik yang ditarik penyapu worker dari API resmi tiap
+ * platform. Total = nilai snapshot ok terakhir per postingan; tren =
+ * nilai yang diketahui pada akhir tiap hari (carry-forward). Platform
+ * yang tidak menawarkan metrik postingan lewat API resmi tampil
+ * dengan penanda tidak-tersedia — tanpa angka.
+ */
+function PostPlatformsSection({
+  t,
+  locale,
+  tenantId,
+  days,
+}: {
+  t: Translate;
+  locale: Locale;
+  tenantId: string;
+  days: number;
+}) {
+  const [data, setData] = useState<PostPlatformAnalyticsResponse | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setFailed(false);
+    void (async () => {
+      try {
+        const body = await api.analytics.postPlatforms(tenantId, days);
+        if (!cancelled) setData(body);
+      } catch {
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [tenantId, days]);
+
+  const num = (v: number) => formatNumber(v, locale);
+
+  return (
+    <div className="mt-10">
+      <h2 className="text-lg font-semibold text-ink">
+        {t("analytics.postPlatforms.title")}
+      </h2>
+      <p className="mt-1 max-w-2xl text-sm text-muted">
+        {t("analytics.postPlatforms.subtitle")}
+      </p>
+      {failed ? (
+        <p className="mt-3 text-sm text-danger">
+          {t("analytics.postPlatforms.loadError")}
+        </p>
+      ) : !data ? (
+        <p className="mt-3 text-sm text-muted">{t("common.loading")}</p>
+      ) : data.platforms.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-line bg-surface p-6">
+          <p className="text-sm text-muted">
+            {t("analytics.postPlatforms.empty")}
+          </p>
+        </div>
+      ) : (
+        <div className="mt-4 grid gap-3 lg:grid-cols-2">
+          {data.platforms.map((platform) => {
+            const totalKeys = POST_METRIC_KEYS.filter(
+              (key) => typeof platform.totals[key] === "number",
+            );
+            // Metrik utama tren: kunci pertama (urutan kanonis) yang
+            // punya nilai pada deret harian platform ini.
+            const trendKey: PostMetricKey | undefined = POST_METRIC_KEYS.find(
+              (key) =>
+                platform.daily.some(
+                  (point) => typeof point.metrics[key] === "number",
+                ),
+            );
+            const trendMax = trendKey
+              ? Math.max(
+                  0,
+                  ...platform.daily.map(
+                    (point) => point.metrics[trendKey] ?? 0,
+                  ),
+                )
+              : 0;
+            return (
+              <div
+                key={platform.provider}
+                className="rounded-xl border border-line bg-surface p-4"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-semibold text-ink">
+                    {t(`inbox.providers.${platform.provider}` as TranslationKey)}
+                  </p>
+                  <p className="text-xs text-muted">
+                    {t("analytics.postPlatforms.trackedLabel", {
+                      count: platform.postsWithSnapshots,
+                    })}
+                    {platform.metricsSupported
+                      ? ` · ${t("analytics.postPlatforms.postsLabel", {
+                          count: platform.postsWithMetrics,
+                        })}`
+                      : ""}
+                  </p>
+                </div>
+                {!platform.metricsSupported ? (
+                  <p className="mt-2 text-sm text-muted">
+                    {t("analytics.postPlatforms.unavailable")}
+                  </p>
+                ) : totalKeys.length === 0 ? (
+                  <p className="mt-2 text-sm text-muted">
+                    {t("analytics.postPlatforms.noData")}
+                  </p>
+                ) : (
+                  <>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {totalKeys.map((key) => (
+                        <span
+                          key={key}
+                          className="rounded-full bg-elevated px-2.5 py-1 text-xs font-medium text-ink"
+                        >
+                          {t(POST_METRIC_LABEL_KEYS[key])}{" "}
+                          {num(platform.totals[key]!)}
+                        </span>
+                      ))}
+                    </div>
+                    {trendKey ? (
+                      <div className="mt-4">
+                        <p className="text-xs font-medium text-muted">
+                          {t("analytics.postPlatforms.trendTitle")} ·{" "}
+                          {t(POST_METRIC_LABEL_KEYS[trendKey])}
+                        </p>
+                        <div className="mt-2 max-h-56 space-y-1 overflow-y-auto pr-1">
+                          {platform.daily.map((point) => {
+                            const value = point.metrics[trendKey] ?? 0;
+                            const width =
+                              trendMax > 0
+                                ? Math.max(2, Math.round((value / trendMax) * 100))
+                                : 2;
+                            return (
+                              <div
+                                key={point.date}
+                                className="flex items-center gap-2 text-xs text-muted"
+                              >
+                                <span className="w-20 shrink-0 tabular-nums">
+                                  {point.date}
+                                </span>
+                                <span className="h-2 flex-1 overflow-hidden rounded bg-elevated">
+                                  <span
+                                    className="block h-full rounded bg-accent"
+                                    style={{ width: `${width}%` }}
+                                  />
+                                </span>
+                                <span className="w-14 shrink-0 text-right tabular-nums text-ink">
+                                  {num(value)}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </div>
   );
