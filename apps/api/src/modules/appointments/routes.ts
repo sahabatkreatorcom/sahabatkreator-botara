@@ -14,6 +14,7 @@ import {
   GoogleCalendarConnectionResponseSchema,
   GoogleCalendarListResponseSchema,
   GoogleConnectStartResponseSchema,
+  GoogleServiceConnectionSchema,
   GoogleServiceConnectionsResponseSchema,
   UpdateAppointmentAvailabilityRequestSchema,
   UpdateAppointmentServiceRequestSchema,
@@ -31,6 +32,7 @@ import {
   createBooking,
   deleteAppointmentService,
   deleteGoogleConnection,
+  disconnectGoogleService,
   exchangeGoogleAuthCode,
   fetchGoogleAccountEmail,
   getAppointmentService,
@@ -106,6 +108,7 @@ import { resolveTenantForUser } from "../tenants/guard";
  * mendaftarkan URI baru di proyeknya sebelum connect diuji lagi:
  *   GET    /tenants/:tenantId/google/status               status tiga layanan
  *   POST   /tenants/:tenantId/google/:service/connect     mulai OAuth layanan itu (owner/admin)
+ *   DELETE /tenants/:tenantId/google/:service             putus koneksi SATU layanan itu saja (owner/admin; S4)
  * Rute appointments/google/* di atas adalah bentuk Calendar-nya
  * (halaman Janji Temu); consent-nya kini SEMPIT kalender saja.
  *
@@ -278,6 +281,7 @@ export function createAppointmentsRoutes(
     app.delete(`${base}/google`, unavailable);
     app.get("/tenants/:tenantId/google/status", unavailable);
     app.post("/tenants/:tenantId/google/:service/connect", unavailable);
+    app.delete("/tenants/:tenantId/google/:service", unavailable);
     app.get("/oauth/google_calendar/callback", unavailable);
     app.get("/oauth/youtube/callback", unavailable);
     app.get("/oauth/google_business/callback", unavailable);
@@ -755,6 +759,47 @@ export function createAppointmentsRoutes(
       return apiError(c, 404, "NOT_FOUND", "Unknown Google service");
     }
     return startGoogleServiceConnect(c, g, service, "channels");
+  });
+
+  /**
+   * Putus koneksi SATU layanan Google (Fase Susulan S4) — pasangan
+   * DELETE dari connect per layanan di atas: baris koneksi layanan
+   * itu saja yang dicabut, empat layanan lain tidak tersentuh.
+   * Semantik turunan (akun channel YouTube/Business ikut nonaktif,
+   * konfigurasi ad_connections bertahan, dsb.) hidup di core
+   * `disconnectGoogleService`. Layanan yang memang TIDAK terhubung
+   * dijawab jujur 422 GOOGLE_NOT_CONNECTED (pola rute kalender di
+   * modul ini), bukan sukses pura-pura. Keberhasilan menjawab
+   * keadaan layanan itu sesudah putus (connected: false).
+   */
+  app.delete("/tenants/:tenantId/google/:service", async (c) => {
+    const g = await guard(c, { ownerAdmin: true });
+    if ("error" in g) return g.error;
+    const service = c.req.param("service") ?? "";
+    if (!isGoogleService(service)) {
+      return apiError(c, 404, "NOT_FOUND", "Unknown Google service");
+    }
+    const result = await disconnectGoogleService(
+      bundle.db,
+      { tenantId: g.tenant.id, actorType: "user", actorId: g.appUser.id },
+      service,
+    );
+    if (!result.connectionRemoved && result.channelAccountsDisconnected === 0) {
+      return apiError(
+        c,
+        422,
+        "GOOGLE_NOT_CONNECTED",
+        "Google service is not connected",
+      );
+    }
+    return c.json(
+      GoogleServiceConnectionSchema.parse({
+        service,
+        connected: false,
+        accountEmail: null,
+        connectedAt: null,
+      }),
+    );
   });
 
   app.get(`${base}/google/calendars`, async (c) => {
